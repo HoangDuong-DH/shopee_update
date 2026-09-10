@@ -1,0 +1,28 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+.local/
+.worktrees/
+.cache/
+*.log
+*.tsbuildinfo
+# Local knowledge snapshots and private operational/source evidence stay on this machine.
+knowledge-base/
+docs/research/
+docs/sources/
+docs/test-reports/
+*.xlsx
+*.docx
+*.zip
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pem
+*.key
+# Deliberately curated fixtures can be tracked explicitly after reviewing their contents.
+tests/fixtures/private/

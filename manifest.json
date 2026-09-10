@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee Product Uploader - Auto Ảnh 1:1 & 3:4",
+  "version": "0.1.0",
+  "description": "Đăng sản phẩm Shopee: chọn folder ảnh → tự xoá ảnh cũ, upload Ảnh bìa (1:1) + ảnh g1..gN (3:4) theo thứ tự, tự crop 'Đặt lại' fit full khung từng ảnh 3:4.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://banhang.shopee.vn/*",
+    "https://seller.shopee.vn/*"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Shopee Product Uploader"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://banhang.shopee.vn/*",
+        "https://seller.shopee.vn/*"
+      ],
+      "js": ["shared.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
