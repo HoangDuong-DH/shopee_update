@@ -57,7 +57,11 @@ describe('whole-folder reader', () => {
     const files = [source('a.png', 'one/a.png'), source('b.png', 'two/b.png')];
     const first = await reader(files);
     expect(first[0].record?.status).toBe('ready');
-    expect(first[1]).toMatchObject({ record: null, error: 'Tạm mất kết nối' });
+    expect(first[1]).toMatchObject({
+      record: null,
+      error: 'Tạm mất kết nối',
+      sha256: record('b.png').sha256,
+    });
     await reader(files);
     expect(counts).toEqual({ 'a.png': 1, 'b.png': 2 });
   });
@@ -92,6 +96,7 @@ describe('whole-folder reader', () => {
     ]);
     expect(output[0].record).toBeNull();
     expect(output[0].error).toContain('chưa hỗ trợ');
+    expect(output[0].sha256).toBe(record('unsupported.pdf').sha256);
     expect(output.slice(1).map((f) => f.relativePath)).toEqual(['one/same.png', 'two/same.png']);
     expect(calls).toBe(1);
   });
@@ -116,6 +121,21 @@ describe('whole-folder reader', () => {
       result.every((item) => item.record?.id === existing.id && item.sha256 === existing.sha256),
     ).toBe(true);
     expect(existing.filename).toBe('existing.png');
+  });
+  it('loads the full parsed body when the saved import index deliberately returns null', async () => {
+    const full = record('existing', 'ready', 'same.png');
+    const requests: string[] = [];
+    const reader = createFolderReader({
+      known: () => [{ ...full, body: null }],
+      request: async (path, init) => {
+        expect(init?.method).not.toBe('POST');
+        requests.push(path);
+        return full;
+      },
+    });
+    const [result] = await reader([source('same.png', 'listing/same.png')]);
+    expect(result.record?.body).toEqual({});
+    expect(requests).toEqual(['/v1/imports/existing']);
   });
   it('rejects mismatched content, byte count, file kind or changed polling identity before using a source', async () => {
     for (const change of [{ sha256: 'different' }, { bytes: 999 }, { kind: 'docx' as const }]) {

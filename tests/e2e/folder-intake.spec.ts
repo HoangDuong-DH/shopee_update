@@ -2,7 +2,7 @@ import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { WorkbookImport } from '@shopee/domain';
+import type { InputBatchRecord, InputBatchState, WorkbookImport } from '@shopee/domain';
 import type { ImportRecord } from '../../apps/web/src/api.js';
 
 // Directory-picker and client assembly acceptance. Import processing is a browser
@@ -55,6 +55,11 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
   const byBody = new Map<string, ImportRecord>();
   const recordsByPath = new Map<string, ImportRecord>();
   const writes: string[] = [];
+  const batchWrites: { id: string; expectedRevision: number; state: InputBatchState }[] = [];
+  const batches = new Map<string, InputBatchRecord>();
+  const lastBatchRequests = new Map<string, string>();
+  let nextSaveFailure: { status: number; code: string } | undefined;
+  let disconnectAfterNextSave = false;
   const unexpectedWrites: string[] = [];
   for (const definition of definitions) {
     const absolute = path.resolve(directory, definition.relativePath);
@@ -95,6 +100,35 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
   await page.route('**/v1/**', async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && pathname === '/v1/input-batches') {
+      const input = request.postDataJSON() as (typeof batchWrites)[number];
+      batchWrites.push(input);
+      if (nextSaveFailure) {
+        const failure = nextSaveFailure;
+        nextSaveFailure = undefined;
+        return route.fulfill({ status: failure.status, json: { code: failure.code } });
+      }
+      const previous = batches.get(input.id);
+      const serialized = JSON.stringify(input);
+      if (previous && lastBatchRequests.get(input.id) === serialized)
+        return route.fulfill({ json: previous });
+      if ((previous?.revision ?? 0) !== input.expectedRevision)
+        return route.fulfill({ status: 409, json: { code: 'INPUT_BATCH_REVISION_CONFLICT' } });
+      const saved: InputBatchRecord = {
+        id: input.id,
+        revision: input.expectedRevision + 1,
+        state: input.state,
+        createdAt: previous?.createdAt ?? observedAt,
+        updatedAt: observedAt,
+      };
+      batches.set(input.id, saved);
+      lastBatchRequests.set(input.id, serialized);
+      if (disconnectAfterNextSave) {
+        disconnectAfterNextSave = false;
+        return route.abort('failed');
+      }
+      return route.fulfill({ status: 201, json: saved });
+    }
     if (request.method() === 'POST' && pathname === '/v1/imports') {
       const record = byBody.get(request.postDataBuffer()?.toString('base64') ?? '');
       if (!record) {
@@ -108,6 +142,47 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
       unexpectedWrites.push(request.method() + ' ' + pathname);
       return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+    }
+    if (pathname === '/v1/input-library') {
+      const assigned = new Set(
+        [...batches.values()].flatMap((batch) => batch.state.files.map((file) => file.importId)),
+      );
+      return route.fulfill({
+        json: {
+          priceBooks: [
+            {
+              id: commonWorkbookId,
+              filename: commonWorkbookRecord.filename,
+              status: 'ready',
+              createdAt: observedAt,
+              bytes: 2048,
+              rowCount: 3,
+              sheetCount: 1,
+              issueCount: 0,
+            },
+          ],
+          batches: [...batches.values()].map((batch) => ({
+            id: batch.id,
+            revision: batch.revision,
+            name: batch.state.name,
+            updatedAt: batch.updatedAt,
+            folderCount: Object.keys(batch.state.productKeys).length,
+            fileCount: batch.state.files.length,
+            completedCount: 0,
+            priceSelection: batch.state.priceSelection,
+          })),
+          unassigned: [...imported.values()].filter((record) => !assigned.has(record.id)),
+        },
+      });
+    }
+    if (pathname.startsWith('/v1/input-batches/')) {
+      const batch = batches.get(pathname.split('/').at(-1)!);
+      return route.fulfill({
+        status: batch ? 200 : 404,
+        json: batch
+          ? { ...batch, imports: [commonWorkbookRecord, ...imported.values()] }
+          : { code: 'NOT_FOUND' },
+      });
     }
     if (pathname === '/v1/imports')
       return route.fulfill({ json: [commonWorkbookRecord, ...imported.values()] });
@@ -131,7 +206,20 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
       return route.fulfill({ json: { worker: 'online', productionWrites: false } });
     return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
   });
-  return { directory, writes, unexpectedWrites, recordsByPath };
+  return {
+    directory,
+    writes,
+    unexpectedWrites,
+    recordsByPath,
+    batches,
+    batchWrites,
+    rejectNextSave(status: number, code: string) {
+      nextSaveFailure = { status, code };
+    },
+    disconnectAfterNextSave() {
+      disconnectAfterNextSave = true;
+    },
+  };
 }
 
 const twoFolders: FolderFileFixture[] = [
@@ -181,6 +269,211 @@ async function openFolders(page: Page, directory: string) {
     .click();
 }
 
+async function choosePreparedRoles(page: Page) {
+  const candidate = page.getByTestId('folder-candidate');
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 1.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Dùng làm ảnh bìa', exact: true }).click();
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 3.png', exact: true }).check();
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 2.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Thêm vào cả hai', exact: true }).click();
+  await candidate.getByRole('tab', { name: 'Word & nội dung', exact: true }).click();
+  await candidate.getByText('Cách đọc Word trong bộ nguồn', { exact: true }).click();
+  await candidate
+    .getByRole('checkbox', {
+      name: 'Dùng cấu trúc Word này cho cả đợt',
+      exact: true,
+    })
+    .check();
+}
+
+async function savedBatch(page: Page, batches: Map<string, InputBatchRecord>) {
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Đã lưu vào Kho đầu vào' }),
+  ).toBeVisible();
+  await expect.poll(() => batches.size).toBe(1);
+  return structuredClone([...batches.values()][0]);
+}
+
+test('fixture: a saved input batch restores both folders, Word, price and image order after reload without uploading again', async ({
+  page,
+}, info) => {
+  const fixture = await folderFixture(page, info, twoFolders);
+  await openFolders(page, fixture.directory);
+  await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
+  await choosePreparedRoles(page);
+  const before = await savedBatch(page, fixture.batches);
+  expect(before.state.priceSelection).toEqual({
+    importId: commonWorkbookId,
+    sheet: 'Giá nội bộ',
+    priceProfile: null,
+  });
+  expect(before.state.wordRule).toEqual({
+    titleHeader: 'TIÊU ĐỀ',
+    descriptionHeader: 'BÀI MÔ TẢ ĐĂNG BÁN',
+    headline: 'first_line',
+    paragraphSeparator: '\n\n',
+  });
+  expect(new Set(Object.values(before.state.productKeys)).size).toBe(2);
+  const groupA = Object.keys(before.state.visual).find((key) => key.endsWith('Listing A'))!;
+  expect(before.state.visual[groupA].galleryPaths.map((item) => item.split('/').at(-1))).toEqual([
+    '3.png',
+    '2.png',
+  ]);
+  expect(before.state.visual[groupA].descriptionPaths).toEqual(
+    before.state.visual[groupA].galleryPaths,
+  );
+  expect(fixture.writes).toHaveLength(7);
+
+  await page.reload();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Kho đầu vào', exact: true })).toBeVisible();
+  await expect(page.getByTestId('input-batch-row')).toHaveCount(1);
+  await page
+    .getByTestId('input-batch-row')
+    .getByRole('button', { name: 'Tiếp tục xử lý', exact: true })
+    .click();
+  const candidate = page.getByTestId('folder-candidate');
+  await expect(page.getByTestId('folder-row')).toHaveCount(2);
+  await page
+    .getByTestId('folder-row')
+    .filter({ hasText: 'Listing A' })
+    .getByRole('button', { name: 'Xem nguồn', exact: true })
+    .click();
+  await expect(candidate).toContainText('Ảnh bìa: 1.png');
+  await expect(candidate).toContainText('Ảnh sản phẩm · 2 ảnh');
+  await expect(candidate).toContainText('Ảnh mô tả · 2 ảnh');
+  await page.screenshot({
+    path: '.local/e2e-artifacts/input-batch-restored-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: '.local/e2e-artifacts/input-batch-restored-mobile.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await candidate.getByRole('tab', { name: 'Word & nội dung', exact: true }).click();
+  await expect(candidate).toContainText('Tiêu đề A nguyên bản');
+  await expect(candidate).toContainText('Phần thân A');
+  await expect(candidate).not.toContainText('Tiêu đề B khác hoàn toàn');
+  await page
+    .getByTestId('folder-row')
+    .filter({ hasText: 'Listing B' })
+    .getByRole('button', { name: 'Xem nguồn', exact: true })
+    .click();
+  await candidate.getByRole('tab', { name: 'Word & nội dung', exact: true }).click();
+  await expect(candidate).toContainText('Tiêu đề B khác hoàn toàn');
+  await expect(candidate).not.toContainText('Tiêu đề A nguyên bản');
+  await candidate.getByRole('tab', { name: 'Ảnh trong thư mục', exact: true }).click();
+  await expect(candidate).toContainText('Ảnh bìa: Chưa chọn');
+  await expect(candidate.getByRole('checkbox', { name: /^Chọn ảnh/ })).toHaveCount(2);
+  await expect(page.getByRole('region', { name: 'Nguồn đã chọn', exact: true })).toContainText(
+    'Giá nội bộ',
+  );
+  expect([...fixture.batches.values()][0].state).toEqual(before.state);
+  expect(fixture.writes).toHaveLength(7);
+  expect(fixture.unexpectedWrites).toEqual([]);
+});
+
+test('fixture: failed batch persistence keeps visual choices and retries the saved references without reupload', async ({
+  page,
+}, info) => {
+  const fixture = await folderFixture(page, info, twoFolders);
+  await openFolders(page, fixture.directory);
+  await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
+  await savedBatch(page, fixture.batches);
+  fixture.rejectNextSave(503, 'SERVICE_UNAVAILABLE');
+  const candidate = page.getByTestId('folder-candidate');
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 1.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Dùng làm ảnh bìa', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Thử lưu lại', exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Đã lưu vào Kho đầu vào' })).toHaveCount(
+    0,
+  );
+  await expect(candidate).toContainText('Ảnh bìa: 1.png');
+  const attemptsAtFailure = fixture.batchWrites.length;
+  await page.getByRole('button', { name: 'Thử lưu lại', exact: true }).click();
+  const saved = await savedBatch(page, fixture.batches);
+  expect(fixture.batchWrites.length).toBeGreaterThan(attemptsAtFailure);
+  expect(
+    Object.values(saved.state.visual).some((value) => value.coverPath?.endsWith('/1.png')),
+  ).toBe(true);
+  expect(fixture.writes).toHaveLength(7);
+  expect(fixture.unexpectedWrites).toEqual([]);
+});
+
+test('fixture: a conflicting batch revision preserves current choices and never overwrites the newer saved batch', async ({
+  page,
+}, info) => {
+  const fixture = await folderFixture(page, info, twoFolders);
+  await openFolders(page, fixture.directory);
+  await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
+  const initial = await savedBatch(page, fixture.batches);
+  const remote = {
+    ...initial,
+    revision: initial.revision + 1,
+    state: { ...initial.state, name: 'Bản từ máy khác' },
+  };
+  fixture.batches.set(initial.id, remote);
+  const candidate = page.getByTestId('folder-candidate');
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 1.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Dùng làm ảnh bìa', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Bộ đầu vào đã có thay đổi ở nơi khác');
+  await expect(candidate).toContainText('Ảnh bìa: 1.png');
+  await expect(page.getByRole('status').filter({ hasText: 'Đã lưu vào Kho đầu vào' })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole('button', { name: 'Mở bản đã lưu', exact: true })).toBeVisible();
+  const failedRequestCount = fixture.batchWrites.length;
+  // Another local choice must not reset a stale revision or overwrite the remote record.
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 2.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Thêm vào cả hai', exact: true }).click();
+  await expect(candidate).toContainText('Ảnh sản phẩm · 1 ảnh');
+  await expect(page.getByRole('alert')).toContainText('Bộ đầu vào đã có thay đổi ở nơi khác');
+  expect(fixture.batches.get(initial.id)).toEqual(remote);
+  expect(fixture.batchWrites).toHaveLength(failedRequestCount);
+  expect(fixture.writes).toHaveLength(7);
+  expect(fixture.unexpectedWrites).toEqual([]);
+});
+
+test('fixture: an uncertain save replays the same request before persisting later image choices', async ({
+  page,
+}, info) => {
+  const fixture = await folderFixture(page, info, twoFolders);
+  await openFolders(page, fixture.directory);
+  await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
+  const initial = await savedBatch(page, fixture.batches);
+  const candidate = page.getByTestId('folder-candidate');
+  fixture.disconnectAfterNextSave();
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 1.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Dùng làm ảnh bìa', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Thử lưu lại', exact: true })).toBeVisible();
+  const uncertain = structuredClone(fixture.batchWrites.at(-1)!);
+  expect(fixture.batches.get(initial.id)?.revision).toBe(initial.revision + 1);
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 3.png', exact: true }).check();
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh 2.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Thêm vào cả hai', exact: true }).click();
+  await page.getByRole('button', { name: 'Thử lưu lại', exact: true }).click();
+  const final = await savedBatch(page, fixture.batches);
+  const attempts = fixture.batchWrites.slice(-3);
+  expect(attempts[0]).toEqual(uncertain);
+  expect(attempts[1]).toEqual(uncertain);
+  expect(attempts[2].expectedRevision).toBe(initial.revision + 1);
+  expect(final.revision).toBe(initial.revision + 2);
+  const chosen = Object.values(final.state.visual).find((value) =>
+    value.coverPath?.endsWith('/1.png'),
+  )!;
+  expect(chosen.galleryPaths.map((item) => item.split('/').at(-1))).toEqual(['3.png', '2.png']);
+  expect(chosen.descriptionPaths).toEqual(chosen.galleryPaths);
+  expect(fixture.batches.size).toBe(1);
+  expect(fixture.writes).toHaveLength(7);
+  expect(fixture.unexpectedWrites).toEqual([]);
+});
+
 test('fixture: reads two separate folders with one common price source and leaves numeric image roles unresolved', async ({
   page,
 }, info) => {
@@ -212,13 +505,13 @@ test('fixture: reads two separate folders with one common price source and leave
   await expect(page.getByRole('region', { name: 'Nguồn đã chọn', exact: true })).toContainText(
     'TEST FIXTURE · Bảng giá dùng chung.xlsx',
   );
-  await page.getByRole('button', { name: 'Đổi thư mục hoặc bảng giá', exact: true }).click();
+  await page.getByRole('button', { name: 'Bảng giá & tệp nguồn', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Bảng giá chung', exact: true })).toHaveValue(
     commonWorkbookId,
   );
   await page.getByRole('button', { name: 'Thu gọn phần chọn nguồn', exact: true }).click();
   await expect(
-    page.getByText('Đọc nguồn và xem trước · Chưa lưu listing · Chưa gửi lên Shopee', {
+    page.getByText('Bộ đầu vào được lưu riêng để làm tiếp · Chưa gửi lên Shopee', {
       exact: true,
     }),
   ).toBeVisible();
@@ -347,7 +640,10 @@ test('fixture: holds navigation while folder uploads are pending and keeps stage
   });
   try {
     await openFolders(page, fixture.directory);
-    await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .click();
     const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Ở lại', exact: true }).click();
@@ -357,7 +653,10 @@ test('fixture: holds navigation while folder uploads are pending and keeps stage
     );
     await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
     await requestStarted;
-    await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click({ force: true });
+    await page
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Nhập listing theo thư mục', exact: true }),
     ).toBeVisible();

@@ -25,8 +25,8 @@ Sau `npm run build`, API cũng phục vụ giao diện build tại cổng 4310. 
 ## Sử dụng
 
 1. **Listing của tôi:** mỗi dòng là một bộ đã lưu. Bấm tên để xem, không cần nhập lại bộ Lamy.
-2. **Tệp nguồn:** thêm workbook, Word và ảnh. Chờ Đã đọc tệp. Tab **Tra bảng giá** chỉ để tra SKU/giá theo sheet, không có thao tác ghép hàng.
-3. **Nhập listing có sẵn:** nhập mã bộ cố định, chọn đúng file/sheet/bộ giá và dán bảng SKU/phân loại đã chuẩn bị. Thiếu hoặc trùng dòng phù hợp phải làm rõ; không tự chọn nguồn. Tiếp tục tới nội dung/ảnh sau khi đối chiếu danh sách. Đây chưa phải trình nhập trọn bộ tự động.
+2. **Kho đầu vào:** tab **Bảng giá chung** nhận riêng Excel, tra giá theo trang tính/bộ giá và dùng cho một đợt mới. Tab **Bộ listing** mở các đợt đã lưu hoặc bộ hoàn thiện; Word/ảnh được nhận cùng thư mục listing. Tệp cũ chưa biết quan hệ được giữ để đối chiếu, không tự gắn vào bộ khác.
+3. **Nhập thư mục listing:** chọn một thư mục listing hoặc thư mục cha chứa nhiều listing, nguồn giá và vai trò ảnh. Đợt được lưu tự động có phiên bản sau khi đọc nguồn. Đợi xác nhận đã lưu trước khi đóng trang; mở lại từ Kho đầu vào. Thiếu SKU/nhãn có bước bổ sung riêng; không tự quyết định danh sách hoặc giá. Editor cần lưu riêng.
 4. **Kiểm tra listing / Đối chiếu nguồn:** bản đã lưu mặc định chỉ xem. Chọn điều chỉnh rõ ràng để sửa nội dung/ảnh; cấu trúc SKU/phân loại được giữ cố định tại UI và transaction lưu. Bộ mô tả mới cần chọn rõ bố trí đang hỗ trợ; bố trí khác chưa thể lưu. Xem [hướng dẫn thao tác](listing-workspace.md).
 5. **Kết nối shop:** với sandbox đã khai báo, nhập Test Partner Key / Access Token của đúng app/shop. Lệnh kiểm tra chỉ đọc `v2.shop.get_shop_info`. Không gửi khóa qua chat. Cấp quyền và refresh tự động còn đang làm; token nhập thủ công không có thời điểm hết hạn đã được xác minh.
 6. **Kết quả:** xem bản kiểm tra theo shop và hàng đợi ở hai tab riêng. Shop đích phải được chọn rõ; lưu bản kiểm tra đăng mới chỉ lưu nội bộ. Executor chưa phát hành, không có nút gửi hàng loạt khả dụng hoặc bằng chứng đã đăng từ đường này.

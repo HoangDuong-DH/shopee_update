@@ -9,6 +9,18 @@ export class RequestError extends Error {
   }
 }
 const requestMessages: Record<string, string> = {
+  INPUT_BATCH_REVISION_CONFLICT:
+    'Đợt nhập này đã có bản mới hơn. Giữ lựa chọn đang xem và mở bản đã lưu để đối chiếu; không ghi đè tự động.',
+  INPUT_BATCH_PRODUCT_KEY_CONFLICT:
+    'Một bộ trong đợt đã gắn với đợt nhập khác. Mở bộ đã lưu để kiểm tra thay vì tạo lại.',
+  INPUT_BATCH_SOURCE_MISMATCH:
+    'Tệp nhận được chưa khớp bản gốc của đợt nhập. Chọn lại đúng thư mục gốc để đối chiếu.',
+  INPUT_BATCH_PATH_INVALID:
+    'Cấu trúc thư mục chưa hợp lệ. Giữ mỗi bộ listing trong thư mục riêng và nhận lại đúng cấp thư mục.',
+  INPUT_BATCH_SELECTION_INVALID:
+    'Một lựa chọn Word hoặc ảnh chưa thuộc đúng thư mục listing. Kiểm tra lại bộ đang chọn.',
+  INPUT_BATCH_PRICE_INVALID:
+    'Bảng giá, trang tính hoặc bộ giá chưa khớp nguồn đã đọc. Chọn lại đúng nguồn giá của đợt.',
   PRODUCT_REVISION_CONFLICT:
     'Thông tin này đã có bản mới hơn. Giữ lại phần đang sửa, mở bản mới nhất để đối chiếu trước khi lưu lại.',
   SOURCE_REVISION_CHANGED: 'Nguồn đã thay đổi. Mở bản mới nhất và đối chiếu lại phần đang chọn.',

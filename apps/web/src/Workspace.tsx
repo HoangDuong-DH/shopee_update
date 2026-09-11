@@ -10,7 +10,13 @@ import {
   Store,
   CircleHelp,
 } from 'lucide-react';
-import type { ChangePlan, JobRecord, ListingDraft, ShopConnection } from '@shopee/domain';
+import type {
+  ChangePlan,
+  InputBatchDetail,
+  JobRecord,
+  ListingDraft,
+  ShopConnection,
+} from '@shopee/domain';
 import { api, date, money, type ImportRecord } from './api.js';
 import { Editor, type EditorSeed } from './Editor.js';
 import { Issues, Preview } from './Preview.js';
@@ -37,7 +43,7 @@ type Page =
   | 'folder';
 const navigation = [
   { id: 'products', label: 'Listing của tôi', icon: LayoutList },
-  { id: 'sources', label: 'Tệp nguồn', icon: Files },
+  { id: 'sources', label: 'Kho đầu vào', icon: Files },
   { id: 'results', label: 'Kết quả', icon: CheckCheck },
 ] as const;
 export default function Workspace() {
@@ -64,11 +70,16 @@ export default function Workspace() {
     [folderBusy, setFolderBusy] = useState(false),
     [folderStarted, setFolderStarted] = useState(false),
     [folderDirty, setFolderDirty] = useState(false),
+    [initialBatch, setInitialBatch] = useState<InputBatchDetail | undefined>(),
+    [initialPriceImportId, setInitialPriceImportId] = useState<string | undefined>(),
+    [folderInstanceKey, setFolderInstanceKey] = useState(() => crypto.randomUUID()),
+    [openingBatch, setOpeningBatch] = useState(false),
     [folderManual, setFolderManual] = useState<FolderManualContext | null>(null),
     [folderManualDraft, setFolderManualDraft] = useState<IntakeDraft | undefined>(),
     [editorOrigin, setEditorOrigin] = useState<'import' | 'folder'>('import'),
     [pendingPage, setPendingPage] = useState<Page | null>(null);
   const refreshing = useRef(false);
+  const openingBatchRef = useRef(false);
   const importsRef = useRef(imports);
   importsRef.current = imports;
   const folderReader = useRef<ReturnType<typeof createFolderReader> | null>(null);
@@ -87,7 +98,17 @@ export default function Workspace() {
         api<JobRecord[]>('/v1/jobs'),
         api<{ worker: string }>('/v1/status'),
       ]);
-      setImports(a);
+      setImports((current) => {
+        const merged = new Map(current.map((item) => [item.id, item]));
+        for (const item of a) {
+          const previous = merged.get(item.id);
+          // Import identities are immutable. An older list request must not erase files
+          // received during that request, or drop their parsed bodies at editor handoff.
+          if (previous?.status === 'ready' && ['queued', 'running'].includes(item.status)) continue;
+          merged.set(item.id, { ...item, body: item.body ?? previous?.body });
+        }
+        return [...merged.values()];
+      });
       setProducts(b);
       setShops(c);
       setPlans(d);
@@ -121,7 +142,7 @@ export default function Workspace() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty, uploadBusy, saveBusy, folderBusy, folderDirty]);
   function go(next: Page) {
-    if ((saveBusy || folderBusy) && next !== page) return;
+    if ((saveBusy || folderBusy || openingBatchRef.current) && next !== page) return;
     if (uploadBusy && next !== page) {
       setError('Đang nhập tệp. Đợi tải xong để xem đủ kết quả trước khi chuyển màn hình.');
       return;
@@ -131,8 +152,61 @@ export default function Workspace() {
       return;
     }
     setError('');
+    setPendingPage(null);
     if (next === 'folder') setFolderStarted(true);
     setPage(next);
+  }
+  function startBatch(priceImportId?: string) {
+    if (saveBusy || uploadBusy || folderBusy || openingBatchRef.current) return;
+    if (dirty || folderDirty) {
+      setError(
+        'Đợt đang làm còn thay đổi chưa lưu. Mở lại đợt và lưu xong trước khi nhận thư mục mới.',
+      );
+      return;
+    }
+    setInitialBatch(undefined);
+    setPendingPage(null);
+    setInitialPriceImportId(priceImportId);
+    setFolderInstanceKey(crypto.randomUUID());
+    setFolderManual(null);
+    setFolderManualDraft(undefined);
+    setFolderStarted(true);
+    setError('');
+    setPage('folder');
+    window.scrollTo(0, 0);
+  }
+  async function resumeBatch(id: string) {
+    if (saveBusy || uploadBusy || folderBusy || openingBatchRef.current) return;
+    if (dirty || folderDirty) {
+      setError(
+        'Còn thay đổi chưa lưu trong đợt đang mở. Giữ hoặc bỏ những thay đổi đó trước khi mở bản đã lưu.',
+      );
+      return;
+    }
+    openingBatchRef.current = true;
+    setOpeningBatch(true);
+    setError('');
+    try {
+      const saved = await api<InputBatchDetail>('/v1/input-batches/' + encodeURIComponent(id));
+      setImports((current) => [
+        ...current.filter((item) => !saved.imports.some((source) => source.id === item.id)),
+        ...saved.imports,
+      ]);
+      setInitialBatch(saved);
+      setPendingPage(null);
+      setInitialPriceImportId(undefined);
+      setFolderInstanceKey(crypto.randomUUID());
+      setFolderManual(null);
+      setFolderManualDraft(undefined);
+      setFolderStarted(true);
+      setPage('folder');
+      window.scrollTo(0, 0);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Chưa mở được đợt đã lưu.');
+    } finally {
+      openingBatchRef.current = false;
+      setOpeningBatch(false);
+    }
   }
   function openFolderEditor(
     seed: EditorSeed,
@@ -295,7 +369,12 @@ export default function Workspace() {
         {uploadProgress}
         {folderBusy && (
           <p role="status" className="context-note">
-            Đang đọc các tệp trong thư mục. Giữ trang mở để nhận đủ kết quả của từng bộ.
+            Đang nhận hoặc lưu đợt nhập. Giữ trang mở đến khi có xác nhận đã lưu.
+          </p>
+        )}
+        {openingBatch && (
+          <p role="status" className="context-note">
+            Đang mở đợt nhập đã lưu…
           </p>
         )}
         {saveBusy && (
@@ -327,7 +406,7 @@ export default function Workspace() {
                 ['import', 'folder'].includes(pendingPage)
                   ? 'Quay lại sẽ bỏ nội dung và ảnh chưa lưu tại màn này. Bảng SKU và nguồn giá vẫn được giữ để bạn tiếp tục.'
                   : page === 'folder'
-                    ? 'Rời màn hình sẽ bỏ lô thư mục đang xử lý. Các tệp và listing đã lưu trên ứng dụng vẫn được giữ.'
+                    ? 'Rời màn hình sẽ bỏ những lựa chọn chưa lưu. Bạn vẫn có thể mở lại bản đã lưu từ Kho đầu vào.'
                     : 'Rời màn hình sẽ bỏ phần đang nhập. Bản đã lưu vẫn được giữ.'}
               </p>
             </div>
@@ -373,7 +452,7 @@ export default function Workspace() {
                     <h1>Listing của tôi</h1>
                     <p>Mỗi dòng là một bộ listing đã chuẩn bị. Mở bộ cần làm để kiểm tra nguồn.</p>
                   </div>
-                  <button className="primary" onClick={() => go('folder')}>
+                  <button className="primary" onClick={() => startBatch()}>
                     <Plus size={18} />
                     Nhập listing có sẵn
                   </button>
@@ -523,17 +602,35 @@ export default function Workspace() {
               </>
             )}
             {page === 'sources' && (
-              <Resources imports={imports} uploadFiles={uploadFiles} uploading={uploadBusy} />
+              <Resources
+                imports={imports}
+                products={products}
+                uploadFiles={uploadFiles}
+                uploading={uploadBusy || openingBatch}
+                onNewBatch={startBatch}
+                onResumeBatch={(id) => void resumeBatch(id)}
+                onOpenListing={open}
+              />
             )}
             {folderStarted && (
               <div hidden={page !== 'folder'}>
                 <FolderIntake
+                  key={folderInstanceKey}
+                  initialBatch={initialBatch}
+                  initialPriceImportId={initialPriceImportId}
+                  onOpenLibrary={() => go('sources')}
                   imports={imports}
                   products={products}
                   active={page === 'folder'}
                   externalBusy={uploadBusy || saveBusy}
                   onRead={async (files, progress) => {
                     const result = await folderReader.current!(files, progress);
+                    setImports((current) => {
+                      const merged = new Map(current.map((item) => [item.id, item]));
+                      for (const item of result)
+                        if (item.record) merged.set(item.record.id, item.record);
+                      return [...merged.values()];
+                    });
                     await refresh();
                     return result;
                   }}
@@ -707,7 +804,7 @@ export default function Workspace() {
             )}
             {page === 'assistant' && <AssistantPanel plans={plans} />}
             {page === 'guide' && (
-              <UsageGuide onImport={() => go('folder')} onListings={() => go('products')} />
+              <UsageGuide onImport={() => startBatch()} onListings={() => go('products')} />
             )}
             {page === 'shops' && (
               <>

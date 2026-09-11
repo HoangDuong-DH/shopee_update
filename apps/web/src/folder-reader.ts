@@ -54,8 +54,7 @@ export function createFolderReader(options: ReaderOptions = {}) {
       }
       validate(record);
       for (let attempt = 0; attempt < (options.maxPolls ?? 120); attempt++) {
-        if ((record.status === 'ready' && record.body !== undefined) || record.status === 'failed')
-          break;
+        if ((record.status === 'ready' && record.body != null) || record.status === 'failed') break;
         if (attempt > 0) await pause();
         record = validate(await request('/v1/imports/' + encodeURIComponent(record.id)), record.id);
         received.set(sha, record);
@@ -82,18 +81,20 @@ export function createFolderReader(options: ReaderOptions = {}) {
         const index = next++,
           file = files[index];
         const relativePath = file.webkitRelativePath || file.name;
+        let sha: string | undefined;
         try {
-          if (!/\.(docx|xlsx|png|jpe?g|webp)$/i.test(file.name))
-            throw new Error('Loại tệp này chưa hỗ trợ. Giữ trong thư mục gốc để đối chiếu.');
           const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
-          const sha = Array.from(new Uint8Array(digest), (value) =>
+          sha = Array.from(new Uint8Array(digest), (value) =>
             value.toString(16).padStart(2, '0'),
           ).join('');
+          if (!/\.(docx|xlsx|png|jpe?g|webp)$/i.test(file.name))
+            throw new Error('Loại tệp này chưa hỗ trợ. Giữ trong thư mục gốc để đối chiếu.');
           const record = await receive(file, sha);
           output[index] = { relativePath, sha256: sha, record };
         } catch (error) {
           output[index] = {
             relativePath,
+            sha256: sha,
             record: null,
             error: error instanceof Error ? error.message : 'Chưa nhận được tệp này. Thử đọc lại.',
           };

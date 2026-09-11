@@ -22,7 +22,8 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 
 - Nhập Excel KINI, Word và ảnh PNG/JPEG/WebP qua HTTP; xử lý bằng worker riêng và lưu tệp theo SHA-256.
 - Ánh xạ theo nhãn của từng khối, hỗ trợ khối cạnh nhau và bộ giá có tiêu đề phân nhóm. Cột mơ hồ được đánh dấu; sheet chưa có mapping được hiển thị rõ.
-- Luồng **Listing của tôi → Nhập listing có sẵn** hướng dẫn ba bước Nguồn giá / Phân loại đã chuẩn bị / Kiểm tra. Nhập từng ô SKU/nhãn, dán Excel khi cần, giữ phần nhập dở trong phiên tab với lựa chọn phục hồi rõ. Mã theo dõi tự tạo; khớp chính xác file/trang tính/bộ giá, không suy danh sách SKU từ KINI.
+- **Kho đầu vào** tách bảng giá dùng chung khỏi các bộ Word/ảnh theo thư mục listing. Nhận nhiều thư mục trong một đợt, lưu đường dẫn, nguồn giá, cách đọc Word và thứ tự ảnh vào PostgreSQL; mở lại đợt sau khi tải lại trang mà không tải lại tệp đã nhận. Phiên bản bất biến và kiểm tra xung đột bảo vệ lựa chọn của người khác.
+- Luồng nhập thư mục giữ riêng nguồn của từng listing. Phần SKU/nhãn chưa rõ có bước bổ sung bằng bảng hoặc dán Excel; không suy danh sách SKU từ KINI. Định danh bộ trong đợt đã lưu ổn định; nhập cùng sản phẩm vào một đợt mới vẫn cần đối chiếu trùng.
 - Nội dung Word có chọn đoạn và xem trước trước khi áp dụng. Ảnh chọn riêng theo vai trò, hình thu nhỏ và thứ tự; có tải tệp ngay trong luồng và thử lại từng tệp lỗi. Ba tab Nội dung / Bộ ảnh / SKU & phân loại giúp xem từng phần. Chưa tự đọc trọn mọi bộ listing hoặc phục hồi nội dung/ảnh chưa lưu sau tải lại trang.
 - Bản đã lưu mở ở chế độ xem; điều chỉnh nội dung/ảnh phải được chọn rõ. Máy chủ khóa thứ tự SKU, tên tầng và nhãn phân loại của cùng mã bộ, giữ cả hai tầng và khoảng trắng. Khóa này chưa xác minh quan hệ SKU trên Shopee.
 - Lưu bản nháp có phiên bản, xem trước và lưu kế hoạch cho từng shop. GIÁ GỐC và mục tiêu khuyến mại tách riêng.
@@ -46,6 +47,7 @@ Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL t
 
 - [Hướng dẫn chạy](docs/runbooks/local-development.md)
 - [Cách dùng giao diện listing](docs/runbooks/listing-workspace.md)
+- [Kho đầu vào và phục hồi đợt nhập](docs/delivery/2026-09-11-input-library.md)
 - [Mốc thực thi và giới hạn](docs/delivery/2026-09-10-foundation.md)
 - [Kiểm tra tiếp nối 11/09](docs/delivery/2026-09-11-checkpoint.md)
 - [Hướng dẫn lấy thông tin TEST](docs/runbooks/sandbox-connection.md)

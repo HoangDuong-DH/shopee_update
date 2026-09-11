@@ -43,7 +43,7 @@
       "depends_on": ["A3"],
       "status": "in_progress",
       "remaining": [
-        "Versioned source/membership mappings, durable folder-batch recovery and logical identity across source revisions",
+        "Versioned source/membership mappings and explicit replacement of source bundles across revisions",
         "Whole prepared-listing intake for arbitrary Word layouts and visual variation identification",
         "Column mapping editor",
         "Stock instruction UI",
@@ -55,7 +55,9 @@
         "2026-09-11 nontech follow-up: three-step intake with exact SKU table and explicit recovery, role-based thumbnail picker, explicit Word paragraph assignment, per-file retry, actionable source checklist and in-app staff guide",
         "125 unit/integration, 7 legacy and 22 browser E2E passed (12 real local read-only scenarios; 10 browser fixtures). Lamy source revision 1 and 6/8/9 SKU/gallery/description counts preserved. Delivery: docs/delivery/2026-09-11-nontech-frontend.md",
         "2026-09-11 folder intake: one prepared listing per folder, shared price source, visual bulk media roles, exact-file identity and partial retry; handoff preserves resolved Word/media and scopes picker to the selected folder. No vision-based SKU inference or Shopee writes.",
-        "144 unit/integration, 7 legacy and 27 browser E2E passed (12 real local read-only; 15 fixtures), compact desktop/mobile folder views verified. In-memory batch only; full publication remains incomplete. Delivery: docs/delivery/2026-09-11-folder-listing-intake.md"
+        "144 unit/integration, 7 legacy and 27 browser E2E passed (12 real local read-only; 15 fixtures), compact desktop/mobile folder views verified. In-memory batch only at that checkpoint; full publication remains incomplete. Delivery: docs/delivery/2026-09-11-folder-listing-intake.md",
+        "2026-09-11 input library: dedicated shared price books and saved folder batches; immutable database snapshots with scoped source references, stable per-batch listing identities, restart recovery, exact unknown-outcome replay and CAS conflicts. Migration 004 applied locally; Lamy revision 1 preserved.",
+        "163 unit/integration, 7 legacy and 32 browser E2E passed (12 real local read-only; 20 fixtures). Library and restored batch desktop/mobile verified. Unsaved Editor changes, arbitrary Word/vision, bulk executor and production remain incomplete. Delivery: docs/delivery/2026-09-11-input-library.md"
       ]
     },
     {
@@ -185,6 +187,6 @@
     "is_statistical_confidence_interval": false,
     "excludes_external_waiting": true
   },
-  "updated_at": "2026-09-11T02:50:13.7295762Z",
-  "latest_evidence": "../../delivery/2026-09-11-listing-workspace-redesign.md"
+  "updated_at": "2026-09-11T06:02:00Z",
+  "latest_evidence": "../../delivery/2026-09-11-input-library.md"
 }

@@ -52,6 +52,25 @@ async function useIntakeFixture(page: Page) {
     }
     if (pathname === '/v1/imports') return route.fulfill({ json: [workbookRecord] });
     if (pathname === '/v1/imports/' + sourceId) return route.fulfill({ json: workbookRecord });
+    if (pathname === '/v1/input-library')
+      return route.fulfill({
+        json: {
+          priceBooks: [
+            {
+              id: sourceId,
+              filename: workbookRecord.filename,
+              status: 'ready',
+              createdAt: source.observedAt,
+              bytes: 2048,
+              rowCount: 2,
+              sheetCount: 1,
+              issueCount: 0,
+            },
+          ],
+          batches: [],
+          unassigned: [],
+        },
+      });
     if (['/v1/products', '/v1/shops', '/v1/plans', '/v1/jobs'].includes(pathname))
       return route.fulfill({ json: [] });
     if (pathname === '/v1/status')
@@ -183,7 +202,7 @@ test('fixture: Excel paste is optional and replacing already entered rows requir
   expect(unexpectedWrites).toEqual([]);
 });
 
-test('fixture: retries only failed uploads and preserves the exact selected file bytes', async ({
+test('fixture: the shared price intake accepts only workbooks and retries unchanged bytes', async ({
   page,
 }) => {
   const unexpectedWrites = await useIntakeFixture(page);
@@ -193,42 +212,68 @@ test('fixture: retries only failed uploads and preserves the exact selected file
     if (route.request().method() !== 'POST') return route.fallback();
     const name = decodeURIComponent(route.request().headers()['x-file-name'] ?? '');
     attempts.push({ name, bytes: route.request().postDataBuffer()?.toString('base64') ?? '' });
-    if (name === 'fixture-content.docx' && !rejectedOnce) {
+    if (name === 'fixture-price-b.xlsx' && !rejectedOnce) {
       rejectedOnce = true;
       return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
     }
     return route.fulfill({ status: 201, json: { id: sourceId, status: 'queued' } });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
-  await page.getByLabel('Thêm tệp nguồn', { exact: true }).setInputFiles([
-    { name: 'fixture-cover.png', mimeType: 'image/png', buffer: Buffer.from('cover-fixture') },
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
+  await page.getByRole('tab', { name: /^Bảng giá chung/ }).click();
+  const input = page.getByLabel('Thêm bảng giá Excel', { exact: true });
+  await expect(input).toHaveAttribute('accept', '.xlsx');
+  await expect(page.getByLabel('Thêm tệp nguồn', { exact: true })).toHaveCount(0);
+  await input.setInputFiles([
     {
-      name: 'fixture-content.docx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      buffer: Buffer.from('original-word-fixture'),
+      name: 'fixture-price-a.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from('original-price-a-fixture'),
     },
-    { name: 'fixture-gallery.png', mimeType: 'image/png', buffer: Buffer.from('gallery-fixture') },
+    {
+      name: 'fixture-price-b.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from('original-price-b-fixture'),
+    },
   ]);
   const rows = page.getByTestId('upload-file-row');
-  await expect(rows).toHaveCount(3);
-  await expect(rows.filter({ hasText: 'fixture-cover.png' })).toContainText('Đã nhận');
-  await expect(rows.filter({ hasText: 'fixture-content.docx' })).toContainText('Chưa nhận');
-  await expect(rows.filter({ hasText: 'fixture-gallery.png' })).toContainText('Đã nhận');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'fixture-price-a.xlsx' })).toContainText('Đã nhận');
+  await expect(rows.filter({ hasText: 'fixture-price-b.xlsx' })).toContainText('Chưa nhận');
   expect(attempts.map((attempt) => attempt.name)).toEqual([
-    'fixture-cover.png',
-    'fixture-content.docx',
-    'fixture-gallery.png',
+    'fixture-price-a.xlsx',
+    'fixture-price-b.xlsx',
   ]);
   await page.getByRole('button', { name: 'Thử lại 1 tệp chưa nhận', exact: true }).click();
-  await expect(rows.filter({ hasText: 'fixture-content.docx' })).toContainText('Đã nhận');
+  await expect(rows.filter({ hasText: 'fixture-price-b.xlsx' })).toContainText('Đã nhận');
   expect(attempts.map((attempt) => attempt.name)).toEqual([
-    'fixture-cover.png',
-    'fixture-content.docx',
-    'fixture-gallery.png',
-    'fixture-content.docx',
+    'fixture-price-a.xlsx',
+    'fixture-price-b.xlsx',
+    'fixture-price-b.xlsx',
   ]);
-  expect(attempts[3].bytes).toBe(attempts[1].bytes);
+  expect(attempts[2].bytes).toBe(attempts[1].bytes);
+  expect(unexpectedWrites).toEqual([]);
+});
+
+test('fixture: the shared price intake rejects Word instead of mixing listing content into the price library', async ({
+  page,
+}) => {
+  const unexpectedWrites = await useIntakeFixture(page);
+  await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
+  await page.getByRole('tab', { name: /^Bảng giá chung/ }).click();
+  await page.getByLabel('Thêm bảng giá Excel', { exact: true }).setInputFiles({
+    name: 'listing-content.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    buffer: Buffer.from('word-file-selected-through-test-only'),
+  });
+  await expect(page.getByRole('alert')).toContainText('Excel');
   expect(unexpectedWrites).toEqual([]);
 });
 

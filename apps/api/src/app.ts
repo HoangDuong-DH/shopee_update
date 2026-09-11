@@ -25,6 +25,7 @@ import { assembleProduct, productInput } from './product-service.js';
 import { connectSandbox } from './connection-service.js';
 import { AssistantService, type KnowledgePort } from './assistant-service.js';
 import { KnowledgeLibrary } from '@shopee/agent-runtime';
+import { InputService } from './input-service.js';
 const REPO = Symbol('repository'),
   BLOBS = Symbol('blobs');
 const id = (s: string) => z.string().uuid().parse(s);
@@ -59,6 +60,24 @@ class ApiErrors implements ExceptionFilter {
         fields: error.issues.map((i) => i.path.join('.')),
       });
     const code = error instanceof Error ? error.message : '';
+    const inputMessages: Record<string, string> = {
+      INPUT_BATCH_REVISION_CONFLICT:
+        'Bộ nguồn đã có bản lưu mới hơn. Giữ phần đang làm và mở lại bản mới nhất để đối chiếu.',
+      INPUT_BATCH_PRODUCT_KEY_CONFLICT:
+        'Thư mục này đang dùng mã listing đã thuộc bộ khác hoặc khác với bản đã lưu. Giữ đúng bộ nguồn để tiếp tục.',
+      INPUT_BATCH_PATH_INVALID:
+        'Cấu trúc thư mục chưa hợp lệ hoặc vượt giới hạn nhận một lần. Kiểm tra lại thư mục đã chọn.',
+      INPUT_BATCH_SELECTION_INVALID:
+        'Ảnh hoặc Word đã chọn không thuộc đúng thư mục listing. Kiểm tra lại các tệp trong bộ.',
+      INPUT_BATCH_SOURCE_MISMATCH:
+        'Một tệp đã nhận chưa khớp nội dung gốc hoặc không còn tồn tại. Chọn lại đúng tệp để đối chiếu.',
+      INPUT_BATCH_PRICE_INVALID:
+        'Bảng giá, trang tính hoặc bộ giá chưa đọc xong hay không còn khớp lựa chọn. Chọn lại nguồn giá phù hợp.',
+    };
+    if (Object.hasOwn(inputMessages, code))
+      return reply
+        .status(code.endsWith('_CONFLICT') ? 409 : 400)
+        .send({ code, message: inputMessages[code] });
     if (code === 'PRODUCT_MEMBERSHIP_LOCKED')
       return reply.status(409).send({
         code,
@@ -66,13 +85,11 @@ class ApiErrors implements ExceptionFilter {
           'Bộ listing này đã có cấu trúc cố định. Không thể thêm, bớt, thay hoặc đảo SKU; tên và thứ tự phân loại phải giữ nguyên theo bộ đã tiếp nhận.',
       });
     if (code === 'DEADLINE_EXCEEDED')
-      return reply
-        .status(504)
-        .send({
-          code,
-          message:
-            'Lần kiểm tra đã hết thời gian. Xem lịch sử để biết các bước đã lưu; nguồn và listing được giữ nguyên.',
-        });
+      return reply.status(504).send({
+        code,
+        message:
+          'Lần kiểm tra đã hết thời gian. Xem lịch sử để biết các bước đã lưu; nguồn và listing được giữ nguyên.',
+      });
     const knowledgeMessages: Record<string, string> = {
       KNOWLEDGE_UNKNOWN_DOCUMENT: 'Không tìm thấy tài liệu trong danh mục nguồn.',
       KNOWLEDGE_OPEN_PLATFORM_UNAVAILABLE: 'Kho Open Platform chưa sẵn sàng tại máy chủ.',
@@ -105,7 +122,22 @@ class AppController {
     @Inject(REPO) readonly repo: Repository,
     @Inject(BLOBS) readonly blobs: BlobStore,
     @Inject(AssistantService) readonly assistant: AssistantService,
+    @Inject(InputService) readonly input: InputService,
   ) {}
+  @Get('input-library') inputLibrary() {
+    return this.input.library.library();
+  }
+  @Get('input-batches') inputBatches() {
+    return this.input.library.list();
+  }
+  @Get('input-batches/:id') async inputBatch(@Param('id') key: string) {
+    const record = await this.input.library.get(id(key));
+    if (!record) throw new HttpException({ code: 'NOT_FOUND' }, 404);
+    return record;
+  }
+  @Post('input-batches') saveInputBatch(@Body() raw: unknown) {
+    return this.input.save(raw);
+  }
   @Get('assistant/reviews') reviews() {
     return this.assistant.list();
   }
@@ -324,6 +356,7 @@ export async function createApp(
     providers: [
       { provide: REPO, useValue: repo },
       { provide: BLOBS, useValue: blobs },
+      { provide: InputService, useValue: new InputService(repo) },
       { provide: DB_PROBE, useValue: () => repo.probe() },
       {
         provide: AssistantService,

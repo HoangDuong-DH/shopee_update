@@ -34,8 +34,9 @@ export function UsageGuide({
           <div>
             <h2>Chọn bảng giá chung và thư mục</h2>
             <p>
-              Chọn bảng giá, sheet và bộ giá một lần cho đợt. Sau đó chọn thư mục trên máy. Nếu đó
-              là một bộ, chọn “Thư mục này là một listing”; nếu bên trong có nhiều thư mục listing,
+              Vào Kho đầu vào → Bảng giá chung để thêm Excel một lần. Chọn “Nhập thư mục listing”,
+              chọn bảng giá, trang tính và bộ giá cho đợt. Sau đó chọn thư mục trên máy. Nếu đó là
+              một bộ, chọn “Thư mục này là một listing”; nếu bên trong có nhiều thư mục listing,
               chọn “Mỗi thư mục con là một listing”.
             </p>
             <p>Bấm “Đọc các thư mục”. Danh sách giữ riêng tệp của từng bộ.</p>
@@ -118,16 +119,16 @@ export function UsageGuide({
           <div>
             <dt>Cần nghỉ giữa đợt nhập</dt>
             <dd>
-              Giữ tab đang mở. Đợt thư mục chỉ được giữ trong bộ nhớ trang khi mở Editor và quay
-              lại. Tải lại hoặc đóng trang sẽ mất lựa chọn thư mục và phần chưa lưu; bản đã lưu
-              trong ứng dụng vẫn còn.
+              Đợi thông báo “Đã lưu vào Kho đầu vào” rồi có thể đóng trang. Mở Kho đầu vào → Bộ
+              listing → Tiếp tục xử lý để lấy lại Word, ảnh, thứ tự đã chọn và nguồn giá của đợt.
+              Phần đang sửa trong màn hoàn thiện SKU/nội dung cần bấm lưu riêng trước khi đóng.
             </dd>
           </div>
           <div>
             <dt>Thấy lời nhắc tiếp tục phần đang nhập</dt>
             <dd>
-              Lời nhắc phục hồi chỉ áp dụng các ô bảng giá/SKU trong luồng nhập thủ công. Nó không
-              khôi phục tệp hay toàn bộ đợt thư mục.
+              Đợt thư mục đã lưu nằm trong Kho đầu vào. Lời nhắc trong luồng nhập thủ công chỉ khôi
+              phục các ô của luồng đó; đây là hai phần lưu riêng.
             </dd>
           </div>
           <div>

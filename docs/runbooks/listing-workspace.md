@@ -9,16 +9,16 @@ Cập nhật ngày **11/09/2026**. Mở http://127.0.0.1:5173/ trên máy đang 
 | Mục | Dùng khi nào |
 | --- | --- |
 | **Listing của tôi** | Mở bộ đã lưu hoặc nhập các thư mục listing đã chuẩn bị |
-| **Tệp nguồn** | Xem Excel, Word, ảnh đã tải; kiểm tra tệp chưa đọc được; tra SKU và giá |
+| **Kho đầu vào** | Bảng giá dùng chung, các đợt thư mục đang làm và bộ listing đã tiếp nhận |
 | **Kết quả** | Xem bản kiểm tra theo shop và trạng thái công việc; bản kiểm tra nội bộ chưa phải kết quả đăng Shopee |
 
 ## Nhập các listing bằng thư mục
 
-Vào **Listing của tôi → Nhập listing có sẵn**. Màn hình **Nhập listing theo thư mục** giữ bảng giá, danh sách thư mục và phần xem nguồn trên cùng một trang.
+Vào **Kho đầu vào → Nhập thư mục listing** hoặc **Listing của tôi → Nhập listing có sẵn**. Màn hình **Nhập listing theo thư mục** giữ bảng giá, danh sách thư mục và phần xem nguồn trên cùng một trang. Mỗi nút nhập mới bắt đầu một đợt mới; để tiếp tục công việc cũ, mở đúng đợt trong Kho đầu vào.
 
 ### Chọn bảng giá chung một lần
 
-Chọn **Bảng giá chung → Sheet chứa giá → Bộ giá áp dụng**. Nếu chưa tải Excel, bấm **Tải bảng giá chung** ngay tại đây. Các thư mục trong đợt được đối chiếu với lựa chọn này; không phải tải lại bảng giá cho từng listing.
+Chọn **Bảng giá chung → Sheet chứa giá → Bộ giá áp dụng**. Nếu chưa tải Excel, bấm **Tải bảng giá chung** ngay tại đây, hoặc vào tab **Bảng giá chung** trong Kho đầu vào. Khu này chỉ nhận Excel; Word/ảnh được nhận theo thư mục. Các thư mục trong đợt được đối chiếu với lựa chọn này; không phải tải lại bảng giá cho từng listing. Bản giá mới được giữ riêng, không tự thay nguồn của đợt cũ.
 
 Bảng giá dùng để tìm SKU và giá. Những SKU cùng nằm trên một sheet không tự chứng minh chúng thuộc cùng listing. Nếu SKU không có hoặc khớp nhiều dòng, kiểm tra lại đúng sheet, bộ giá và mã nguyên văn. Không dùng một giá khác chỉ để vượt lỗi.
 
@@ -102,7 +102,7 @@ Bấm **Lưu & xem trước** để lưu bản nháp nội bộ. Nếu chưa lư
 
 ## Trở lại đợt thư mục và mở bộ đã có
 
-Đợt thư mục được giữ trong bộ nhớ của trang khi mở Editor, xem trước và quay lại làm các thư mục tiếp theo. Nội dung đã nhận diện và vai trò ảnh đã chọn trong khung thư mục vẫn còn. Những thay đổi chỉ mới thực hiện trong Editor cần được lưu; nếu bỏ thay đổi để quay lại, phần chưa lưu trong Editor không được nhập ngược vào khung thư mục.
+Đợi trạng thái **Đã lưu vào Kho đầu vào**, rồi có thể rời trang. Vào **Kho đầu vào → Bộ listing → Tiếp tục xử lý** để mở lại Word, nguồn giá và thứ tự ảnh đã lưu, kể cả sau khi đóng tab. Tệp đã nhận không phải tải lại. Nếu còn tệp chưa nhận, chọn lại đúng thư mục gốc để kiểm tên, kích thước và SHA trước khi thử tiếp. Những thay đổi chỉ mới thực hiện trong Editor cần được lưu riêng; nếu bỏ thay đổi để quay lại, phần chưa lưu trong Editor không được nhập ngược vào khung thư mục.
 
 Sau khi lưu, mở lại đúng bộ nguồn đã nhận diện có thể hiện **Mở bộ đã lưu**. Cơ chế này nhận biết mã bộ nguồn tương ứng; không bảo đảm phát hiện mọi lần nhập trùng cùng sản phẩm thực tế, nhất là khi đổi nguồn hoặc đường dẫn. Kiểm tra **Listing của tôi** trước khi nhập lại.
 
@@ -114,7 +114,8 @@ Chỉ chọn **Shop đích** khi cần lưu bản kiểm tra theo shop. Đây v�
 
 - **Tệp chưa đọc được:** xem tên tệp và thông báo. Kiểm tra tệp gốc rồi thử **Đọc các thư mục** lại. Chi tiết kỹ thuật nằm trong mục đóng dành cho người hỗ trợ; các tệp đọc được vẫn có thể xem và đối chiếu.
 - **Đang tải/đọc/lưu:** đợi kết quả trước khi chuyển công việc. Tệp đã nhận chưa chắc đã được đọc thành công.
-- **Đợt thư mục đang mở:** được giữ trong bộ nhớ trang, không phải bản phục hồi trên máy chủ hoặc trong `sessionStorage`. Tải lại/đóng trang sẽ mất lựa chọn thư mục và các thao tác chưa lưu; cần chọn lại nguồn. Giữ tab mở để tiếp tục đợt đang làm.
+- **Đợt thư mục đang mở:** lưu tự động trên máy chủ với lịch sử phiên bản. Chỉ phần đã được xác nhận lưu mới phục hồi sau khi đóng trang. Mất mạng thì giữ trang và dùng nút thử lưu lại; không coi thông báo đang lưu là đã lưu.
+- **Đợt có bản mới hơn:** có thể một người khác vừa sửa. Ứng dụng dừng ghi để không đè bản của họ. Mở bản đã lưu để đối chiếu; không tự trộn hai bộ lựa chọn.
 - **Editor chưa lưu:** chưa có phục hồi nội dung/ảnh đang sửa sau khi tải lại trang. Bản đã lưu trong ứng dụng vẫn còn.
 - **Nhập thủ công:** các ô bảng giá/SKU của luồng phụ có cơ chế lưu tạm trong cùng tab. Lời nhắc **Tiếp tục phần đang nhập** chỉ áp dụng phần này, không khôi phục tệp hoặc toàn bộ đợt thư mục, và không phải bản làm việc dùng chung giữa nhân viên.
 - **Rời phần có thay đổi:** chọn **Ở lại** để tiếp tục hoặc hành động bỏ thay đổi được nêu rõ. Bỏ phần chưa lưu không xóa bản đã lưu. Chọn một đợt thư mục khác sẽ bắt đầu lại phần đối chiếu của đợt đó.

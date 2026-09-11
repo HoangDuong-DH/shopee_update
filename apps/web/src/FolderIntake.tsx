@@ -11,7 +11,13 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { ListingDraft, WorkbookImport, WordImport } from '@shopee/domain';
+import type {
+  InputBatchRecord,
+  InputBatchState,
+  ListingDraft,
+  WorkbookImport,
+  WordImport,
+} from '@shopee/domain';
 import { api, media, money, type ImportRecord } from './api.js';
 import type { EditorSeed } from './Editor.js';
 import {
@@ -22,6 +28,11 @@ import {
   type FolderSourceRules,
   type UploadedFolderFile,
 } from './folder-source.js';
+import {
+  createInputBatchSaver,
+  verifyReselectedFiles,
+  type BatchSaveStatus,
+} from './input-batch-client.js';
 import './folder-intake.css';
 
 export type FolderManualContext = {
@@ -63,6 +74,10 @@ export function FolderIntake({
   onBusy,
   externalBusy = false,
   active = true,
+  initialBatch,
+  initialPriceImportId,
+  onBatchSaved,
+  onOpenLibrary,
 }: {
   imports: ImportRecord[];
   products: ListingDraft[];
@@ -80,30 +95,71 @@ export function FolderIntake({
   onBusy?: (busy: boolean) => void;
   externalBusy?: boolean;
   active?: boolean;
+  initialBatch?: InputBatchRecord & { imports: ImportRecord[] };
+  initialPriceImportId?: string;
+  onBatchSaved?: (record: InputBatchRecord) => void;
+  onOpenLibrary?: () => void;
 }) {
+  const initial = initialBatch?.state;
+  const [batchId] = useState(() => initialBatch?.id ?? crypto.randomUUID());
+  const [batchName, setBatchName] = useState(initial?.name ?? 'Đợt listing mới');
   const [chosenFiles, setChosenFiles] = useState<File[]>([]);
-  const [mode, setMode] = useState<FolderMode>('single_listing');
-  const [uploaded, setUploaded] = useState<UploadedFolderFile[]>([]);
-  const [setupCollapsed, setSetupCollapsed] = useState(false);
-  const [sourceId, setSourceId] = useState(''),
-    [sheet, setSheet] = useState(''),
-    [profileChoice, setProfileChoice] = useState('');
+  const [descriptors, setDescriptors] = useState<InputBatchState['files']>(initial?.files ?? []);
+  const [productKeys, setProductKeys] = useState<Record<string, string>>(
+    initial?.productKeys ?? {},
+  );
+  const [mode, setMode] = useState<FolderMode>(initial?.mode ?? 'single_listing');
+  const [uploaded, setUploaded] = useState<UploadedFolderFile[]>(() =>
+    (initial?.files ?? []).map((file) => ({
+      relativePath: file.relativePath,
+      sha256: file.sha256,
+      record: initialBatch?.imports.find((record) => record.id === file.importId) ?? null,
+      ...(file.error ? { error: file.error } : {}),
+    })),
+  );
+  const [setupCollapsed, setSetupCollapsed] = useState(!!initial?.files.length);
+  const [sourceId, setSourceId] = useState(
+      initial?.priceSelection?.importId ?? initialPriceImportId ?? '',
+    ),
+    [sheet, setSheet] = useState(initial?.priceSelection?.sheet ?? ''),
+    [profileChoice, setProfileChoice] = useState(
+      initial?.priceSelection ? JSON.stringify(initial.priceSelection.priceProfile) : '',
+    );
   const [catalog, setCatalog] = useState<WorkbookImport | null>(null),
     [sourceLoading, setSourceLoading] = useState(false);
-  const [localSources, setLocalSources] = useState<ImportRecord[]>([]);
+  const [localSources, setLocalSources] = useState<ImportRecord[]>(initialBatch?.imports ?? []);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const [progress, setProgress] = useState<FolderReadProgress | null>(null);
   const [selectedFolder, setSelectedFolder] = useState('');
   const [panel, setPanel] = useState<'images' | 'word' | 'sku'>('images');
-  const [visual, setVisual] = useState<Record<string, VisualMedia>>({});
+  const [visual, setVisual] = useState<Record<string, VisualMedia>>(() =>
+    Object.fromEntries(
+      Object.entries(initial?.visual ?? {}).map(([key, value]) => [
+        key,
+        { ...value, convention: 'explicit_selection' },
+      ]),
+    ),
+  );
   const [selectedImages, setSelectedImages] = useState<Record<string, string[]>>({});
-  const [wordPaths, setWordPaths] = useState<Record<string, string>>({});
-  const [wordConfirmed, setWordConfirmed] = useState(false);
-  const [titleHeader, setTitleHeader] = useState('TIÊU ĐỀ'),
-    [descriptionHeader, setDescriptionHeader] = useState('BÀI MÔ TẢ ĐĂNG BÁN');
-  const [headlineMode, setHeadlineMode] = useState<'first_line' | 'none'>('first_line');
-  const [paragraphSeparator, setParagraphSeparator] = useState<'\n' | '\n\n'>('\n\n');
+  const [wordPaths, setWordPaths] = useState<Record<string, string>>(initial?.wordPaths ?? {});
+  const [wordConfirmed, setWordConfirmed] = useState(!!initial?.wordRule);
+  const [titleHeader, setTitleHeader] = useState(initial?.wordRule?.titleHeader ?? 'TIÊU ĐỀ'),
+    [descriptionHeader, setDescriptionHeader] = useState(
+      initial?.wordRule?.descriptionHeader ?? 'BÀI MÔ TẢ ĐĂNG BÁN',
+    );
+  const [headlineMode, setHeadlineMode] = useState<'first_line' | 'none'>(
+    initial?.wordRule?.headline ?? 'first_line',
+  );
+  const [paragraphSeparator, setParagraphSeparator] = useState<'\n' | '\n\n'>(
+    initial?.wordRule?.paragraphSeparator ?? '\n\n',
+  );
+  const [saveStatus, setSaveStatus] = useState<BatchSaveStatus>('saved');
+  const [saveError, setSaveError] = useState('');
+  const [hasSaved, setHasSaved] = useState(!!initialBatch);
+  const saver = useRef<ReturnType<typeof createInputBatchSaver> | null>(null);
+  const callbacks = useRef({ onBatchSaved });
+  callbacks.current = { onBatchSaved };
   const [assemblyState, setAssemblyState] = useState<{ context: string; values: FolderAssembly[] }>(
     { context: '', values: [] },
   );
@@ -113,19 +169,7 @@ export function FolderIntake({
     assemblyGeneration = useRef(0),
     mounted = useRef(true);
   const locked = busy || externalBusy;
-  const grouped = useMemo(
-    () =>
-      groupDirectoryFiles(
-        chosenFiles.map((file) => ({
-          name: file.name,
-          relativePath: file.webkitRelativePath || file.name,
-          size: file.size,
-          type: file.type,
-        })),
-        mode,
-      ),
-    [chosenFiles, mode],
-  );
+  const grouped = useMemo(() => groupDirectoryFiles(descriptors, mode), [descriptors, mode]);
   const workbooks = useMemo(
     () =>
       Array.from(
@@ -210,6 +254,7 @@ export function FolderIntake({
     ]),
     groups: grouped.bundles.map((item) => item.key),
     rules: effectiveRules,
+    productKeys,
   });
   const assemblies = assemblyState.context === context ? assemblyState.values : [];
   const selectedAssembly = assemblies.find((item) => item.key === group?.key);
@@ -223,6 +268,48 @@ export function FolderIntake({
     groupWords.find((item) => item.relativePath === selectedWordPath) ??
     (groupWords.length === 1 ? groupWords[0] : undefined);
   const wordBody = visibleWord?.record.body as WordImport | undefined;
+  const pendingImportIds = [
+    ...new Set(
+      uploaded
+        .filter(
+          (item) =>
+            item.record &&
+            item.record.status !== 'failed' &&
+            (item.record.status !== 'ready' || item.record.body === undefined),
+        )
+        .map((item) => item.record!.id),
+    ),
+  ];
+  const pendingImportKey = JSON.stringify(pendingImportIds);
+  const persistenceState: InputBatchState = {
+    version: 1,
+    name: batchName,
+    mode,
+    files: descriptors,
+    priceSelection:
+      sourceId && sheet && profileChoice !== ''
+        ? { importId: sourceId, sheet, priceProfile: JSON.parse(profileChoice) as string | null }
+        : null,
+    visual: Object.fromEntries(
+      Object.entries(visual).map(([key, value]) => [
+        key,
+        {
+          ...(value.coverPath ? { coverPath: value.coverPath } : {}),
+          galleryPaths: value.galleryPaths,
+          descriptionPaths: value.descriptionPaths,
+        },
+      ]),
+    ),
+    wordPaths,
+    wordRule: wordConfirmed
+      ? { titleHeader, descriptionHeader, headline: headlineMode, paragraphSeparator }
+      : null,
+    productKeys,
+  };
+  const persistenceKey = JSON.stringify(persistenceState);
+  const wordRuleIncomplete = wordConfirmed && (!titleHeader.trim() || !descriptionHeader.trim());
+  const unsaved =
+    saveStatus !== 'saved' || (!!descriptors.length && !hasSaved) || wordRuleIncomplete;
 
   useEffect(() => {
     mounted.current = true;
@@ -231,8 +318,84 @@ export function FolderIntake({
     };
   }, []);
   useEffect(() => {
-    if (active) onDirty?.(chosenFiles.length > 0);
-  }, [active, chosenFiles.length, onDirty]);
+    saver.current = createInputBatchSaver({
+      id: batchId,
+      initial: initialBatch,
+      onStatus: (status, cause) => {
+        setSaveStatus(status);
+        setSaveError(
+          status === 'conflict'
+            ? 'Bộ đầu vào đã có thay đổi ở nơi khác. Phần đang chọn được giữ trên màn hình; mở bản mới nhất để đối chiếu.'
+            : cause instanceof Error
+              ? cause.message
+              : status === 'error'
+                ? 'Chưa lưu được bộ đầu vào. Phần đang chọn vẫn được giữ để thử lại.'
+                : '',
+        );
+      },
+      onSaved: (record) => {
+        setHasSaved(true);
+        callbacks.current.onBatchSaved?.(record);
+      },
+    });
+    return () => saver.current?.dispose();
+  }, [batchId]);
+  useEffect(() => {
+    if (
+      (uploaded.length || initialBatch) &&
+      !wordRuleIncomplete &&
+      grouped.issues.length === 0 &&
+      grouped.bundles.every((item) => productKeys[item.key])
+    ) {
+      saver.current?.schedule(persistenceState);
+    }
+  }, [persistenceKey, uploaded.length]);
+  useEffect(() => {
+    onDirty?.(unsaved);
+  }, [unsaved, onDirty]);
+  useEffect(() => {
+    onBusy?.(busy || saveStatus === 'saving');
+  }, [busy, saveStatus, onBusy]);
+  useEffect(() => {
+    if (!active || busy || !pendingImportIds.length) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    let cursor = 0;
+    async function checkReceived() {
+      const ids = Array.from(
+        { length: Math.min(4, pendingImportIds.length) },
+        () => pendingImportIds[cursor++ % pendingImportIds.length],
+      );
+      const results = await Promise.allSettled(
+        ids.map((id) =>
+          api<ImportRecord>('/v1/imports/' + encodeURIComponent(id), { signal: controller.signal }),
+        ),
+      );
+      if (controller.signal.aborted) return;
+      const records = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      setUploaded((all) =>
+        all.map((item) => {
+          const record = records.find((value) => value.id === item.record?.id);
+          if (
+            !record ||
+            record.sha256 !== item.record?.sha256 ||
+            record.bytes !== item.record?.bytes ||
+            record.kind !== item.record?.kind
+          )
+            return item;
+          return { ...item, record };
+        }),
+      );
+      timer = setTimeout(() => void checkReceived(), 2000);
+    }
+    timer = setTimeout(() => void checkReceived(), 1000);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [active, busy, pendingImportKey]);
   useEffect(() => {
     const generation = ++sourceGeneration.current;
     if (!sourceId) {
@@ -288,6 +451,7 @@ export function FolderIntake({
           files: uploaded,
           priceSource: { importId: sourceId, sheet, priceProfile: profile, rows: catalog.rows },
           rules: effectiveRules[item.key],
+          productKey: productKeys[item.key],
         }),
       ),
     )
@@ -317,7 +481,6 @@ export function FolderIntake({
     if (!files.length || locked || pipelineGuard.current) return;
     pipelineGuard.current = true;
     setBusy(true);
-    onBusy?.(true);
     setError('');
     setProgress({ completed: 0, total: files.length });
     try {
@@ -340,6 +503,22 @@ export function FolderIntake({
         setCatalog(null);
       } else {
         setUploaded(result);
+        setDescriptors((all) =>
+          all.map((file) => {
+            const received = result.find((item) => item.relativePath === file.relativePath);
+            if (!received) return file;
+            return {
+              relativePath: file.relativePath,
+              name: file.name,
+              size: file.size,
+              ...(received.record ? { importId: received.record.id } : {}),
+              ...(received.sha256 || received.record?.sha256
+                ? { sha256: received.sha256 ?? received.record!.sha256 }
+                : {}),
+              ...(received.error ? { error: received.error } : {}),
+            };
+          }),
+        );
         setSetupCollapsed(true);
       }
     } catch (cause) {
@@ -355,12 +534,46 @@ export function FolderIntake({
         setBusy(false);
         setProgress(null);
       }
-      onBusy?.(false);
     }
   }
-  function stage(files: FileList | null) {
-    if (!files?.length || locked) return;
-    setChosenFiles(Array.from(files));
+  async function stage(files: FileList | null) {
+    if (!files?.length || locked || pipelineGuard.current) return;
+    const selected = Array.from(files);
+    if (hasSaved || uploaded.length) {
+      pipelineGuard.current = true;
+      setBusy(true);
+      try {
+        if (!(await verifyReselectedFiles(descriptors, selected))) {
+          setError(
+            'Thư mục này khác bộ đầu vào đang mở. Chọn lại đúng thư mục gốc để đọc tiếp; vào Kho đầu vào để nhận một bộ mới.',
+          );
+          return;
+        }
+        setChosenFiles(selected);
+        setSetupCollapsed(false);
+        setError('');
+      } catch {
+        setError('Chưa đối chiếu được tệp đã chọn với bản gốc. Chọn lại đúng thư mục và thử lại.');
+      } finally {
+        pipelineGuard.current = false;
+        setBusy(false);
+      }
+      return;
+    }
+    const nextDescriptors = selected.map((file) => ({
+      name: file.name,
+      relativePath: file.webkitRelativePath || file.name,
+      size: file.size,
+    }));
+    const nextGroups = groupDirectoryFiles(nextDescriptors, mode);
+    setChosenFiles(selected);
+    setDescriptors(nextDescriptors);
+    setProductKeys(
+      Object.fromEntries(
+        nextGroups.bundles.map((item) => [item.key, `input-${crypto.randomUUID()}`]),
+      ),
+    );
+    setBatchName(selected[0]?.webkitRelativePath.split('/')[0] || 'Đợt listing mới');
     setSetupCollapsed(false);
     setUploaded([]);
     setAssemblyState({ context: '', values: [] });
@@ -371,8 +584,16 @@ export function FolderIntake({
     setError('');
   }
   function changeMode(next: FolderMode) {
-    if (locked) return;
+    if (locked || uploaded.length || hasSaved) return;
     setMode(next);
+    setProductKeys(
+      Object.fromEntries(
+        groupDirectoryFiles(descriptors, next).bundles.map((item) => [
+          item.key,
+          `input-${crypto.randomUUID()}`,
+        ]),
+      ),
+    );
     setSelectedFolder('');
     setVisual({});
     setSelectedImages({});
@@ -437,7 +658,7 @@ export function FolderIntake({
     });
   }
   function manual() {
-    if (!selectedAssembly || !priceReady || profile === undefined || locked) return;
+    if (!selectedAssembly || !priceReady || profile === undefined || locked || unsaved) return;
     const candidates = selectedAssembly.candidates;
     onManual({
       productKey: selectedAssembly.productKey,
@@ -468,7 +689,7 @@ export function FolderIntake({
     });
   }
   function continueAssembly(assembly: FolderAssembly) {
-    if (locked) return;
+    if (locked || unsaved) return;
     const existing = products.find((product) => product.productKey === assembly.productKey);
     if (existing) {
       onOpenExisting(existing);
@@ -486,6 +707,15 @@ export function FolderIntake({
 
   return (
     <div className="folder-intake">
+      {onOpenLibrary && (
+        <button
+          className="folder-library-back"
+          disabled={locked || saveStatus === 'saving'}
+          onClick={onOpenLibrary}
+        >
+          ← Kho đầu vào
+        </button>
+      )}
       <div className="page-heading">
         <div>
           <p className="eyebrow">BỘ LISTING ĐÃ CHUẨN BỊ</p>
@@ -494,14 +724,45 @@ export function FolderIntake({
             Mỗi thư mục là một listing, gồm Word và ảnh của bộ đó. Bảng giá dùng chung cho cả đợt.
           </p>
         </div>
-        <button disabled={locked} onClick={() => onManual()}>
+        <button
+          disabled={locked || unsaved}
+          onClick={() => {
+            if (!locked && !unsaved) onManual();
+          }}
+        >
           Nhập thủ công khi cần
         </button>
       </div>
       <div className="folder-scope">
         <Check size={17} aria-hidden="true" />
-        <span>Đọc nguồn và xem trước · Chưa lưu listing · Chưa gửi lên Shopee</span>
+        <span>Bộ đầu vào được lưu riêng để làm tiếp · Chưa gửi lên Shopee</span>
       </div>
+      {(uploaded.length > 0 || hasSaved) && (
+        <div className={`folder-save-status ${saveStatus}`}>
+          <p role="status">
+            {saveStatus === 'saving'
+              ? 'Đang lưu bộ đầu vào…'
+              : saveStatus === 'saved' && hasSaved && !unsaved
+                ? 'Đã lưu vào Kho đầu vào'
+                : 'Có thay đổi chưa lưu'}
+          </p>
+          {saveError && (
+            <div role="alert">
+              <p>{saveError}</p>
+              {saveStatus === 'error' && (
+                <button disabled={locked} onClick={() => saver.current?.retry()}>
+                  Thử lưu lại
+                </button>
+              )}
+              {saveStatus === 'conflict' && onOpenLibrary && (
+                <button disabled={locked} onClick={onOpenLibrary}>
+                  Mở bản đã lưu
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {error && (
         <div className="error banner" role="alert">
           {error}
@@ -513,7 +774,7 @@ export function FolderIntake({
             <FolderOpen size={24} aria-hidden="true" />
             <div>
               <strong>
-                {grouped.bundles.length} thư mục · {chosenFiles.length} tệp
+                {grouped.bundles.length} thư mục · {descriptors.length} tệp
               </strong>
               <p>
                 {workbooks.find((item) => item.id === sourceId)?.filename ?? 'Chưa chọn bảng giá'} ·{' '}
@@ -532,9 +793,12 @@ export function FolderIntake({
               aria-expanded={!setupCollapsed}
               onClick={() => setSetupCollapsed((value) => !value)}
             >
-              {setupCollapsed ? 'Đổi thư mục hoặc bảng giá' : 'Thu gọn phần chọn nguồn'}
+              {setupCollapsed ? 'Bảng giá & tệp nguồn' : 'Thu gọn phần chọn nguồn'}
             </button>
-            <button disabled={locked} onClick={() => void readFiles(chosenFiles)}>
+            <button
+              disabled={locked || !chosenFiles.length}
+              onClick={() => void readFiles(chosenFiles)}
+            >
               {busy ? 'Đang đọc lại…' : 'Đọc lại tệp'}
             </button>
           </div>
@@ -546,8 +810,8 @@ export function FolderIntake({
           )}
           {setupCollapsed && !priceReady && (
             <p className="folder-compact-progress">
-              Cần chọn bảng giá, sheet và bộ giá trước khi hoàn thiện SKU. Mở “Đổi thư mục hoặc bảng
-              giá” để bổ sung.
+              Cần chọn bảng giá, sheet và bộ giá trước khi hoàn thiện SKU. Mở “Bảng giá & tệp nguồn”
+              để bổ sung.
             </p>
           )}
           {setupCollapsed && grouped.issues.length > 0 && (
@@ -649,8 +913,8 @@ export function FolderIntake({
             <FolderOpen size={34} aria-hidden="true" />
             <div>
               <h2>
-                {chosenFiles.length
-                  ? `${grouped.bundles.length} thư mục · ${chosenFiles.length} tệp đã chọn`
+                {descriptors.length
+                  ? `${grouped.bundles.length} thư mục · ${descriptors.length} tệp đã chọn`
                   : 'Chọn thư mục listing của bạn'}
               </h2>
               <p>
@@ -660,7 +924,11 @@ export function FolderIntake({
             </div>
             <label className={`upload-button${locked ? ' disabled' : ''}`}>
               <FolderOpen size={17} aria-hidden="true" />{' '}
-              {chosenFiles.length ? 'Chọn thư mục khác' : 'Chọn thư mục'}
+              {hasSaved || uploaded.length
+                ? 'Chọn lại thư mục gốc'
+                : descriptors.length
+                  ? 'Chọn thư mục khác'
+                  : 'Chọn thư mục'}
               <input
                 type="file"
                 multiple
@@ -668,7 +936,7 @@ export function FolderIntake({
                 aria-label="Chọn thư mục listing"
                 disabled={locked}
                 onChange={(event) => {
-                  stage(event.currentTarget.files);
+                  void stage(event.currentTarget.files);
                   event.currentTarget.value = '';
                 }}
               />
@@ -680,7 +948,7 @@ export function FolderIntake({
                 type="radio"
                 name="folder-mode"
                 checked={mode === 'single_listing'}
-                disabled={locked}
+                disabled={locked || uploaded.length > 0 || hasSaved}
                 onChange={() => changeMode('single_listing')}
               />{' '}
               Thư mục này là một listing
@@ -690,19 +958,25 @@ export function FolderIntake({
                 type="radio"
                 name="folder-mode"
                 checked={mode === 'parent_with_listing_folders'}
-                disabled={locked}
+                disabled={locked || uploaded.length > 0 || hasSaved}
                 onChange={() => changeMode('parent_with_listing_folders')}
               />{' '}
               Mỗi thư mục con là một listing
             </label>
           </div>
+          {hasSaved && !chosenFiles.length && (
+            <p className="caption">
+              Các tệp đã nhận và cách chọn ảnh được khôi phục từ Kho đầu vào. Chỉ cần chọn lại thư
+              mục gốc nếu muốn đọc tiếp tệp chưa nhận được.
+            </p>
+          )}
           <div className="folder-read-row">
             <p className="caption">
               Tệp được giữ nguyên. Sau khi đọc, chọn ảnh theo hình và đối chiếu những phần chưa rõ.
             </p>
             <button
               className="primary"
-              disabled={locked || !grouped.bundles.length}
+              disabled={locked || !grouped.bundles.length || !chosenFiles.length}
               onClick={() => void readFiles(chosenFiles)}
             >
               {busy ? 'Đang đọc tệp…' : 'Đọc các thư mục'}{' '}
@@ -711,7 +985,7 @@ export function FolderIntake({
           </div>
           {progress && (
             <p role="status">
-              Đã đọc {progress.completed}/{progress.total} tệp
+              Đã xử lý {progress.completed}/{progress.total} tệp
               {progress.filename ? ` · ${progress.filename}` : ''}
             </p>
           )}
@@ -735,7 +1009,12 @@ export function FolderIntake({
                   existing =
                     assembly &&
                     products.find((product) => product.productKey === assembly.productKey);
-                const readCount = uploaded.filter((value) =>
+                const readCount = uploaded.filter(
+                  (value) =>
+                    value.record?.status === 'ready' &&
+                    item.files.some((file) => file.relativePath === value.relativePath),
+                ).length;
+                const attemptedCount = uploaded.filter((value) =>
                   item.files.some((file) => file.relativePath === value.relativePath),
                 ).length;
                 return (
@@ -769,18 +1048,23 @@ export function FolderIntake({
                       <span className={`tag ${assembly?.seed || existing ? 'neutral' : 'warning'}`}>
                         {existing
                           ? 'Bộ này đã lưu'
-                          : !readCount
-                            ? 'Chờ đọc tệp'
-                            : !priceReady
-                              ? 'Chọn bảng giá chung'
-                              : assembling
-                                ? 'Đang đối chiếu'
-                                : assembly?.seed
-                                  ? 'Có thể xem bản nháp'
-                                  : 'Cần bạn đối chiếu'}
+                          : attemptedCount > readCount
+                            ? `${attemptedCount - readCount} tệp cần kiểm tra`
+                            : !readCount
+                              ? 'Chờ đọc tệp'
+                              : !priceReady
+                                ? 'Chọn bảng giá chung'
+                                : assembling
+                                  ? 'Đang đối chiếu'
+                                  : assembly?.seed
+                                    ? 'Có thể xem bản nháp'
+                                    : 'Cần bạn đối chiếu'}
                       </span>
                       {assembly && (assembly.seed || existing) ? (
-                        <button disabled={locked} onClick={() => continueAssembly(assembly)}>
+                        <button
+                          disabled={locked || unsaved}
+                          onClick={() => continueAssembly(assembly)}
+                        >
                           {existing ? 'Mở bộ đã lưu' : 'Xem & hoàn thiện'}{' '}
                           <ArrowRight size={15} aria-hidden="true" />
                         </button>
@@ -1001,9 +1285,15 @@ export function FolderIntake({
                           <select
                             disabled={locked}
                             value={selectedWordPath ?? ''}
-                            onChange={(event) =>
-                              setWordPaths((all) => ({ ...all, [group.key]: event.target.value }))
-                            }
+                            onChange={(event) => {
+                              const path = event.target.value;
+                              setWordPaths((all) => {
+                                const next = { ...all };
+                                if (path) next[group.key] = path;
+                                else delete next[group.key];
+                                return next;
+                              });
+                            }}
                           >
                             <option value="">Chọn đúng tệp nội dung</option>
                             {groupWords.map((item) => (
@@ -1041,6 +1331,11 @@ export function FolderIntake({
                           />{' '}
                           Dùng cấu trúc Word này cho cả đợt
                         </label>
+                        {wordRuleIncomplete && (
+                          <p className="folder-exceptions">
+                            Điền đủ dòng đánh dấu tiêu đề và nội dung để lưu cách đọc Word.
+                          </p>
+                        )}
                         <div className="folder-rule-fields">
                           <label>
                             Dòng đánh dấu tiêu đề
@@ -1171,7 +1466,7 @@ export function FolderIntake({
                     {selectedAssembly && (selectedAssembly.seed || selectedExisting) ? (
                       <button
                         className="primary"
-                        disabled={locked || assembling}
+                        disabled={locked || assembling || unsaved}
                         onClick={() => continueAssembly(selectedAssembly)}
                       >
                         {products.some(
@@ -1192,7 +1487,9 @@ export function FolderIntake({
                         </p>
                         <button
                           className="primary"
-                          disabled={locked || assembling || !selectedAssembly || !priceReady}
+                          disabled={
+                            locked || assembling || unsaved || !selectedAssembly || !priceReady
+                          }
                           onClick={manual}
                         >
                           Bổ sung SKU/phân loại <ArrowRight size={16} />

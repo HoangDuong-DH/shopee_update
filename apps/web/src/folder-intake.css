@@ -1,6 +1,37 @@
 .folder-intake {
   min-width: 0;
 }
+.folder-library-back {
+  margin: 0 0 18px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: #58685d;
+}
+.folder-save-status {
+  padding: 11px 16px;
+  margin: 0 0 18px;
+  border: 1px solid #dde5df;
+  border-radius: 10px;
+  background: #f5f8f5;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.folder-save-status p {
+  margin: 0;
+  line-height: 1.6;
+}
+.folder-save-status.error,
+.folder-save-status.conflict {
+  background: #fff8ed;
+  border-color: #ebd9b8;
+}
+.folder-save-status [role='alert'] {
+  margin-top: 6px;
+}
+.folder-save-status [role='alert'] button {
+  margin-top: 10px;
+}
 .folder-setup-controls[hidden] {
   display: none !important;
 }

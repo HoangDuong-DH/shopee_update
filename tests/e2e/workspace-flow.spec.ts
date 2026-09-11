@@ -36,11 +36,25 @@ test('keeps the price catalog read-only instead of assembling arbitrary SKU grou
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Tệp đã nhập', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Tra bảng giá', exact: true }).click();
-  const workbook = page.getByRole('combobox', { name: 'File bảng giá', exact: true });
-  await workbook.selectOption({ label: 'FILE KINI (MẸ & BÉ, BCS).xlsx' });
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
+  await expect(page.getByRole('tab', { name: 'Bộ listing', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Bộ listing đã tiếp nhận', exact: true }),
+  ).toContainText('Khẩu trang 5D Lamy');
+  await page.screenshot({ path: '.local/e2e-artifacts/input-library-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '.local/e2e-artifacts/input-library-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.getByRole('tab', { name: /^Bảng giá chung/ }).click();
+  await page
+    .getByTestId('price-book-row')
+    .filter({ hasText: 'FILE KINI (MẸ & BÉ, BCS).xlsx' })
+    .getByRole('button', { name: 'Tra giá', exact: true })
+    .click();
   await page.getByLabel('Tìm SKU', { exact: true }).fill('LMKT5DT100');
   await expect(page.getByRole('cell', { name: /LMKT5DT100/ }).first()).toBeVisible();
   await expect(page.getByRole('checkbox')).toHaveCount(0);
@@ -83,16 +97,22 @@ test('preserves unfinished import when staying and discards only after explicit 
     .getAttribute('value');
   expect(sourceId).toBeTruthy();
   await workbook.selectOption(sourceId!);
-  await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
   const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Ở lại', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(workbook).toHaveValue(sourceId!);
-  await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Bỏ thay đổi và rời đi', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Tệp nguồn', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Kho đầu vào', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Nhập listing có sẵn', exact: true })).toHaveCount(
     0,
   );
@@ -297,7 +317,10 @@ test('fixture: keeps the listing screen stable while a plan save is pending', as
     await page.getByRole('button', { name: 'Lưu bản kiểm tra theo shop', exact: true }).click();
     await requestStarted;
     await expect(page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click({ force: true });
+    await page
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Kiểm tra listing', exact: true }),
     ).toBeVisible();
@@ -309,8 +332,11 @@ test('fixture: keeps the listing screen stable while a plan save is pending', as
       page.getByRole('button', { name: 'Lưu bản kiểm tra theo shop', exact: true }),
     ).toBeEnabled();
     await expect(page.getByRole('alert')).toContainText('Giữ phần đang nhập và thử lại');
-    await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Tệp nguồn', exact: true })).toBeVisible();
+    await page
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Kho đầu vào', exact: true })).toBeVisible();
     expect(interceptedWrites).toEqual(['POST']);
   } finally {
     releaseResponse();
@@ -346,7 +372,10 @@ test('fixture: retains edited content after a failed save and blocks navigation 
     );
     await page.getByRole('button', { name: 'Lưu & xem trước', exact: true }).first().click();
     await requestStarted;
-    await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click({ force: true });
+    await page
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Đối chiếu nguồn listing', exact: true }),
     ).toBeVisible();
@@ -358,7 +387,10 @@ test('fixture: retains edited content after a failed save and blocks navigation 
     await expect(page.getByRole('alert')).toContainText('Giữ phần đang nhập và thử lại');
     await expect(title).toHaveValue('TEST FIXTURE · Nội dung mới chưa gửi');
     await expect(title).toBeEditable();
-    await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Điều hướng chính' })
+      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .click();
     const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Ở lại', exact: true }).click();
@@ -522,7 +554,10 @@ test('discarding an edit to a saved listing keeps a separate unfinished intake r
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
   await page.getByRole('button', { name: 'Điều chỉnh nội dung và ảnh', exact: true }).click();
   await page.getByLabel('Tiêu đề listing', { exact: true }).fill('TEST FIXTURE · Bỏ sửa bộ đã lưu');
-  await page.getByRole('button', { name: 'Tệp nguồn', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .click();
   await page
     .getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true })
     .getByRole('button', { name: 'Bỏ thay đổi và rời đi', exact: true })

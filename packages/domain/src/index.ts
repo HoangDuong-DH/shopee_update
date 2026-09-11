@@ -5,3 +5,4 @@ export * from './source/word.js';
 export * from './source/assets.js';
 export * from './plans.js';
 export * from './draft.js';
+export * from './input-library.js';
