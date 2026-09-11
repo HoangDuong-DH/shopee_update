@@ -50,7 +50,9 @@
       ],
       "evidence": [
         "2026-09-11: listing-first workspace replaces arbitrary catalog SKU grouping; explicit prepared membership intake and read-only source review",
-        "110 unit/integration, 7 legacy and 11 UI E2E passed; live local Lamy preserved; no Shopee writes"
+        "110 unit/integration, 7 legacy and 11 UI E2E passed; live local Lamy preserved; no Shopee writes",
+        "2026-09-11 nontech follow-up: three-step intake with exact SKU table and explicit recovery, role-based thumbnail picker, explicit Word paragraph assignment, per-file retry, actionable source checklist and in-app staff guide",
+        "125 unit/integration, 7 legacy and 22 browser E2E passed (12 real local read-only scenarios; 10 browser fixtures). Lamy source revision 1 and 6/8/9 SKU/gallery/description counts preserved. Delivery: docs/delivery/2026-09-11-nontech-frontend.md"
       ]
     },
     {

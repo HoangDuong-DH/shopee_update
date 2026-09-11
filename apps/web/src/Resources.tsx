@@ -5,17 +5,16 @@ import { Issues } from './Preview.js';
 
 export function Resources({
   imports,
-  refresh,
-  onUploading,
+  uploadFiles,
+  uploading,
   initialTab = 'files',
 }: {
   imports: ImportRecord[];
-  refresh: () => Promise<void>;
-  onUploading?: (busy: boolean) => void;
+  uploadFiles: (files: FileList | null) => Promise<void>;
+  uploading: boolean;
   initialTab?: 'files' | 'prices';
 }) {
   const [tab, setTab] = useState(initialTab),
-    [uploading, setUploading] = useState(''),
     [error, setError] = useState(''),
     [sourceId, setSourceId] = useState(''),
     [catalog, setCatalog] = useState<WorkbookImport | null>(null),
@@ -47,35 +46,6 @@ export function Resources({
       if (generation === request.current) setReading(false);
     }
   }
-  async function upload(files: FileList | null) {
-    if (!files) return;
-    const chosen = Array.from(files);
-    let completed = 0;
-    onUploading?.(true);
-    setError('');
-    try {
-      for (const [i, file] of chosen.entries()) {
-        setUploading(`${i + 1}/${chosen.length} · ${file.name}`);
-        await api('/v1/imports', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'X-File-Name': encodeURIComponent(file.name),
-          },
-          body: file,
-        });
-        completed++;
-      }
-    } catch (e) {
-      setError(
-        `Đã lưu ${completed}/${chosen.length} tệp. Dừng tại ${chosen[completed]?.name ?? 'tệp đang tải'}: ${(e as Error).message}. Chọn lại ${chosen.length - completed} tệp còn lại để tiếp tục.`,
-      );
-    } finally {
-      setUploading('');
-      onUploading?.(false);
-      await refresh();
-    }
-  }
   const visible = (catalog?.rows ?? []).filter(
     (r) =>
       (!sheet || r.sheet === sheet) &&
@@ -99,7 +69,7 @@ export function Resources({
             accept=".xlsx,.docx,.png,.jpg,.jpeg,.webp"
             disabled={!!uploading}
             onChange={(e) => {
-              void upload(e.target.files);
+              void uploadFiles(e.target.files);
               e.target.value = '';
             }}
           />
@@ -113,7 +83,6 @@ export function Resources({
           Tra bảng giá
         </button>
       </div>
-      {uploading && <p role="status">Đang lưu {uploading}</p>}
       {error && (
         <p className="banner error" role="alert">
           {error}
@@ -146,7 +115,12 @@ export function Resources({
                             : 'Bảng Excel'}{' '}
                         · {(i.bytes / 1024 / 1024).toFixed(2)} MB
                       </small>
-                      {i.message && <small className="error">{i.message}</small>}
+                      {i.message && (
+                        <details>
+                          <summary>Thông tin để kiểm tra tệp</summary>
+                          <small>{i.message}</small>
+                        </details>
+                      )}
                     </td>
                     <td>
                       <span

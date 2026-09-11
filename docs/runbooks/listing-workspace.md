@@ -1,33 +1,95 @@
-# Sử dụng không gian listing nội bộ
+# Hướng dẫn dùng ứng dụng listing nội bộ
 
-Giao diện cập nhật ngày 11/09/2026 theo yêu cầu tiếp nhận listing đã chuẩn bị. Địa chỉ tại máy: http://127.0.0.1:5173/. Bản hiện tại hỗ trợ nhập và đối chiếu nguồn; bước gửi/cập nhật Shopee chưa mở.
+Cập nhật ngày **11/09/2026**. Mở http://127.0.0.1:5173/ trên máy đang chạy ứng dụng. Nút **Hướng dẫn** trong ứng dụng cũng mở các bước sử dụng cơ bản.
 
-## Với bộ Lamy đã nhập
+Ứng dụng tiếp nhận bộ listing công ty đã chuẩn bị: danh sách SKU, tên phân loại, nội dung và ảnh. Bản hiện tại giúp nhập, đối chiếu và lưu bản nháp nội bộ; **chưa bật đăng/cập nhật Shopee**.
 
-1. Mở **Listing của tôi**, bấm tên bộ Lamy.
-2. Xem ảnh bìa, ảnh sản phẩm, bảng sáu SKU cùng GIÁ GỐC và giá bán mục tiêu. Phần mô tả giữ chín ảnh đã chọn.
-3. Bấm **Đối chiếu nguồn** để xem nội dung và phân loại. Mặc định chỉ đọc. Tab **Bộ ảnh** cho xem vai trò và thứ tự ảnh.
-4. Nếu có thay đổi nội dung/ảnh cụ thể, bấm **Điều chỉnh nội dung và ảnh**, sửa đúng phần rồi **Lưu & xem trước**. Lưu tạo phiên bản nội bộ, không thay listing trên Shopee. Danh sách SKU và cấu trúc phân loại vẫn bị khóa.
-5. Chọn **Shop đích** tại màn kiểm tra chỉ khi cần lưu bản kiểm tra theo shop. Đây là ngữ cảnh cho đăng mới, chưa phải lệnh đăng. Cập nhật link đang có cần luồng định danh item/model riêng chưa phát hành.
+## Ba nơi làm việc chính
 
-## Với listing mới bên bạn đã chuẩn bị
+| Mục                 | Dùng khi nào                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Listing của tôi** | Mở bộ đã có, hoặc bắt đầu nhập một bộ mới đã chuẩn bị                                                     |
+| **Tệp nguồn**       | Xem Excel, Word, ảnh đã tải; kiểm tra tệp chưa đọc được; tra SKU và giá                                   |
+| **Kết quả**         | Xem các bản kiểm tra theo shop và trạng thái công việc; bản kiểm tra nội bộ chưa phải kết quả đăng Shopee |
 
-1. Trong **Tệp nguồn**, thêm Excel, Word và ảnh gốc. Có thể chọn nhiều tệp. Chờ thông báo đọc xong; nếu upload bị ngắt, ứng dụng chỉ rõ tệp dừng và số tệp còn lại.
-2. Về **Listing của tôi → Nhập listing có sẵn**. Dùng mã bộ ổn định do bên bạn quản lý; không đặt mã khác để nhập lại cùng bộ.
-3. Chọn đúng file giá, sheet và bộ giá. KINI có dòng trùng SKU theo bộ giá; không mặc định mọi dòng cùng tên là cùng listing.
-4. Chọn cấu trúc không phân loại/một nhóm/hai nhóm theo nguồn. Dán bảng gồm SKU và nhãn phân loại nguyên văn từ tài liệu listing, mỗi SKU một dòng, cột cách nhau bằng Tab. Không dán hàng tiêu đề. Ứng dụng không tự tạo tổ hợp hoặc đặt tên phân loại từ tên sản phẩm trong bảng giá.
-5. Bấm **Đối chiếu với bảng giá**. Đọc các dòng khớp và giá nguồn, làm rõ các lỗi, xác nhận danh sách đầy đủ rồi tiếp tục.
-6. Dán nội dung đã chuẩn bị, gán ảnh theo đúng vai trò/thứ tự. Hiện mô tả nhận bố trí câu mở đầu → dòng trống → ảnh mô tả → dòng trống → chữ còn lại. Chỉ chọn bố trí đó khi đúng nguồn. Bố trí khác cần bổ sung cách nhập, không ép dữ liệu vào mẫu này.
-7. **Lưu & xem trước**. Mỗi bộ được lưu độc lập; giá đăng mới từ GIÁ GỐC, GIÁ BÁN chỉ là mục tiêu khuyến mại riêng.
+## Xem bộ Lamy đã nhập
 
-## Khi có lỗi hoặc cần kiểm tra thêm
+1. Vào **Listing của tôi**, bấm tên Lamy.
+2. Xem ảnh bìa, ảnh sản phẩm, bảng sáu SKU, giá đăng mới và giá bán mục tiêu. Mô tả giữ chín ảnh đã chọn trong bộ nguồn.
+3. Bấm **Đối chiếu nguồn**. Ba tab **Nội dung**, **Bộ ảnh**, **SKU & phân loại** giúp xem từng phần. Bản đã lưu mở ở chế độ chỉ xem.
+4. Nếu có yêu cầu sửa nội dung hoặc ảnh cụ thể, bấm **Điều chỉnh nội dung và ảnh**, sửa đúng phần rồi **Lưu & xem trước**. Việc lưu tạo phiên bản nội bộ, chưa sửa listing trên Shopee.
+5. Chỉ chọn **Shop đích** khi cần lưu bản kiểm tra theo shop. Phần này chưa đăng mới hoặc cập nhật link đang có.
 
-- SKU không có/khớp nhiều dòng: kiểm file, sheet, bộ giá và mã nguyên văn. Ứng dụng không chọn đại dòng đầu.
-- Mã bộ đã tồn tại: mở bộ đã lưu; không ghi đè bằng một lần nhập mới. Mã khác vẫn có thể đại diện cùng sản phẩm thực tế, nên đây chưa phải chống trùng link trên sàn.
-- Muốn thay thành phần SKU hoặc đổi cấu trúc bộ đã lưu: baseline hiện chặn. Cần bổ sung luồng thay đổi cấu trúc có đối chiếu riêng; không dùng sửa nội dung để làm việc này.
-- Nguồn/giá thiếu, bố trí khác, ngành/thuộc tính/tồn/vận chuyển chưa kiểm: giữ trạng thái cần xử lý. Không sửa dữ kiện sản phẩm hoặc thay ảnh để vượt kiểm tra.
-- Rời màn hình có dữ liệu chưa lưu: chọn **Ở lại** để tiếp tục hoặc **Bỏ thay đổi và rời đi**. Trong khi gửi yêu cầu lưu/tải tệp, đợi kết quả trước khi đổi màn hình.
-- **Kết quả** tách bản kiểm tra nội bộ và hàng đợi. Một job đang chờ chưa chứng minh đã gửi API hoặc đã QC.
-- Nút quyển sách mở **Tra cứu & kiểm tra**. Kết quả tra kho bản chụp không tự thành chính sách hiện hành hoặc xác nhận quyền shop.
+Danh sách, thứ tự SKU, tên nhóm và nhãn phân loại của bộ đã lưu được khóa. Không dùng sửa nội dung để thêm/bớt SKU hay đổi cấu trúc sản phẩm.
 
-Chưa có đăng hàng loạt, nhập trọn bộ tự động cho mọi cấu trúc, thuộc tính ngành động đầy đủ, cập nhật item/model, tồn thủ công trên UI, QC, Flash Sale hoặc vận hành 24h. Các phần đó thuộc kế hoạch thực thi tiếp theo.
+## Nhập một bộ listing mới đã chuẩn bị
+
+Vào **Listing của tôi → Nhập listing có sẵn**. Màn hình hướng dẫn ba bước, mỗi bước chỉ hiện phần cần làm. Nút **Quay lại** giữa ba bước giữ nguyên các ô đã điền.
+
+### 1. Nguồn giá
+
+Chọn **File bảng giá → Trang tính chứa giá → Bộ giá áp dụng**, rồi bấm **Tiếp tục: phân loại**. Nếu chưa có Excel, bấm **Thêm file Excel** ngay tại đây; không cần rời phần đang nhập. Chờ tệp được đọc xong rồi chọn nó trong danh sách.
+
+Bảng giá chỉ dùng để tìm SKU và giá. SKU xuất hiện trong cùng trang tính không tự chứng minh chúng thuộc cùng listing. Cần chọn đúng bộ giá của bộ nguồn, kể cả khi cùng SKU xuất hiện ở nhiều bộ giá.
+
+**GIÁ GỐC** là giá dùng khi đăng listing mới. **GIÁ BÁN** được giữ làm giá mục tiêu cho bước khuyến mại riêng; thao tác nhập này không tạo chương trình giảm giá.
+
+### 2. Phân loại đã chuẩn bị
+
+Chọn cấu trúc đúng như bộ công ty đã làm:
+
+| Lựa chọn               | Cách điền                                                  |
+| ---------------------- | ---------------------------------------------------------- |
+| **Không có phân loại** | Điền một mã SKU                                            |
+| **Một nhóm**           | Điền tên nhóm và từng dòng SKU/nhãn phân loại              |
+| **Hai nhóm**           | Điền hai tên nhóm và từng dòng SKU/nhãn nhóm 1/nhãn nhóm 2 |
+
+**SKU** là mã hàng trong bảng giá. **Nhãn phân loại** là tên khách mua nhìn thấy. Nhập nguyên văn, kể cả khoảng trắng, và giữ đúng thứ tự trong bộ đã chuẩn bị. Dùng **Thêm dòng SKU** hoặc nút xóa dòng chỉ để đưa vào đúng danh sách của bộ mới này. Ứng dụng không tự tạo thêm tổ hợp, gộp/tách sản phẩm hoặc đặt tên từ bảng giá.
+
+Nếu đã có bảng phân loại trong Excel, mở **Đã có bảng phân loại trong Excel? Dán nhiều dòng**. Sao chép các ô SKU và nhãn, bỏ hàng tiêu đề, rồi bấm **Đưa dữ liệu vào bảng**. Nếu bảng đang có dữ liệu, ứng dụng yêu cầu bấm rõ **Thay bảng bằng dữ liệu đã dán** trước khi thay các dòng. Phần dán chưa áp dụng phải được đưa vào bảng hoặc xóa trước khi tiếp tục.
+
+Bấm **Tiếp tục: kiểm tra**. Lỗi chỉ rõ dòng cần làm rõ: SKU không tìm thấy, trùng SKU, thiếu nhãn hoặc giá nguồn chưa hợp lệ. Nếu đổi từ hai nhóm xuống một nhóm mà còn nhãn nhóm hai, ứng dụng giữ ô đó và yêu cầu xử lý; không âm thầm bỏ nhãn.
+
+### 3. Kiểm tra
+
+Đọc lại danh sách SKU, nhãn, **Giá đăng mới**, **Giá bán mục tiêu** và dòng nguồn. **Xem ô nguồn** giúp kiểm tra vị trí giá trong Excel. Xác nhận đã đủ SKU, đúng tên và thứ tự rồi bấm **Tiếp tục: nội dung & ảnh**.
+
+Ứng dụng tự tạo mã theo dõi, nằm trong phần **Mã theo dõi trong ứng dụng**. Nhân viên không phải nghĩ thêm một mã mới. Mã này không phải SKU hoặc mã sản phẩm Shopee; nó cũng chưa phát hiện hai lần nhập khác nhau là cùng sản phẩm thực tế.
+
+## Đưa nội dung Word và ảnh vào đúng chỗ
+
+### Nội dung
+
+Trong tab **Nội dung**, chọn **Tệp Word để đối chiếu** hoặc **Tải Word từ máy**. Ứng dụng hiện các đoạn theo thứ tự để kiểm tra. Chọn **Từ đoạn / Đến đoạn**, chọn đưa vào tiêu đề, câu mở đầu hoặc phần chữ sau ảnh. Đọc phần **Hiện tại / Sau khi áp dụng**, rồi bấm **Áp dụng** vào đúng trường. Có thể hủy lựa chọn mà không đổi nội dung.
+
+Bạn cũng có thể dán nguyên văn vào từng ô. Ứng dụng giữ khoảng trắng và xuống dòng; không tự viết lại nội dung. Việc đọc Word hiện lấy phần chữ theo đoạn; chưa tự nhập bố cục, ảnh nhúng hoặc lưu vị trí đoạn thành liên kết nguồn cho từng ô.
+
+Chọn **Bố trí mô tả trong bộ nguồn**. Bản hiện tại hỗ trợ câu mở đầu → dòng trống → toàn bộ ảnh mô tả → dòng trống → phần chữ còn lại. Chỉ chọn khi đúng bố trí đã chuẩn bị. Bố trí khác được báo chưa hỗ trợ, không tự ép nguồn vào mẫu này.
+
+### Bộ ảnh và ảnh phân loại
+
+Trong tab **Bộ ảnh**, chọn riêng **Ảnh bìa**, **Ảnh listing** hoặc **Ảnh mô tả**. Mặc định màn hình chỉ hiện các ảnh đã chọn cho vị trí đó. Bấm **Chọn ảnh**, **Đổi ảnh** hoặc **Thêm ảnh** để mở kho, tìm theo tên tệp và chọn đúng ảnh gốc. Có thể **Tải ảnh từ máy** ngay trong kho.
+
+Ảnh được đánh số theo thứ tự đã chọn. Dùng nút lên trước/về sau khi cần chỉnh theo đúng nguồn; nút bỏ ảnh chỉ bỏ liên kết khỏi bản nháp, không xóa tệp gốc. Tải một tệp lên chưa tự gán nó vào listing. Ứng dụng không crop, sinh ảnh hoặc đổi nội dung ảnh.
+
+Trong tab **SKU & phân loại**, kiểm tra nhãn đã khóa và gán ảnh cho từng phân loại bằng hình thu nhỏ/tên tệp. Không đổi danh sách SKU hoặc tên phân loại ở bước này.
+
+Khi đã đối chiếu xong, bấm **Lưu & xem trước**. Nếu chưa lưu được, lý do và nút đưa đến phần cần bổ sung hiện ở đầu màn hình. Lưu thành công là lưu nội bộ; chưa phải đã đăng Shopee.
+
+## Tải tệp lỗi, nhập dở và quay lại
+
+- **Tệp tải lỗi:** bảng tiến độ nêu rõ từng tệp **Đã nhận / Chưa nhận**. Bấm **Thử lại … tệp chưa nhận**; chỉ các tệp lỗi được gửi lại. Tệp độc lập khác vẫn được nhận. Giữ trang mở để ứng dụng còn tệp cần thử lại; sau khi tải lại trang, tệp chưa nhận cần được chọn lại từ máy.
+- **Đang nhận tệp / đang lưu:** đợi kết quả trước khi đổi màn hoặc sang bước tiếp theo. “Đã nhận tệp” chưa có nghĩa worker đã đọc xong tệp.
+- **Nhập dở ba bước đầu:** nếu tải lại trang hoặc mở lại phần nhập trong cùng tab, ứng dụng đề nghị **Tiếp tục phần đang nhập** hoặc **Nhập bộ khác**. Tiếp tục giữ nguồn, bảng SKU/nhãn và mã theo dõi; bước kiểm tra cần chạy lại. Chọn bộ khác xóa phần tạm của bộ trước.
+- **Phạm vi phục hồi:** chỉ lưu tạm các ô nhập của ba bước đầu trong phiên tab trình duyệt. Không phải bản lưu dùng chung giữa nhân viên, không chứa tệp hay token, và không bảo đảm còn sau khi đóng tab. Nội dung/ảnh đang sửa trong editor chưa có phục hồi sau tải lại trang. Nếu trình duyệt không lưu được phần tạm, ứng dụng hiện thông báo để giữ tab mở.
+- **Quay lại từ nội dung/ảnh của bộ mới:** hộp thoại nói rõ phần nội dung/ảnh chưa lưu sẽ bị bỏ. Nếu tiếp tục quay lại, phần nguồn giá/SKU ở ba bước đầu vẫn được giữ để phục hồi.
+- **Rời sang công việc khác:** chọn **Ở lại** để tiếp tục hoặc **Bỏ thay đổi và rời đi**. Bản đã lưu luôn được giữ; bỏ phần nhập bộ mới sẽ xóa phần tạm tương ứng. Sửa rồi bỏ thay đổi của một listing đã lưu không xóa phần nhập dở của bộ khác.
+
+## Những trường hợp cần người vận hành làm rõ
+
+- SKU không có hoặc khớp nhiều dòng: kiểm tra file, trang tính, bộ giá và mã nguyên văn. Ứng dụng không chọn đại dòng đầu.
+- Mã theo dõi đã tồn tại: mở bộ đã lưu; không ghi đè bằng lần nhập mới. Kiểm tra danh sách trước khi nhập lại một sản phẩm vì mã mới không tự chống trùng link trên sàn.
+- Nguồn/giá thiếu, bố trí khác hoặc ngành/thuộc tính/tồn/vận chuyển chưa kiểm: giữ ngoại lệ để bổ sung nguồn hoặc khả năng hỗ trợ. Không đổi dữ kiện sản phẩm, giá hay ảnh chỉ để vượt kiểm tra.
+- **Tra cứu & kiểm tra** dùng kho kiến thức chụp tại máy. Kết quả tìm tài liệu chưa tự chứng minh chính sách hiện hành, quyền shop hoặc QC Shopee.
+
+Chưa có đăng hàng loạt, nhập trọn bộ tự động cho mọi cấu trúc, thuộc tính ngành động đầy đủ, cập nhật item/model, nhập lệnh tồn trên UI, QC, Flash Sale hoặc vận hành 24 giờ. Các phần đó thuộc kế hoạch tiếp theo, không được coi đã hoàn tất vì giao diện đã thay đổi.

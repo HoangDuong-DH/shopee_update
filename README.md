@@ -22,7 +22,8 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 
 - Nhập Excel KINI, Word và ảnh PNG/JPEG/WebP qua HTTP; xử lý bằng worker riêng và lưu tệp theo SHA-256.
 - Ánh xạ theo nhãn của từng khối, hỗ trợ khối cạnh nhau và bộ giá có tiêu đề phân nhóm. Cột mơ hồ được đánh dấu; sheet chưa có mapping được hiển thị rõ.
-- Luồng mới **Listing của tôi → Nhập listing có sẵn → Kiểm tra listing**; Tệp nguồn và Kết quả tách rõ. Dán danh sách SKU/phân loại đúng theo bộ đã chuẩn bị, khớp chính xác file/sheet/bộ giá. Chưa tự nhập trọn bộ Word/ảnh hay suy danh sách SKU từ KINI.
+- Luồng **Listing của tôi → Nhập listing có sẵn** hướng dẫn ba bước Nguồn giá / Phân loại đã chuẩn bị / Kiểm tra. Nhập từng ô SKU/nhãn, dán Excel khi cần, giữ phần nhập dở trong phiên tab với lựa chọn phục hồi rõ. Mã theo dõi tự tạo; khớp chính xác file/trang tính/bộ giá, không suy danh sách SKU từ KINI.
+- Nội dung Word có chọn đoạn và xem trước trước khi áp dụng. Ảnh chọn riêng theo vai trò, hình thu nhỏ và thứ tự; có tải tệp ngay trong luồng và thử lại từng tệp lỗi. Ba tab Nội dung / Bộ ảnh / SKU & phân loại giúp xem từng phần. Chưa tự đọc trọn mọi bộ listing hoặc phục hồi nội dung/ảnh chưa lưu sau tải lại trang.
 - Bản đã lưu mở ở chế độ xem; điều chỉnh nội dung/ảnh phải được chọn rõ. Máy chủ khóa thứ tự SKU, tên tầng và nhãn phân loại của cùng mã bộ, giữ cả hai tầng và khoảng trắng. Khóa này chưa xác minh quan hệ SKU trên Shopee.
 - Lưu bản nháp có phiên bản, xem trước và lưu kế hoạch cho từng shop. GIÁ GỐC và mục tiêu khuyến mại tách riêng.
 - PostgreSQL giữ kế hoạch bất biến, giao dịch job/outbox và ràng buộc chống gửi trùng. Có phép thử đồng thời, xung đột phiên bản và rollback.

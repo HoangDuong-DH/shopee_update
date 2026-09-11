@@ -50,11 +50,14 @@ test('reviews the prepared source with locked SKU structure and unchanged data a
   await page.goto('/');
   await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
-  await expect(page.getByText('Danh sách SKU và phân loại đã khóa', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Tiêu đề listing')).toHaveValue(
     'Khẩu trang 5D Lamy 3 lớp trắng đen, quai co giãn ôm mặt, combo 100/300 cái, thùng 500 cái',
   );
   await expect(page.getByLabel('Tiêu đề listing')).not.toBeEditable();
+  await page.getByRole('tab', { name: /^SKU & phân loại/ }).click();
+  await expect(page.getByText('Danh sách SKU và phân loại đã khóa', { exact: true })).toBeVisible();
+  await expect(page.locator('.variant-editor').first()).toContainText('LMKT5DT100');
+  await expect(page.locator('.variant-editor').first()).toContainText('137.998');
   await expect(page.getByLabel('Phân loại 1', { exact: true })).toHaveValue('CB 100 Cái Trắng');
   await expect(page.getByLabel('Phân loại 1', { exact: true })).not.toBeEditable();
   for (const button of await page.getByRole('button', { name: /^Lưu/ }).all()) {

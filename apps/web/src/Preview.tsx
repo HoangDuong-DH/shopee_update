@@ -23,7 +23,7 @@ export function Preview({
 }: {
   draft: ListingDraft;
   shops: ShopConnection[];
-  onEdit: () => void;
+  onEdit: (section?: 'content' | 'images' | 'structure') => void;
   onPlan: (p: ChangePlan) => void;
   onBusy?: (busy: boolean) => void;
 }) {
@@ -31,6 +31,34 @@ export function Preview({
     [shop, setShop] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const sourceChecks: {
+    title: string;
+    detail: string;
+    present: boolean;
+    section: 'content' | 'images' | 'structure';
+  }[] = [
+    {
+      title: 'Tiêu đề và nội dung',
+      detail: 'Xem nguyên văn nội dung đã chọn',
+      present:
+        !!draft.title.value && draft.description.some((b) => b.type === 'text' && b.text !== ''),
+      section: 'content',
+    },
+    {
+      title: 'Ảnh bìa và ảnh sản phẩm',
+      detail: 'Xem đúng ảnh và thứ tự trong bộ',
+      present: !!draft.coverKey && draft.galleryKeys.length > 0,
+      section: 'images',
+    },
+    {
+      title: 'Phân loại và giá nguồn',
+      detail: 'Đối chiếu từng SKU với bảng giá',
+      present:
+        draft.variants.length > 0 &&
+        draft.variants.every((v) => !!v.sku.value && /^\d+$/.test(v.originalPrice.value)),
+      section: 'structure',
+    },
+  ];
   async function prepare() {
     if (!shops.some((s) => s.id === shop)) return;
     setBusy(true);
@@ -57,32 +85,55 @@ export function Preview({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">
-            {draft.productKey} · Bản nguồn {draft.revision}
-          </p>
+          <p className="eyebrow">Bộ đã lưu · Bản nguồn {draft.revision}</p>
           <h1>Kiểm tra listing</h1>
           <p>Đối chiếu bộ đã chuẩn bị trước khi chọn shop. Mở xem không thay đổi dữ liệu.</p>
         </div>
-        <button disabled={busy || !draft.sourceSelection} onClick={onEdit}>
+        <button disabled={busy || !draft.sourceSelection} onClick={() => onEdit()}>
           Đối chiếu nguồn
         </button>
       </div>
-      <section className="review-summary" aria-label="Các bước kiểm tra">
-        <div>
-          <strong>{draft.variants.length} SKU trong bộ</strong>
-          <span>Giữ thứ tự và tên phân loại đã lưu</span>
+      <section className="panel next-actions" aria-label="Việc tiếp theo">
+        <div className="section-heading">
+          <div>
+            <h2>Việc tiếp theo</h2>
+            <p>
+              Kiểm tra từng phần của bộ nguồn. “Đã có nguồn” chưa có nghĩa đã đạt điều kiện đăng.
+            </p>
+          </div>
+          <span className="tag neutral">{draft.variants.length} SKU trong bộ</span>
         </div>
-        <div>
-          <strong>
-            {draft.issues.some((i) => i.severity === 'block')
-              ? 'Cần bổ sung nguồn'
-              : 'Đã có bản nguồn'}
-          </strong>
-          <span>Chưa kiểm đầy đủ điều kiện theo shop</span>
+        <div className="source-checks">
+          {sourceChecks.map((check) => (
+            <button
+              key={check.section}
+              disabled={busy || !draft.sourceSelection}
+              onClick={() => onEdit(check.section)}
+            >
+              <span className={'tag ' + (check.present ? 'neutral' : 'danger')}>
+                {check.present ? 'Đã có nguồn' : 'Cần bạn bổ sung'}
+              </span>
+              <strong>{check.title}</strong>
+              <small>{check.detail}</small>
+              <span className="check-action">
+                {check.present ? 'Mở để đối chiếu' : 'Mở phần cần bổ sung'} →
+              </span>
+            </button>
+          ))}
         </div>
-        <div>
-          <strong>Chưa có kết quả từ Shopee</strong>
-          <span>Chức năng gửi và đọc lại chưa mở</span>
+        {draft.issues.length > 0 && (
+          <div className="source-issues">
+            <h3>Thông tin cần kiểm tra từ nguồn</h3>
+            <Issues issues={draft.issues} />
+          </div>
+        )}
+        <div className="application-limit">
+          <strong>Chưa hỗ trợ trong ứng dụng</strong>
+          <p>
+            Chọn và kiểm tra ngành/thuộc tính theo shop, nhập tồn đăng bán và vận chuyển, gửi lên
+            Shopee và đọc lại kết quả đang được hoàn thiện. Hiện tại bạn có thể lưu, đối chiếu và
+            sửa nội dung hoặc ảnh của bộ nguồn.
+          </p>
         </div>
       </section>
       <div className="preview-layout">
@@ -185,7 +236,7 @@ export function Preview({
                 ? `${shops.find((s) => s.id === shop)?.scope.shopId} · Chỉ lưu trong ứng dụng, chưa gửi lên Shopee.`
                 : 'Chưa chọn shop đích.'}
             </p>
-            <button className="primary" disabled={busy || !shop} onClick={() => void prepare()}>
+            <button disabled={busy || !shop} onClick={() => void prepare()}>
               {busy ? 'Đang lưu…' : 'Lưu bản kiểm tra theo shop'}
             </button>
             {error && (
@@ -196,7 +247,6 @@ export function Preview({
           </div>
         </section>
       </div>
-      <Issues issues={draft.issues} />
       <details className="coverage-details">
         <summary>Những gì còn thiếu trước khi đăng</summary>
         <dl>

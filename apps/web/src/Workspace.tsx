@@ -8,6 +8,7 @@ import {
   LayoutList,
   Plus,
   Store,
+  CircleHelp,
 } from 'lucide-react';
 import type { ChangePlan, JobRecord, ListingDraft, ShopConnection } from '@shopee/domain';
 import { api, date, money, type ImportRecord } from './api.js';
@@ -17,8 +18,19 @@ import { Resources } from './Resources.js';
 import { ListingImport } from './ListingImport.js';
 import { ConnectionForm } from './ConnectionForm.js';
 import { AssistantPanel } from './AssistantPanel.js';
+import { useFileUploads } from './useFileUploads.js';
+import { clearIntakeRecovery } from './intake-state.js';
+import { UsageGuide } from './UsageGuide.js';
 type Page =
-  'products' | 'sources' | 'results' | 'shops' | 'assistant' | 'preview' | 'editor' | 'import';
+  | 'products'
+  | 'sources'
+  | 'results'
+  | 'shops'
+  | 'assistant'
+  | 'preview'
+  | 'editor'
+  | 'import'
+  | 'guide';
 const navigation = [
   { id: 'products', label: 'Listing của tôi', icon: LayoutList },
   { id: 'sources', label: 'Tệp nguồn', icon: Files },
@@ -37,11 +49,12 @@ export default function Workspace() {
     [loading, setLoading] = useState(true),
     [draft, setDraft] = useState<ListingDraft | null>(null),
     [editor, setEditor] = useState<EditorSeed | null>(null),
+    [editorVariants, setEditorVariants] = useState<{ sku: string; originalPrice?: string }[]>([]),
     [search, setSearch] = useState(''),
     [filter, setFilter] = useState('all'),
     [resultTab, setResultTab] = useState<'plans' | 'jobs'>('plans'),
     [dirty, setDirty] = useState(false),
-    [uploadBusy, setUploadBusy] = useState(false),
+    [editorSection, setEditorSection] = useState<'content' | 'images' | 'structure'>('content'),
     [saveBusy, setSaveBusy] = useState(false),
     [pendingPage, setPendingPage] = useState<Page | null>(null);
   const refreshing = useRef(false);
@@ -71,6 +84,11 @@ export default function Workspace() {
       setLoading(false);
     }
   }
+  const {
+    uploadFiles,
+    busy: uploadBusy,
+    progress: uploadProgress,
+  } = useFileUploads(refresh, saveBusy);
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => void refresh(), 5000);
@@ -99,19 +117,27 @@ export default function Workspace() {
     setPage(next);
   }
   function open(d: ListingDraft) {
+    setPendingPage(null);
     setDraft(d);
     setPage('preview');
     setDirty(false);
     setError('');
     window.scrollTo(0, 0);
   }
-  function edit() {
+  function edit(section: 'content' | 'images' | 'structure' = 'content') {
     if (draft?.sourceSelection) {
       setEditor({
         ...draft.sourceSelection,
         productKey: draft.productKey,
         expectedRevision: draft.revision,
       });
+      setEditorSection(section);
+      setEditorVariants(
+        draft.variants.map((variant) => ({
+          sku: variant.sku.value,
+          originalPrice: variant.originalPrice.value,
+        })),
+      );
       setPage('editor');
       window.scrollTo(0, 0);
     }
@@ -157,6 +183,14 @@ export default function Workspace() {
           ))}
         </nav>
         <div className="header-tools">
+          <button
+            onClick={() => go('guide')}
+            aria-label="Hướng dẫn sử dụng"
+            title="Hướng dẫn sử dụng"
+          >
+            <CircleHelp size={18} />
+            <span>Hướng dẫn</span>
+          </button>
           <button onClick={() => go('shops')} aria-current={page === 'shops' ? 'page' : undefined}>
             <Store size={17} />
             <span>Kết nối shop</span>
@@ -178,6 +212,7 @@ export default function Workspace() {
         <span>Nhập và đối chiếu nguồn · Chưa bật đăng/cập nhật lên Shopee</span>
       </div>
       <main id="workspace-main" className="workspace-main">
+        {uploadProgress}
         {saveBusy && (
           <p role="status" className="context-note">
             Đang lưu. Đợi kết quả trước khi chuyển màn hình; yêu cầu đang gửi chưa thể hủy bằng cách
@@ -201,7 +236,11 @@ export default function Workspace() {
           <div role="alertdialog" aria-label="Thay đổi chưa lưu" className="unsaved-notice">
             <div>
               <strong>Bạn có thay đổi chưa lưu</strong>
-              <p>Rời màn hình sẽ bỏ phần đang nhập. Bản đã lưu vẫn được giữ.</p>
+              <p>
+                {page === 'editor' && editor?.expectedRevision === 0 && pendingPage === 'import'
+                  ? 'Quay lại sẽ bỏ nội dung và ảnh chưa lưu. Bảng SKU và nguồn giá vẫn được giữ để bạn tiếp tục.'
+                  : 'Rời màn hình sẽ bỏ phần đang nhập. Bản đã lưu vẫn được giữ.'}
+              </p>
             </div>
             <div className="actions">
               <button onClick={() => setPendingPage(null)}>Ở lại</button>
@@ -209,6 +248,13 @@ export default function Workspace() {
                 disabled={saveBusy || uploadBusy}
                 onClick={() => {
                   setDirty(false);
+                  if (page === 'import') clearIntakeRecovery();
+                  else if (
+                    page === 'editor' &&
+                    editor?.expectedRevision === 0 &&
+                    pendingPage !== 'import'
+                  )
+                    clearIntakeRecovery(editor.productKey);
                   setPage(pendingPage);
                   setPendingPage(null);
                 }}
@@ -276,7 +322,7 @@ export default function Workspace() {
                   </div>
                   <input
                     aria-label="Tìm listing"
-                    placeholder="Tìm tên listing, mã bộ hoặc SKU"
+                    placeholder="Tìm tên listing hoặc mã SKU"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
@@ -308,9 +354,7 @@ export default function Workspace() {
                           >
                             {p.title.value || 'Chưa có tiêu đề'}
                           </button>
-                          <small>
-                            {p.productKey} · Bản {p.revision}
-                          </small>
+                          <small>Bản nguồn {p.revision} · Đã lưu trong ứng dụng</small>
                         </div>
                       </div>
                       <div className="listing-facts">
@@ -368,11 +412,11 @@ export default function Workspace() {
                       Listing đã có trong bảng: bấm tên để xem và kiểm tra. Không cần nhập lại.
                     </li>
                     <li>
-                      Listing mới: thêm Excel, Word và ảnh trong Tệp nguồn; sau đó chọn Nhập listing
-                      có sẵn.
+                      Listing mới: chọn Nhập listing có sẵn. Thêm bảng giá, nội dung và ảnh ngay tại
+                      bước cần dùng.
                     </li>
                     <li>
-                      Dán đúng danh sách SKU/phân loại của bộ đã chuẩn bị và đối chiếu giá. Ứng dụng
+                      Điền từng SKU/phân loại của bộ đã chuẩn bị vào bảng và đối chiếu giá. Ứng dụng
                       không tự quyết định gộp hay tách link.
                     </li>
                     <li>
@@ -383,7 +427,7 @@ export default function Workspace() {
               </>
             )}
             {page === 'sources' && (
-              <Resources imports={imports} refresh={refresh} onUploading={setUploadBusy} />
+              <Resources imports={imports} uploadFiles={uploadFiles} uploading={uploadBusy} />
             )}
             {page === 'import' && (
               <>
@@ -396,7 +440,10 @@ export default function Workspace() {
                   onDirty={setDirty}
                   onCancel={() => go('products')}
                   onSources={() => go('sources')}
-                  onContinue={(seed) => {
+                  onUploadFiles={uploadFiles}
+                  externalBusy={uploadBusy || saveBusy}
+                  onContinue={(seed, variants = []) => {
+                    if (uploadBusy || saveBusy) return;
                     if (products.some((p) => p.productKey === seed.productKey)) {
                       setError(
                         'Mã bộ này đã tồn tại. Mở listing đã lưu để đối chiếu; không nhập lại thành bản khác.',
@@ -404,6 +451,8 @@ export default function Workspace() {
                       return;
                     }
                     setEditor(seed);
+                    setEditorVariants(variants);
+                    setEditorSection('content');
                     setDraft(null);
                     setPage('editor');
                     setDirty(true);
@@ -425,6 +474,7 @@ export default function Workspace() {
                   onEdit={edit}
                   onBusy={setSaveBusy}
                   onPlan={() => {
+                    setPendingPage(null);
                     void refresh();
                     setPage('results');
                   }}
@@ -436,10 +486,15 @@ export default function Workspace() {
                 key={editor.productKey + ':' + editor.expectedRevision}
                 seed={editor}
                 imports={imports}
+                initialSection={editorSection}
+                variantSummaries={editorVariants}
+                onUploadFiles={uploadFiles}
+                externalBusy={uploadBusy}
                 onDirty={setDirty}
                 onBusy={setSaveBusy}
                 onCancel={() => go(draft ? 'preview' : 'import')}
                 onSaved={(d) => {
+                  clearIntakeRecovery(d.productKey);
                   setDirty(false);
                   void refresh();
                   open(d);
@@ -515,6 +570,9 @@ export default function Workspace() {
               </>
             )}
             {page === 'assistant' && <AssistantPanel plans={plans} />}
+            {page === 'guide' && (
+              <UsageGuide onImport={() => go('import')} onListings={() => go('products')} />
+            )}
             {page === 'shops' && (
               <>
                 <div className="page-heading">
