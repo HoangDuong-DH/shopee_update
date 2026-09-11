@@ -37,6 +37,8 @@ export function ListingImport({
   onDirty,
   onUploadFiles,
   externalBusy = false,
+  initialDraft,
+  onDraft,
 }: {
   imports: ImportRecord[];
   onContinue: (
@@ -48,9 +50,13 @@ export function ListingImport({
   onDirty?: (dirty: boolean) => void;
   onUploadFiles?: (files: FileList | null) => Promise<void>;
   externalBusy?: boolean;
+  initialDraft?: IntakeDraft;
+  onDraft?: (draft: IntakeDraft) => void;
 }) {
-  const [recovery, setRecovery] = useState(readRecovery);
-  const [draft, setDraft] = useState(newIntakeDraft);
+  const [recovery, setRecovery] = useState(() =>
+    initialDraft ? { unavailable: false } : readRecovery(),
+  );
+  const [draft, setDraft] = useState(() => initialDraft ?? newIntakeDraft());
   const [catalog, setCatalog] = useState<WorkbookImport | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -82,6 +88,10 @@ export function ListingImport({
     onDirty?.(dirty);
   }, [dirty, onDirty]);
   useEffect(() => {
+    onDraft?.(draft);
+  }, [draft, onDraft]);
+  useEffect(() => {
+    if (initialDraft) return;
     if (recovery.draft) return;
     if (!dirty) {
       clearIntakeRecovery(draft.productKey);
@@ -98,7 +108,7 @@ export function ListingImport({
     } catch {
       setStorageUnavailable(true);
     }
-  }, [draft, dirty, recovery.draft]);
+  }, [draft, dirty, recovery.draft, initialDraft]);
   useEffect(() => {
     if (!recovery.draft) title.current?.focus();
   }, [step, recovery.draft]);

@@ -21,6 +21,9 @@ import { AssistantPanel } from './AssistantPanel.js';
 import { useFileUploads } from './useFileUploads.js';
 import { clearIntakeRecovery } from './intake-state.js';
 import { UsageGuide } from './UsageGuide.js';
+import { FolderIntake, type FolderManualContext } from './FolderIntake.js';
+import { createFolderReader } from './folder-reader.js';
+import { newIntakeDraft, type IntakeDraft } from './intake-state.js';
 type Page =
   | 'products'
   | 'sources'
@@ -30,7 +33,8 @@ type Page =
   | 'preview'
   | 'editor'
   | 'import'
-  | 'guide';
+  | 'guide'
+  | 'folder';
 const navigation = [
   { id: 'products', label: 'Listing của tôi', icon: LayoutList },
   { id: 'sources', label: 'Tệp nguồn', icon: Files },
@@ -50,14 +54,27 @@ export default function Workspace() {
     [draft, setDraft] = useState<ListingDraft | null>(null),
     [editor, setEditor] = useState<EditorSeed | null>(null),
     [editorVariants, setEditorVariants] = useState<{ sku: string; originalPrice?: string }[]>([]),
+    [editorSourceIds, setEditorSourceIds] = useState<string[] | null>(null),
     [search, setSearch] = useState(''),
     [filter, setFilter] = useState('all'),
     [resultTab, setResultTab] = useState<'plans' | 'jobs'>('plans'),
     [dirty, setDirty] = useState(false),
     [editorSection, setEditorSection] = useState<'content' | 'images' | 'structure'>('content'),
     [saveBusy, setSaveBusy] = useState(false),
+    [folderBusy, setFolderBusy] = useState(false),
+    [folderStarted, setFolderStarted] = useState(false),
+    [folderDirty, setFolderDirty] = useState(false),
+    [folderManual, setFolderManual] = useState<FolderManualContext | null>(null),
+    [folderManualDraft, setFolderManualDraft] = useState<IntakeDraft | undefined>(),
+    [editorOrigin, setEditorOrigin] = useState<'import' | 'folder'>('import'),
     [pendingPage, setPendingPage] = useState<Page | null>(null);
   const refreshing = useRef(false);
+  const importsRef = useRef(imports);
+  importsRef.current = imports;
+  const folderReader = useRef<ReturnType<typeof createFolderReader> | null>(null);
+  const editorUploadGuard = useRef(false);
+  if (!folderReader.current)
+    folderReader.current = createFolderReader({ known: () => importsRef.current });
   async function refresh() {
     if (refreshing.current) return;
     refreshing.current = true;
@@ -88,23 +105,23 @@ export default function Workspace() {
     uploadFiles,
     busy: uploadBusy,
     progress: uploadProgress,
-  } = useFileUploads(refresh, saveBusy);
+  } = useFileUploads(refresh, saveBusy || folderBusy);
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => void refresh(), 5000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
-    if (!dirty && !uploadBusy && !saveBusy) return;
+    if (!dirty && !uploadBusy && !saveBusy && !folderBusy && !folderDirty) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty, uploadBusy, saveBusy]);
+  }, [dirty, uploadBusy, saveBusy, folderBusy, folderDirty]);
   function go(next: Page) {
-    if (saveBusy && next !== page) return;
+    if ((saveBusy || folderBusy) && next !== page) return;
     if (uploadBusy && next !== page) {
       setError('Đang nhập tệp. Đợi tải xong để xem đủ kết quả trước khi chuyển màn hình.');
       return;
@@ -114,7 +131,40 @@ export default function Workspace() {
       return;
     }
     setError('');
+    if (next === 'folder') setFolderStarted(true);
     setPage(next);
+  }
+  function openFolderEditor(
+    seed: EditorSeed,
+    variants: { sku: string; originalPrice?: string }[] = [],
+  ) {
+    if (saveBusy || uploadBusy || folderBusy) return;
+    setEditor(seed);
+    setEditorSourceIds(null);
+    setEditorVariants(variants);
+    setEditorSection('content');
+    setEditorOrigin('folder');
+    setDraft(null);
+    setDirty(true);
+    setPage('editor');
+    window.scrollTo(0, 0);
+  }
+  function completeFolderMembership(context?: FolderManualContext) {
+    if (saveBusy || uploadBusy || folderBusy) return;
+    setFolderManual(context ?? null);
+    if (context) {
+      setFolderManualDraft({
+        ...newIntakeDraft(),
+        productKey: context.productKey,
+        sourceId: context.priceSource.importId,
+        sheet: context.priceSource.sheet,
+        profileChoice: JSON.stringify(context.priceSource.priceProfile),
+        step: 2,
+      });
+    } else setFolderManualDraft(undefined);
+    setPage('import');
+    setDirty(false);
+    window.scrollTo(0, 0);
   }
   function open(d: ListingDraft) {
     setPendingPage(null);
@@ -126,6 +176,7 @@ export default function Workspace() {
   }
   function edit(section: 'content' | 'images' | 'structure' = 'content') {
     if (draft?.sourceSelection) {
+      setEditorSourceIds(null);
       setEditor({
         ...draft.sourceSelection,
         productKey: draft.productKey,
@@ -142,6 +193,35 @@ export default function Workspace() {
       window.scrollTo(0, 0);
     }
   }
+  async function uploadEditorFiles(files: FileList | null) {
+    if (editorSourceIds === null) return uploadFiles(files);
+    if (!files?.length || saveBusy || uploadBusy || folderBusy || editorUploadGuard.current) return;
+    editorUploadGuard.current = true;
+    setFolderBusy(true);
+    setError('');
+    try {
+      const result = await folderReader.current!(Array.from(files));
+      setEditorSourceIds((ids) => [
+        ...new Set([
+          ...(ids ?? []),
+          ...result.flatMap((item) => (item.record ? [item.record.id] : [])),
+        ]),
+      ]);
+      await refresh();
+      const unread = result.filter((item) => item.record?.status !== 'ready');
+      if (unread.length)
+        setError(
+          `${unread.length} tệp chưa đọc được: ${unread.map((item) => item.relativePath).join(', ')}. Giữ phần đang nhập và chọn lại các tệp này để thử tiếp.`,
+        );
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'Chưa nhận đủ tệp. Giữ phần đang nhập để thử lại.',
+      );
+    } finally {
+      editorUploadGuard.current = false;
+      setFolderBusy(false);
+    }
+  }
   const displayed = products.filter(
     (p) =>
       (filter !== 'issues' || p.issues.some((i) => i.severity === 'block')) &&
@@ -149,7 +229,7 @@ export default function Workspace() {
         .toLocaleLowerCase('vi')
         .includes(search.toLocaleLowerCase('vi')),
   );
-  const parent = ['import', 'preview', 'editor'].includes(page) ? 'products' : page;
+  const parent = ['import', 'preview', 'editor', 'folder'].includes(page) ? 'products' : page;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#workspace-main">
@@ -213,6 +293,11 @@ export default function Workspace() {
       </div>
       <main id="workspace-main" className="workspace-main">
         {uploadProgress}
+        {folderBusy && (
+          <p role="status" className="context-note">
+            Đang đọc các tệp trong thư mục. Giữ trang mở để nhận đủ kết quả của từng bộ.
+          </p>
+        )}
         {saveBusy && (
           <p role="status" className="context-note">
             Đang lưu. Đợi kết quả trước khi chuyển màn hình; yêu cầu đang gửi chưa thể hủy bằng cách
@@ -237,24 +322,35 @@ export default function Workspace() {
             <div>
               <strong>Bạn có thay đổi chưa lưu</strong>
               <p>
-                {page === 'editor' && editor?.expectedRevision === 0 && pendingPage === 'import'
-                  ? 'Quay lại sẽ bỏ nội dung và ảnh chưa lưu. Bảng SKU và nguồn giá vẫn được giữ để bạn tiếp tục.'
-                  : 'Rời màn hình sẽ bỏ phần đang nhập. Bản đã lưu vẫn được giữ.'}
+                {page === 'editor' &&
+                editor?.expectedRevision === 0 &&
+                ['import', 'folder'].includes(pendingPage)
+                  ? 'Quay lại sẽ bỏ nội dung và ảnh chưa lưu tại màn này. Bảng SKU và nguồn giá vẫn được giữ để bạn tiếp tục.'
+                  : page === 'folder'
+                    ? 'Rời màn hình sẽ bỏ lô thư mục đang xử lý. Các tệp và listing đã lưu trên ứng dụng vẫn được giữ.'
+                    : 'Rời màn hình sẽ bỏ phần đang nhập. Bản đã lưu vẫn được giữ.'}
               </p>
             </div>
             <div className="actions">
               <button onClick={() => setPendingPage(null)}>Ở lại</button>
               <button
-                disabled={saveBusy || uploadBusy}
+                disabled={saveBusy || uploadBusy || folderBusy}
                 onClick={() => {
                   setDirty(false);
-                  if (page === 'import') clearIntakeRecovery();
+                  if (page === 'import' && !folderManual) clearIntakeRecovery();
                   else if (
                     page === 'editor' &&
                     editor?.expectedRevision === 0 &&
-                    pendingPage !== 'import'
+                    !['import', 'folder'].includes(pendingPage)
                   )
                     clearIntakeRecovery(editor.productKey);
+                  if (page === 'folder') {
+                    setFolderStarted(false);
+                    setFolderDirty(false);
+                    setFolderManual(null);
+                    setFolderManualDraft(undefined);
+                  }
+                  if (pendingPage === 'folder') setFolderStarted(true);
                   setPage(pendingPage);
                   setPendingPage(null);
                 }}
@@ -277,7 +373,7 @@ export default function Workspace() {
                     <h1>Listing của tôi</h1>
                     <p>Mỗi dòng là một bộ listing đã chuẩn bị. Mở bộ cần làm để kiểm tra nguồn.</p>
                   </div>
-                  <button className="primary" onClick={() => go('import')}>
+                  <button className="primary" onClick={() => go('folder')}>
                     <Plus size={18} />
                     Nhập listing có sẵn
                   </button>
@@ -286,8 +382,8 @@ export default function Workspace() {
                   <li>
                     <span>1</span>
                     <div>
-                      <strong>Nhập bộ listing</strong>
-                      <small>Đúng danh sách SKU, nội dung và ảnh</small>
+                      <strong>Nhận các thư mục listing</strong>
+                      <small>Ảnh và Word của từng bộ · bảng giá chung</small>
                     </div>
                   </li>
                   <li>
@@ -429,30 +525,61 @@ export default function Workspace() {
             {page === 'sources' && (
               <Resources imports={imports} uploadFiles={uploadFiles} uploading={uploadBusy} />
             )}
+            {folderStarted && (
+              <div hidden={page !== 'folder'}>
+                <FolderIntake
+                  imports={imports}
+                  products={products}
+                  active={page === 'folder'}
+                  externalBusy={uploadBusy || saveBusy}
+                  onRead={async (files, progress) => {
+                    const result = await folderReader.current!(files, progress);
+                    await refresh();
+                    return result;
+                  }}
+                  onContinue={openFolderEditor}
+                  onOpenExisting={open}
+                  onManual={completeFolderMembership}
+                  onBusy={setFolderBusy}
+                  onDirty={(value) => {
+                    setFolderDirty(value);
+                    if (page === 'folder') setDirty(value);
+                  }}
+                />
+              </div>
+            )}
             {page === 'import' && (
               <>
-                <button className="back-link" onClick={() => go('products')}>
+                <button
+                  className="back-link"
+                  onClick={() => go(folderManual ? 'folder' : 'products')}
+                >
                   <ArrowLeft size={15} />
-                  Listing của tôi
+                  {folderManual ? 'Về các thư mục đang xử lý' : 'Listing của tôi'}
                 </button>
                 <ListingImport
+                  key={folderManual?.productKey ?? 'manual'}
                   imports={imports}
+                  initialDraft={folderManual ? folderManualDraft : undefined}
+                  onDraft={folderManual ? setFolderManualDraft : undefined}
                   onDirty={setDirty}
-                  onCancel={() => go('products')}
+                  onCancel={() => go(folderManual ? 'folder' : 'products')}
                   onSources={() => go('sources')}
                   onUploadFiles={uploadFiles}
-                  externalBusy={uploadBusy || saveBusy}
+                  externalBusy={uploadBusy || saveBusy || folderBusy}
                   onContinue={(seed, variants = []) => {
-                    if (uploadBusy || saveBusy) return;
+                    if (uploadBusy || saveBusy || folderBusy) return;
                     if (products.some((p) => p.productKey === seed.productKey)) {
                       setError(
                         'Mã bộ này đã tồn tại. Mở listing đã lưu để đối chiếu; không nhập lại thành bản khác.',
                       );
                       return;
                     }
-                    setEditor(seed);
+                    setEditor(folderManual ? { ...seed, ...folderManual.prepared } : seed);
+                    setEditorSourceIds(folderManual?.sourceImportIds ?? null);
                     setEditorVariants(variants);
                     setEditorSection('content');
+                    setEditorOrigin('import');
                     setDraft(null);
                     setPage('editor');
                     setDirty(true);
@@ -463,6 +590,11 @@ export default function Workspace() {
             )}
             {page === 'preview' && draft && (
               <>
+                {folderStarted && (
+                  <button className="back-link" onClick={() => go('folder')}>
+                    <ArrowLeft size={15} /> Về các thư mục đang xử lý
+                  </button>
+                )}
                 <button className="back-link" onClick={() => go('products')}>
                   <ArrowLeft size={15} />
                   Listing của tôi
@@ -485,14 +617,18 @@ export default function Workspace() {
               <Editor
                 key={editor.productKey + ':' + editor.expectedRevision}
                 seed={editor}
-                imports={imports}
+                imports={
+                  editorSourceIds
+                    ? imports.filter((item) => editorSourceIds.includes(item.id))
+                    : imports
+                }
                 initialSection={editorSection}
                 variantSummaries={editorVariants}
-                onUploadFiles={uploadFiles}
-                externalBusy={uploadBusy}
+                onUploadFiles={uploadEditorFiles}
+                externalBusy={uploadBusy || folderBusy}
                 onDirty={setDirty}
                 onBusy={setSaveBusy}
-                onCancel={() => go(draft ? 'preview' : 'import')}
+                onCancel={() => go(draft ? 'preview' : editorOrigin)}
                 onSaved={(d) => {
                   clearIntakeRecovery(d.productKey);
                   setDirty(false);
@@ -571,7 +707,7 @@ export default function Workspace() {
             )}
             {page === 'assistant' && <AssistantPanel plans={plans} />}
             {page === 'guide' && (
-              <UsageGuide onImport={() => go('import')} onListings={() => go('products')} />
+              <UsageGuide onImport={() => go('folder')} onListings={() => go('products')} />
             )}
             {page === 'shops' && (
               <>

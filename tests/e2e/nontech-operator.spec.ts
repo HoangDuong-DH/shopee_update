@@ -64,6 +64,7 @@ async function useIntakeFixture(page: Page) {
 async function openSourceStep(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
+  await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   await page.getByRole('combobox', { name: 'File bảng giá', exact: true }).selectOption(sourceId);
   await page
     .getByRole('combobox', { name: 'Trang tính chứa giá', exact: true })
@@ -143,6 +144,7 @@ test('fixture: offers explicit recovery after refresh without silently restoring
   await page.getByLabel('Nhãn nhóm 1 dòng 1', { exact: true }).fill('  Gói 12  cái ');
   await page.reload();
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
+  await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Bạn có một bộ đang nhập dở', exact: true }),
   ).toBeVisible();

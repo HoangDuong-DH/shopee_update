@@ -43,7 +43,8 @@
       "depends_on": ["A3"],
       "status": "in_progress",
       "remaining": [
-        "Automatic whole prepared-listing bundle intake with source paragraph/media mapping",
+        "Versioned source/membership mappings, durable folder-batch recovery and logical identity across source revisions",
+        "Whole prepared-listing intake for arbitrary Word layouts and visual variation identification",
         "Column mapping editor",
         "Stock instruction UI",
         "Source-aware full category/field validation and selective existing-item updates"
@@ -52,7 +53,9 @@
         "2026-09-11: listing-first workspace replaces arbitrary catalog SKU grouping; explicit prepared membership intake and read-only source review",
         "110 unit/integration, 7 legacy and 11 UI E2E passed; live local Lamy preserved; no Shopee writes",
         "2026-09-11 nontech follow-up: three-step intake with exact SKU table and explicit recovery, role-based thumbnail picker, explicit Word paragraph assignment, per-file retry, actionable source checklist and in-app staff guide",
-        "125 unit/integration, 7 legacy and 22 browser E2E passed (12 real local read-only scenarios; 10 browser fixtures). Lamy source revision 1 and 6/8/9 SKU/gallery/description counts preserved. Delivery: docs/delivery/2026-09-11-nontech-frontend.md"
+        "125 unit/integration, 7 legacy and 22 browser E2E passed (12 real local read-only scenarios; 10 browser fixtures). Lamy source revision 1 and 6/8/9 SKU/gallery/description counts preserved. Delivery: docs/delivery/2026-09-11-nontech-frontend.md",
+        "2026-09-11 folder intake: one prepared listing per folder, shared price source, visual bulk media roles, exact-file identity and partial retry; handoff preserves resolved Word/media and scopes picker to the selected folder. No vision-based SKU inference or Shopee writes.",
+        "144 unit/integration, 7 legacy and 27 browser E2E passed (12 real local read-only; 15 fixtures), compact desktop/mobile folder views verified. In-memory batch only; full publication remains incomplete. Delivery: docs/delivery/2026-09-11-folder-listing-intake.md"
       ]
     },
     {

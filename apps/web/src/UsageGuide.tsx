@@ -11,7 +11,7 @@ export function UsageGuide({
         <div>
           <p className="eyebrow">Dành cho nhân viên vận hành</p>
           <h1>Bắt đầu từ bộ listing đã có</h1>
-          <p>Một listing là một link sản phẩm với đúng các phân loại bên bạn đã chuẩn bị.</p>
+          <p>Mỗi thư mục chứa Word và ảnh của một listing. Bảng giá dùng chung cho đợt nhập.</p>
         </div>
         <button onClick={onListings}>Về listing của tôi</button>
       </div>
@@ -19,70 +19,81 @@ export function UsageGuide({
         <h2>Bạn đang cần làm việc gì?</h2>
         <div className="guide-actions">
           <button className="primary" onClick={onImport}>
-            Nhập một bộ listing mới
+            Nhập listing bằng thư mục
           </button>
           <button onClick={onListings}>Mở bộ đã nhập để kiểm tra</button>
         </div>
         <p>
-          Không cần nhập lại bộ đã có trong danh sách. SKU là mã sản phẩm/phân loại trong bảng giá
-          của công ty.
+          Đọc các thư mục, xem nguồn và xử lý phần chưa rõ trên cùng một màn hình. Việc đọc nguồn
+          chưa lưu listing hoặc gửi lên Shopee.
         </p>
       </section>
       <ol className="guide-steps">
         <li>
           <span>1</span>
           <div>
-            <h2>Chọn bảng giá</h2>
+            <h2>Chọn bảng giá chung và thư mục</h2>
             <p>
-              Chọn tệp Excel đã nhập, hoặc tải lên ngay tại bước này. Chọn đúng trang tính và bộ giá
-              dành cho shop bạn đang làm.
+              Chọn bảng giá, sheet và bộ giá một lần cho đợt. Sau đó chọn thư mục trên máy. Nếu đó
+              là một bộ, chọn “Thư mục này là một listing”; nếu bên trong có nhiều thư mục listing,
+              chọn “Mỗi thư mục con là một listing”.
             </p>
+            <p>Bấm “Đọc các thư mục”. Danh sách giữ riêng tệp của từng bộ.</p>
             <p className="caption">
-              GIÁ GỐC là giá dùng cho bước đăng mới. GIÁ BÁN được giữ riêng làm giá mục tiêu khuyến
-              mại.
+              GIÁ GỐC dùng khi đăng mới. GIÁ BÁN được giữ riêng làm giá mục tiêu khuyến mại; nhập
+              nguồn không tự tạo giảm giá.
             </p>
           </div>
         </li>
         <li>
           <span>2</span>
           <div>
-            <h2>Điền các phân loại đã chuẩn bị</h2>
+            <h2>Chọn ảnh bằng hình và đối chiếu Word</h2>
             <p>
-              Chọn sản phẩm không có phân loại, có một nhóm (ví dụ Quy cách) hoặc hai nhóm (ví dụ
-              Màu sắc và Quy cách). Điền từng SKU và đúng tên phân loại vào bảng. Có thể dán nhiều
-              dòng từ Excel trong phần mở rộng.
+              Mở một thư mục trong danh sách. Đánh dấu ảnh rồi chọn dùng làm bìa, thêm vào ảnh sản
+              phẩm, ảnh mô tả hoặc cả hai. Xem nhãn và số thứ tự trên ảnh; không cần đổi tên tệp
+              thành SKU.
+            </p>
+            <p>
+              Tab “Word & nội dung” cho xem nguyên văn và phần đã nhận diện. Nếu chưa rõ tiêu đề/mô
+              tả, văn bản thô chỉ dùng để xem; bạn cần chọn đúng đoạn từ Word ở màn hoàn thiện.
             </p>
             <p className="caption">
-              Ứng dụng đối chiếu từng SKU với nguồn giá. Nếu không tìm thấy hoặc trùng nguồn, quay
-              lại sửa lựa chọn; không tự đoán dữ liệu.
+              Ứng dụng giữ tệp gốc. Chưa có tính năng nhìn ảnh để tự suy ra SKU, combo hoặc tên phân
+              loại.
             </p>
           </div>
         </li>
         <li>
           <span>3</span>
           <div>
-            <h2>Chọn nội dung và ảnh của bộ</h2>
+            <h2>Bổ sung đúng phần còn thiếu</h2>
             <p>
-              Đưa tiêu đề và mô tả có sẵn vào các ô tương ứng. Có thể chọn đoạn từ Word để điền.
-              Chọn ảnh bìa, ảnh sản phẩm, ảnh mô tả và ảnh cho từng phân loại bằng hình thu nhỏ.
+              Nếu chưa xác định được SKU và nhãn, bấm “Bổ sung SKU/phân loại”. Bảng giá, phần Word
+              đã xác định và ảnh vừa chọn được giữ lại. Chỉ nhập đúng danh sách của bộ đã chuẩn bị,
+              rồi kiểm tra giá và dòng nguồn.
+            </p>
+            <p>
+              Trong Editor, kiểm tra nội dung, bố trí ảnh và gán ảnh cho từng phân loại. Tên, khoảng
+              trắng và thứ tự phân loại phải đúng bộ gốc.
             </p>
             <p className="caption">
-              Kiểm tra đúng vai trò và thứ tự. Ứng dụng giữ nguyên tệp ảnh; khi nhập thiếu sẽ chỉ rõ
-              phần cần bổ sung.
+              “Nhập thủ công khi cần” là lựa chọn phụ khi chưa tổ chức nguồn bằng thư mục. Không cần
+              bắt đầu lại từ đây cho mỗi thư mục.
             </p>
           </div>
         </li>
         <li>
           <span>4</span>
           <div>
-            <h2>Lưu và xem lại</h2>
+            <h2>Lưu, xem lại và làm bộ tiếp theo</h2>
             <p>
-              Lưu bộ nguồn, xem lại ảnh, chữ, phân loại và giá. Mục “Việc tiếp theo” dẫn đến phần
-              cần kiểm tra. SKU và cấu trúc của bộ đã lưu được cố định.
+              Bấm “Lưu & xem trước” để kiểm tra ảnh, chữ, SKU và giá. Đợt thư mục vẫn được giữ khi
+              quay lại làm bộ tiếp theo. Danh sách và cấu trúc của bộ đã lưu được khóa.
             </p>
             <p className="caption">
-              “Lưu bộ nguồn” và “Lưu bản kiểm tra theo shop” chỉ lưu trong ứng dụng. Bản hiện tại
-              chưa đăng hay cập nhật sản phẩm lên Shopee.
+              Lưu bộ nguồn và lưu bản kiểm tra theo shop chỉ lưu trong ứng dụng. Bản hiện tại chưa
+              đăng hay cập nhật sản phẩm lên Shopee.
             </p>
           </div>
         </li>
@@ -91,29 +102,53 @@ export function UsageGuide({
         <h2>Khi đang làm mà gặp vấn đề</h2>
         <dl>
           <div>
-            <dt>Tải tệp bị lỗi</dt>
+            <dt>Có tệp không đọc được</dt>
             <dd>
-              Xem tên từng tệp ở bảng tiến độ và bấm thử lại các tệp chưa nhận. Giữ trang mở để
-              không phải chọn lại tệp lỗi.
+              Xem tên tệp, kiểm tra tệp gốc rồi đọc lại thư mục. Các tệp đọc được vẫn có để đối
+              chiếu. Chi tiết kỹ thuật nằm trong mục dành cho người hỗ trợ.
             </dd>
           </div>
           <div>
-            <dt>Cần nghỉ giữa bước nhập</dt>
+            <dt>Word hoặc SKU chưa xác định rõ</dt>
             <dd>
-              Phần bảng giá và phân loại đang nhập được giữ trong tab trình duyệt. Khi trở lại, chọn
-              “Tiếp tục phần đang nhập”. Nội dung và ảnh đang chỉnh chưa lưu cần được lưu trước khi
-              rời trang.
+              Giữ nguyên nguồn và bổ sung đúng phần được báo. Văn bản Word chưa phân loại không tự
+              trở thành mô tả; tên trong bảng giá cũng không tự trở thành nhãn phân loại.
+            </dd>
+          </div>
+          <div>
+            <dt>Cần nghỉ giữa đợt nhập</dt>
+            <dd>
+              Giữ tab đang mở. Đợt thư mục chỉ được giữ trong bộ nhớ trang khi mở Editor và quay
+              lại. Tải lại hoặc đóng trang sẽ mất lựa chọn thư mục và phần chưa lưu; bản đã lưu
+              trong ứng dụng vẫn còn.
+            </dd>
+          </div>
+          <div>
+            <dt>Thấy lời nhắc tiếp tục phần đang nhập</dt>
+            <dd>
+              Lời nhắc phục hồi chỉ áp dụng các ô bảng giá/SKU trong luồng nhập thủ công. Nó không
+              khôi phục tệp hay toàn bộ đợt thư mục.
             </dd>
           </div>
           <div>
             <dt>Không bấm lưu được</dt>
-            <dd>Xem danh sách việc còn thiếu, bấm vào việc đó để đến đúng ô cần điền.</dd>
+            <dd>
+              Xem lý do ở đầu màn hình và bấm “Đi đến phần cần bổ sung”. Khi đang tải hoặc lưu, đợi
+              kết quả trước khi đổi công việc.
+            </dd>
+          </div>
+          <div>
+            <dt>Thư mục báo bộ này đã lưu</dt>
+            <dd>
+              Bấm “Mở bộ đã lưu” để xem lại. Nhận biết bộ nguồn chưa bảo đảm phát hiện mọi sản phẩm
+              trùng; kiểm tra danh sách trước khi nhập lại cùng một sản phẩm.
+            </dd>
           </div>
           <div>
             <dt>Muốn thêm SKU vào bộ đã lưu</dt>
             <dd>
-              Cấu trúc bộ đã tiếp nhận được cố định. Không ghép SKU từ bảng giá sang một listing
-              khác. Kiểm tra bộ gốc với người phụ trách sản phẩm.
+              Cấu trúc đã tiếp nhận được cố định. Chỉnh nội dung hoặc ảnh không ghép thêm SKU sang
+              listing khác. Đối chiếu bộ gốc với người phụ trách sản phẩm.
             </dd>
           </div>
         </dl>

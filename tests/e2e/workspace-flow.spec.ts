@@ -58,8 +58,10 @@ test('opens prepared listing import without creating a product or choosing arbit
   await page.goto('/');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Nhập listing có sẵn', exact: true }),
+    page.getByRole('heading', { name: 'Nhập listing theo thư mục', exact: true }),
   ).toBeVisible();
+  await expect(page.getByLabel('Chọn thư mục listing', { exact: true })).toHaveCount(1);
+  await expect(page.getByLabel('SKU dòng 1', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Ghép.*SKU|Ghép listing/ })).toHaveCount(0);
   expect(mutations).toEqual([]);
 });
@@ -73,6 +75,7 @@ test('preserves unfinished import when staying and discards only after explicit 
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
+  await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   const workbook = page.getByRole('combobox', { name: 'File bảng giá', exact: true });
   const sourceId = await workbook
     .locator('option')
@@ -506,6 +509,7 @@ test('discarding an edit to a saved listing keeps a separate unfinished intake r
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto('/');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
+  await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   const workbook = page.getByRole('combobox', { name: 'File bảng giá', exact: true });
   const sourceId = await workbook
     .locator('option')
@@ -525,6 +529,7 @@ test('discarding an edit to a saved listing keeps a separate unfinished intake r
     .click();
   await page.getByRole('button', { name: 'Listing của tôi', exact: true }).click();
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
+  await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Bạn có một bộ đang nhập dở', exact: true }),
   ).toBeVisible();
