@@ -1,0 +1,13 @@
+node_modules
+.local
+dist
+knowledge-base
+docs/research
+docs/sources
+docs/test-reports
+content.js
+content.css
+shared.js
+popup.js
+popup.html
+lib

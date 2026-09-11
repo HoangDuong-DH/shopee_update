@@ -1,0 +1,33 @@
+name: Application checks
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_USER: shopee
+          POSTGRES_PASSWORD: isolated_ci_fixture
+          POSTGRES_DB: shopee_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U shopee -d shopee_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://shopee:isolated_ci_fixture@127.0.0.1:5432/shopee_test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund
+      - run: node scripts/verify.mjs
+      - run: npm audit --omit=dev --audit-level=high

@@ -1,0 +1,206 @@
+{
+  "created_on": "2026-09-10",
+  "status": "implementation_started_source_workflow_running",
+  "plan": "2026-09-10-shopee-execution-plan.md",
+  "execution_mode": "sequential_checkpoints_no_subagents_requested",
+  "production_write_authorized": false,
+  "tasks": [
+    {
+      "id": "A1",
+      "name": "Workspace, runtime, health and development checks",
+      "depends_on": [],
+      "status": "passed",
+      "evidence": [
+        "Node 24.20.0 official SHA verified",
+        "PostgreSQL 17.11 healthy",
+        "Clean npm ci",
+        "typecheck/build/legacy/health checks"
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "Source contracts and provenance-preserving import",
+      "depends_on": [
+        "A1"
+      ],
+      "status": "in_progress",
+      "remaining": [
+        "Manual remapping for ambiguous columns and unsupported sheets",
+        "Versioned import mappings"
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "Immutable plans, persistence and manual stock commands",
+      "depends_on": [
+        "A2"
+      ],
+      "status": "in_progress",
+      "remaining": [
+        "Scope/capability refresh checks before an enabled executor",
+        "Wire manual stock UI to immutable commands"
+      ]
+    },
+    {
+      "id": "A4",
+      "name": "Import, mapping and preview UI",
+      "depends_on": [
+        "A3"
+      ],
+      "status": "in_progress",
+      "remaining": [
+        "Column mapping editor",
+        "Stock instruction UI",
+        "Source-aware edit validation beyond current import mapping"
+      ]
+    },
+    {
+      "id": "B1",
+      "name": "Scoped gateway, token rotation and capabilities",
+      "depends_on": [
+        "A3"
+      ],
+      "status": "in_progress",
+      "remaining": [
+        "User supplies sandbox backend credentials via local UI",
+        "Authorization callback and rotating token recovery",
+        "Endpoint/capability discovery"
+      ]
+    },
+    {
+      "id": "B2",
+      "name": "Checkpointed media and listing creation",
+      "depends_on": [
+        "B1"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "B3",
+      "name": "Selective updates and identity-based readback",
+      "depends_on": [
+        "B2"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "B4",
+      "name": "Direct Lamy sandbox E2E evidence",
+      "depends_on": [
+        "A4",
+        "B3"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "C1",
+      "name": "Outbox, leases and scheduling",
+      "depends_on": [
+        "B3"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "C2",
+      "name": "Retry, rate budgets and uncertain-write reconciliation",
+      "depends_on": [
+        "C1"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "C3",
+      "name": "Push, polling and multidimensional QC",
+      "depends_on": [
+        "C1",
+        "B1"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "C4",
+      "name": "Batch progress, pause, resume and recovery UI",
+      "depends_on": [
+        "C2",
+        "C3",
+        "A4"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "D1",
+      "name": "Prices and promotion plans",
+      "depends_on": [
+        "B3",
+        "C2"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "D2",
+      "name": "Versioned knowledge, agent tools, MCP and evaluations",
+      "depends_on": [
+        "A4",
+        "B1"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "E1",
+      "name": "Deployment packaging, telemetry and backup restore",
+      "depends_on": [
+        "C4"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "E2",
+      "name": "Load, soak, release evidence and authorized pilot",
+      "depends_on": [
+        "B4",
+        "D1",
+        "D2",
+        "E1"
+      ],
+      "status": "planned"
+    }
+  ],
+  "external_dependencies": [
+    {
+      "id": "dev_database",
+      "needed_for": "A3 integration",
+      "observed": "Resolved: Docker PostgreSQL 17.11-alpine healthy, port 5442; integration tests use isolated real schemas"
+    },
+    {
+      "id": "sandbox_backend_connection",
+      "needed_for": "B1/B4 live sandbox tests",
+      "observed": "Local configuration form ready; descriptor 1232297 / 227418363 disconnected at last check; user asked for TEST credential guidance"
+    },
+    {
+      "id": "production_data_and_write_scope",
+      "needed_for": "E2 production pilot",
+      "observed": "Real shops remain read-only; stock and source revisions required per SKU/shop"
+    },
+    {
+      "id": "hosting_choice",
+      "needed_for": "E1 paid deployment",
+      "observed": "Hosting environment and budget require selection before provisioning"
+    },
+    {
+      "id": "feature_capabilities",
+      "needed_for": "Feature-specific real tests",
+      "observed": "Flash, QC, special media and compliance coverage remain capability-specific"
+    }
+  ],
+  "effort_estimate": {
+    "unit": "effective_engineering_person_days",
+    "optimistic": 16,
+    "most_likely": 26,
+    "pessimistic": 44,
+    "pert_mean": 27.333333333333332,
+    "is_statistical_confidence_interval": false,
+    "excludes_external_waiting": true
+  },
+  "updated_at": "2026-09-11T01:07:42.608Z",
+  "latest_evidence": "../../delivery/2026-09-11-checkpoint.md"
+}

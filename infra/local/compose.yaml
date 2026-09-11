@@ -1,0 +1,20 @@
+name: shopee-product-uploader-dev
+services:
+  postgres:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_USER: shopee
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run setup:local first}
+      POSTGRES_DB: shopee_uploader
+    ports:
+      - "127.0.0.1:5442:5432"
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopee -d shopee_uploader"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+volumes:
+  database:

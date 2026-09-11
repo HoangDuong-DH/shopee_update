@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@shopee/domain": ["./packages/domain/src/index.ts"],
+      "@shopee/persistence": ["./packages/persistence/src/index.ts"],
+      "@shopee/gateway": ["./packages/shopee/src/index.ts"]
+    }
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.mts"
+  ],
+  "exclude": ["**/node_modules", "**/dist"]
+}

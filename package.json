@@ -1,0 +1,62 @@
+{
+  "name": "shopee-product-uploader",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.20.0 <25"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  },
+  "scripts": {
+    "doctor": "node scripts/doctor.mjs",
+    "setup:local": "node scripts/setup-local.mjs",
+    "db:migrate": "node --conditions=development --import tsx scripts/migrate.mts",
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -b && vite build --config apps/web/vite.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test:legacy": "node --test tests/shared.test.js",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "test": "npm run test:legacy && npm run test:unit && npm run test:integration"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/supertest": "7.2.1",
+    "@vitejs/plugin-react": "6.1.1",
+    "prettier": "3.9.6",
+    "supertest": "7.2.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.0.1",
+    "@nestjs/core": "12.0.1",
+    "@nestjs/platform-fastify": "12.0.1",
+    "dotenv": "17.4.2",
+    "exceljs": "4.4.0",
+    "fast-xml-parser": "5.11.1",
+    "fflate": "0.8.3",
+    "lucide-react": "1.44.0",
+    "pg": "8.23.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "sharp": "0.35.4",
+    "zod": "4.6.1"
+  }
+}

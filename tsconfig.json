@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "packages/domain" },
+    { "path": "packages/persistence" },
+    { "path": "packages/shopee" },
+    { "path": "apps/api" },
+    { "path": "apps/worker" }
+  ]
+}

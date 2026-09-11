@@ -1,0 +1,11 @@
+{
+  "name": "@shopee/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@shopee/domain": "0.1.0",
+    "@shopee/persistence": "0.1.0",
+    "@shopee/gateway": "0.1.0"
+  }
+}
