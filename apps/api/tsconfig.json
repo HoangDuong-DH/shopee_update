@@ -5,6 +5,7 @@
   "references": [
     { "path": "../../packages/domain" },
     { "path": "../../packages/persistence" },
-    { "path": "../../packages/shopee" }
+    { "path": "../../packages/shopee" },
+    { "path": "../../packages/agent-runtime" }
   ]
 }

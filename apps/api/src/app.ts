@@ -23,6 +23,8 @@ import { makePlan, type Issue, type Scope } from '@shopee/domain';
 import { HealthController, DB_PROBE } from './health.js';
 import { assembleProduct, productInput } from './product-service.js';
 import { connectSandbox } from './connection-service.js';
+import { AssistantService, type KnowledgePort } from './assistant-service.js';
+import { KnowledgeLibrary } from '@shopee/agent-runtime';
 const REPO = Symbol('repository'),
   BLOBS = Symbol('blobs');
 const id = (s: string) => z.string().uuid().parse(s);
@@ -51,26 +53,44 @@ class ApiErrors implements ExceptionFilter {
     if (error instanceof HttpException)
       return reply.status(error.getStatus()).send(error.getResponse());
     if (error instanceof z.ZodError)
-      return reply
-        .status(400)
-        .send({
-          code: 'INVALID_INPUT',
-          message: 'Dữ liệu nhập chưa hợp lệ.',
-          fields: error.issues.map((i) => i.path.join('.')),
-        });
+      return reply.status(400).send({
+        code: 'INVALID_INPUT',
+        message: 'Dữ liệu nhập chưa hợp lệ.',
+        fields: error.issues.map((i) => i.path.join('.')),
+      });
     const code = error instanceof Error ? error.message : '';
+    if (code === 'DEADLINE_EXCEEDED')
+      return reply
+        .status(504)
+        .send({
+          code,
+          message:
+            'Lần kiểm tra đã hết thời gian. Xem lịch sử để biết các bước đã lưu; nguồn và listing được giữ nguyên.',
+        });
+    const knowledgeMessages: Record<string, string> = {
+      KNOWLEDGE_UNKNOWN_DOCUMENT: 'Không tìm thấy tài liệu trong danh mục nguồn.',
+      KNOWLEDGE_OPEN_PLATFORM_UNAVAILABLE: 'Kho Open Platform chưa sẵn sàng tại máy chủ.',
+      KNOWLEDGE_SELLER_VN_UNAVAILABLE: 'Kho Học viện Shopee VN chưa sẵn sàng tại máy chủ.',
+      KNOWLEDGE_SOURCE_NOT_ALLOWED: 'Nguồn này không thuộc danh sách tài liệu Shopee được hỗ trợ.',
+      KNOWLEDGE_PATH_OUTSIDE_ROOT: 'Đường dẫn tài liệu nằm ngoài kho đã cấu hình.',
+      KNOWLEDGE_DOCUMENT_UNAVAILABLE: 'Tệp tài liệu không còn truy cập được.',
+      KNOWLEDGE_DOCUMENT_TOO_LARGE:
+        'Tài liệu vượt dung lượng đọc đầy đủ; mở nguồn chính thức để xem.',
+      KNOWLEDGE_INTEGRITY_MISMATCH:
+        'Tài liệu đã đổi so với bản kê nguồn. Cần kiểm tra lại bản chụp.',
+    };
+    if (Object.hasOwn(knowledgeMessages, code))
+      return reply.status(409).send({ code, message: knowledgeMessages[code] });
     if (
       /^(PLAN_|PRODUCT_REVISION_|SOURCE_REVISION_|STOCK_COMMAND_|JOB_|RECONCILIATION_)/.test(code)
     )
       return reply.status(409).send({ code, message: code });
     if (/^(SOURCE_|ASSET_|NOT_FOUND|INVALID_)/.test(code))
       return reply.status(400).send({ code, message: code });
-    return reply
-      .status(503)
-      .send({
-        code: 'SERVICE_UNAVAILABLE',
-        message: 'Dịch vụ chưa sẵn sàng. Dữ liệu đã lưu vẫn được giữ; vui lòng thử lại.',
-      });
+    return reply.status(503).send({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Dịch vụ chưa sẵn sàng. Dữ liệu đã lưu vẫn được giữ; vui lòng thử lại.',
+    });
   }
 }
 @Controller('v1')
@@ -78,7 +98,40 @@ class AppController {
   constructor(
     @Inject(REPO) readonly repo: Repository,
     @Inject(BLOBS) readonly blobs: BlobStore,
+    @Inject(AssistantService) readonly assistant: AssistantService,
   ) {}
+  @Get('assistant/reviews') reviews() {
+    return this.assistant.list();
+  }
+  @Get('assistant/reviews/:id') review(@Param('id') key: string) {
+    return this.assistant.get(id(key));
+  }
+  @Post('assistant/reviews') investigate(@Body() raw: unknown) {
+    return this.assistant.review(raw);
+  }
+  @Post('knowledge/search') searchKnowledge(@Body() raw: unknown) {
+    const input = z
+      .object({ query: z.string().trim().min(1).max(300) })
+      .strict()
+      .parse(raw);
+    return this.assistant.knowledge.search(input.query, 10);
+  }
+  @Post('knowledge/read') async readKnowledge(@Body() raw: unknown) {
+    const input = z
+      .object({
+        documentId: z.string().min(1).max(300),
+        expectedSha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+      })
+      .strict()
+      .parse(raw);
+    const doc = await this.assistant.knowledge.readDocument(input.documentId);
+    if (input.expectedSha256 && input.expectedSha256 !== doc.source.sha256)
+      throw new Error('SOURCE_REVISION_CHANGED');
+    return doc;
+  }
   @Get('status') async status() {
     const r = await this.repo.pool.query(
       "SELECT max(updated_at) AS last_seen FROM worker_heartbeats WHERE updated_at>now()-interval '15 seconds'",
@@ -258,6 +311,7 @@ export async function createApp(
   repo: Repository,
   blobs: BlobStore,
   origins: string[],
+  options: { knowledge?: KnowledgePort } = {},
 ): Promise<NestFastifyApplication> {
   @Module({
     controllers: [AppController, HealthController],
@@ -265,6 +319,17 @@ export async function createApp(
       { provide: REPO, useValue: repo },
       { provide: BLOBS, useValue: blobs },
       { provide: DB_PROBE, useValue: () => repo.probe() },
+      {
+        provide: AssistantService,
+        useValue: new AssistantService(
+          repo,
+          options.knowledge ??
+            new KnowledgeLibrary([
+              { corpus: 'open-platform', root: 'knowledge-base/shopee-open-platform' },
+              { corpus: 'seller-vn', root: 'knowledge-base/shopee-uni-vn' },
+            ]),
+        ),
+      },
     ],
   })
   class AppModule {}

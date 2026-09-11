@@ -8,6 +8,55 @@
   --line: #eaeaea;
   --muted: #727872;
 }
+.knowledge-search {
+  display: flex;
+  gap: 12px;
+  margin: 8px 0 14px;
+}
+.knowledge-search input,
+.knowledge-search select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+.knowledge-hit {
+  border-top: 1px solid var(--line);
+  padding: 18px 0;
+  overflow-wrap: anywhere;
+}
+.knowledge-hit a {
+  font-weight: 600;
+  color: #355d43;
+}
+.knowledge-document {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  padding: 16px;
+  background: #fafbf8;
+}
+.review-history {
+  display: grid;
+  gap: 10px;
+}
+.review-history button {
+  display: grid;
+  justify-content: start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.review-history span,
+.review-history small {
+  font-weight: 400;
+}
+@media (max-width: 700px) {
+  .knowledge-search {
+    flex-direction: column;
+  }
+}
 * {
   box-sizing: border-box;
 }

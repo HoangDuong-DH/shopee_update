@@ -5,6 +5,7 @@
     { "path": "packages/domain" },
     { "path": "packages/persistence" },
     { "path": "packages/shopee" },
+    { "path": "packages/agent-runtime" },
     { "path": "apps/api" },
     { "path": "apps/worker" }
   ]

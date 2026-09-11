@@ -26,6 +26,7 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 - Lưu bản nháp có phiên bản, xem trước và lưu kế hoạch cho từng shop. GIÁ GỐC và mục tiêu khuyến mại tách riêng.
 - PostgreSQL giữ kế hoạch bất biến, giao dịch job/outbox và ràng buộc chống gửi trùng. Có phép thử đồng thời, xung đột phiên bản và rollback.
 - Kết nối sandbox bằng Test Partner Key / Access Token nhập ở UI, gọi `get_shop_info` trực tiếp. Khóa/token mã hóa tại server và không được trả lại UI.
+- Bổ sung 11/09: **Tra cứu & kiểm tra** dùng hai kho Shopee tại máy, mở toàn bài có metadata/hash, kiểm scope/phiên bản kế hoạch và lưu lịch sử vào PostgreSQL. Harness chỉ có công cụ đọc, giới hạn lượt/thời gian; chưa cấu hình LLM hoặc MCP. Đây chưa phải bộ kiểm chính sách ngành đầy đủ hoặc QC Shopee.
 
 Tồn thủ công đã có hợp đồng và quy tắc không tự bù sau đơn hàng; **màn hình nhập lệnh tồn và executor chưa hoàn tất**. Chưa tự suy ngành, thương hiệu, chứng từ, logistics, giới hạn ảnh hoặc quyền API từ ví dụ tài liệu.
 
@@ -45,6 +46,7 @@ Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL t
 - [Mốc thực thi và giới hạn](docs/delivery/2026-09-10-foundation.md)
 - [Kiểm tra tiếp nối 11/09](docs/delivery/2026-09-11-checkpoint.md)
 - [Hướng dẫn lấy thông tin TEST](docs/runbooks/sandbox-connection.md)
+- [Harness và bộ đánh giá](docs/runbooks/agent-evaluation.md)
 - [Kế hoạch E2E](docs/superpowers/plans/2026-09-10-shopee-execution-plan.md)
 - [Quy tắc tra cứu Shopee](AGENTS.md)
 

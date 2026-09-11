@@ -11,6 +11,7 @@ import { api, date, money, post, type ImportRecord } from './api.js';
 import { Editor, type EditorSeed } from './Editor.js';
 import { Issues, Preview } from './Preview.js';
 import { ConnectionForm } from './ConnectionForm.js';
+import { AssistantPanel } from './AssistantPanel.js';
 const nav = [
   ['products', 'Danh mục listing'],
   ['sources', 'Nguồn tài liệu'],
@@ -18,6 +19,7 @@ const nav = [
   ['plans', 'Kế hoạch'],
   ['jobs', 'Công việc'],
   ['shops', 'Kết nối shop'],
+  ['assistant', 'Tra cứu & kiểm tra'],
 ] as const;
 type Page = (typeof nav)[number][0] | 'preview' | 'editor';
 export default function App() {
@@ -605,6 +607,7 @@ export default function App() {
                   )}
                 </>
               )}
+              {page === 'assistant' && <AssistantPanel plans={plans} />}
               {page === 'shops' && (
                 <>
                   <div className="page-heading">

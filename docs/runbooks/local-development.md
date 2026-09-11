@@ -30,6 +30,7 @@ Sau `npm run build`, API cũng phục vụ giao diện build tại cổng 4310. 
 4. **Xem trước:** xem ảnh gốc, nhãn/SKU, GIÁ GỐC và giá mục tiêu. Mô tả có toàn bộ ảnh đã chọn giữa câu mở đầu và nội dung còn lại.
 5. **Kết nối shop:** với sandbox đã khai báo, nhập Test Partner Key / Access Token của đúng app/shop. Lệnh kiểm tra chỉ đọc `v2.shop.get_shop_info`. Không gửi khóa qua chat. Cấp quyền và refresh tự động còn đang làm; token nhập thủ công không có thời điểm hết hạn đã được xác minh.
 6. **Kế hoạch:** lưu scope và revision để chuẩn bị. Kế hoạch có lỗi chặn sẽ không được gửi vào hàng đợi. Executor hiện chưa được phát hành, nên chưa có lệnh ghi Shopee từ đường này.
+7. **Tra cứu & kiểm tra:** tìm từ khóa trong hai kho tài liệu Shopee, mở bản đầy đủ hoặc kiểm một kế hoạch đã lưu. Kết quả/nguồn/lịch sử giữ trong PostgreSQL; chưa dùng model AI và chưa xác nhận đã đăng/QC. Đọc [hướng dẫn harness](agent-evaluation.md) về nguồn thiếu, deadline và bộ đánh giá.
 
 ## Kiểm tra và điều tra lỗi
 

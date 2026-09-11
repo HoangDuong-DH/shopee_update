@@ -5,7 +5,7 @@ export default defineConfig({
   workers: 1,
   timeout: 30000,
   reporter: [['list'], ['json', { outputFile: '.local/e2e-results.json' }]],
-  outputDir: '.local/e2e-artifacts',
+  outputDir: '.local/e2e-artifacts/runner',
   use: {
     baseURL: 'http://127.0.0.1:5173',
     channel: 'msedge',

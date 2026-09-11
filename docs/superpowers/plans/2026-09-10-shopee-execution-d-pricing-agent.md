@@ -56,6 +56,8 @@ Nếu quy tắc về sau cho tỷ lệ phân số, bổ sung rational numerator/
 
 ## D2 — Kiến thức có nguồn, agent harness, MCP và eval
 
+**Bổ sung 11/09/2026:** đang triển khai phần đầu theo [kế hoạch harness](2026-09-11-harness-foundation.md). Đã có tra cứu manifest/FTS, đọc toàn bài, lớp công cụ chỉ đọc có ngân sách/phạm vi, lịch sử PostgreSQL, UI và fixture đánh giá ranh giới. Chưa cấu hình LLM, SDK, MCP, tự cập nhật KB, đề xuất sửa kế hoạch hoặc bộ eval diễn giải chính sách bằng model; D2 chưa qua gate.
+
 **Files tạo:** `packages/agent-runtime/package.json`, `packages/agent-runtime/src/harness.ts`, `packages/agent-runtime/src/retrieval.ts`, `packages/agent-runtime/src/tools.ts`, `packages/agent-runtime/src/output-schema.ts`, `packages/agent-runtime/src/budget.ts`, `packages/mcp-server/package.json`, `packages/mcp-server/src/server.ts`, `apps/api/src/assistant/assistant.controller.ts`, `apps/web/src/features/assistant/AssistantPanel.tsx`, `tests/evals/cases.jsonl`, `tests/evals/run.mts`, `tests/unit/tool-scope.test.ts`, `docs/runbooks/agent-evaluation.md`.
 
 **Interfaces:** `runAssistant`/`resolveAgentScope` trong contracts. Tools đầu tiên: `search_knowledge(query, scope)`, `read_source(documentId)`, `inspect_plan(planId)`, `explain_issue(planId, issueCode)`, `propose_plan_revision(planId, changes)`. Khi cho phép thực thi từ trợ lý, thêm `submit_authorized_plan(planId, revision, fingerprint)` gọi đúng service submit, yêu cầu scope đã được người dùng khởi chạy; tool không cấp quyền mới.

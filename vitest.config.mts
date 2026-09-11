@@ -8,6 +8,9 @@ export default defineConfig({
         new URL('./packages/persistence/src/index.ts', import.meta.url),
       ),
       '@shopee/gateway': fileURLToPath(new URL('./packages/shopee/src/index.ts', import.meta.url)),
+      '@shopee/agent-runtime': fileURLToPath(
+        new URL('./packages/agent-runtime/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {

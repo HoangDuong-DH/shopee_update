@@ -8,7 +8,8 @@
     "paths": {
       "@shopee/domain": ["./packages/domain/src/index.ts"],
       "@shopee/persistence": ["./packages/persistence/src/index.ts"],
-      "@shopee/gateway": ["./packages/shopee/src/index.ts"]
+      "@shopee/gateway": ["./packages/shopee/src/index.ts"],
+      "@shopee/agent-runtime": ["./packages/agent-runtime/src/index.ts"]
     }
   },
   "include": [
