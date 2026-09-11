@@ -20,7 +20,7 @@ export function ConnectionForm({
       const r = await post<any>('/v1/connections/sandbox', {
         connectionId: shop.id,
         expectedRevision: shop.scope.connectionRevision,
-        partnerKey: key,
+        partnerKey: key || undefined,
         accessToken: token,
         refreshToken: refresh || undefined,
       });
@@ -55,22 +55,6 @@ export function ConnectionForm({
         {shop.scope.shopId}. Bước này chỉ đọc thông tin shop.
       </p>
       <label>
-        Test Partner Key
-        <input
-          type="password"
-          autoComplete="off"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        />
-      </label>
-      <p className="caption">
-        Lấy key tại{' '}
-        <a href="https://open.shopee.com/console/app" target="_blank" rel="noreferrer">
-          App List
-        </a>{' '}
-        → app có Test Partner ID {shop.scope.partnerId} → APP Key → Test API Partner Key.
-      </p>
-      <label>
         Sandbox Access Token
         <input
           type="password"
@@ -79,15 +63,42 @@ export function ConnectionForm({
           onChange={(e) => setToken(e.target.value)}
         />
       </label>
-      <label>
-        Sandbox Refresh Token · nếu có
-        <input
-          type="password"
-          autoComplete="off"
-          value={refresh}
-          onChange={(e) => setRefresh(e.target.value)}
-        />
-      </label>
+      <p className="caption">
+        Khi làm mới kết nối, chỉ cần dán Access Token mới. Partner Key đã lưu được dùng lại trên
+        server.
+      </p>
+      <details open={shop.state === 'disconnected' ? true : undefined}>
+        <summary>Partner Key lần đầu / đổi khóa hoặc bổ sung Refresh Token</summary>
+        <label>
+          Test Partner Key
+          <input
+            type="password"
+            autoComplete="off"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+        </label>
+        <p className="caption">
+          Lần đầu kết nối cần nhập key tại{' '}
+          <a href="https://open.shopee.com/console/app" target="_blank" rel="noreferrer">
+            App List
+          </a>{' '}
+          → app có Test Partner ID {shop.scope.partnerId} → APP Key → Test API Partner Key. Những
+          lần sau để trống để giữ key đã lưu của đúng kết nối này.
+        </p>
+        <label>
+          Sandbox Refresh Token · nếu có
+          <input
+            type="password"
+            autoComplete="off"
+            value={refresh}
+            onChange={(e) => setRefresh(e.target.value)}
+          />
+        </label>
+        <p className="caption">
+          Để trống sẽ giữ Refresh Token đã lưu, nếu có. Ứng dụng chưa tự làm mới token.
+        </p>
+      </details>
       <p className="caption">
         Lấy access_token tại{' '}
         <a href="https://open.shopee.com/console/tools/api-test" target="_blank" rel="noreferrer">
@@ -100,7 +111,7 @@ export function ConnectionForm({
       </p>
       <button
         className="primary"
-        disabled={busy || key.length < 8 || token.length < 8}
+        disabled={busy || (key.length > 0 && key.trim().length < 8) || token.trim().length < 8}
         onClick={() => void connect()}
       >
         {busy ? 'Đang gọi API đọc shop…' : 'Kiểm tra & lưu kết nối TEST'}

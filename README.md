@@ -2,7 +2,7 @@
 
 Ứng dụng nội bộ để tiếp nhận bộ listing đã chuẩn bị, đối chiếu SKU/giá/nội dung/ảnh và chuẩn bị đăng/cập nhật cho nhiều shop. Bảng giá là nguồn tra cứu, không phải nơi tự ghép các SKU thành listing.
 
-**Trạng thái 11/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Luồng đăng/cập nhật Shopee, làm mới token tự động, khuyến mại, QC, đo tải và chạy bền 24 giờ còn trong kế hoạch. Không có lệnh ghi Shopee trong worker hiện tại. Kết nối sandbox mới hỗ trợ kiểm tra bằng API đọc shop.
+**Trạng thái 11/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Trang chính là **Công việc đăng hàng**, gắn bản nguồn đã chuẩn bị với từng shop. Backend có luồng cập nhật giới hạn trên listing Lamy sandbox: đọc, xem thay đổi, gửi các trường được chọn và đọc lại. Đăng mới hàng loạt, làm mới token tự động, khuyến mại, QC, đo tải và chạy bền 24 giờ còn trong kế hoạch. Shop thật chỉ đọc; worker hiện tại xử lý nguồn, chưa chạy hàng đợi đăng listing.
 
 ## Chạy tại máy
 
@@ -20,6 +20,9 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 
 ## Phần đã triển khai
 
+- Bảng công việc tách bộ nguồn khỏi nơi đăng: chọn nhiều bộ, shop đích, đăng mới/cập nhật và trường cần cập nhật. Lưu cấu hình có phiên bản; phân biệt thiếu nguồn, cần ánh xạ, lỗi kết nối, xung đột và tính năng chưa hỗ trợ. Tồn đăng bán nhập riêng theo SKU/shop, để trống không được hiểu là 0.
+- Hồ sơ bàn giao tùy chọn được xuất từ nguồn đã lưu, dùng lại ánh xạ nội dung/ảnh/SKU/giá. Nhập lại cần xem khác biệt trước khi lưu; không thay thế các tệp nguồn và không yêu cầu nhân viên tự viết JSON. Luồng đầu vào chính vẫn là thư mục Word/ảnh với bảng giá chung.
+- Luồng sandbox trực tiếp chỉ cho phép partner `1232297`, shop `227418363`, item `803934364`; các trường `title`, `description`, `gallery`. Giữ byte ảnh và bố cục nguồn; kiểm SKU/nhãn, giới hạn thật từ API, phiên bản công việc và dữ liệu trước khi gửi. Ghi checkpoint, khóa mục tiêu, đọc lại cả trường được chọn và trường giữ nguyên. Kết quả chưa rõ được phục hồi từ server để đối chiếu, không tự gửi lại.
 - Nhập Excel KINI, Word và ảnh PNG/JPEG/WebP qua HTTP; xử lý bằng worker riêng và lưu tệp theo SHA-256.
 - Ánh xạ theo nhãn của từng khối, hỗ trợ khối cạnh nhau và bộ giá có tiêu đề phân nhóm. Cột mơ hồ được đánh dấu; sheet chưa có mapping được hiển thị rõ.
 - **Kho đầu vào** tách bảng giá dùng chung khỏi các bộ Word/ảnh theo thư mục listing. Nhận nhiều thư mục trong một đợt, lưu đường dẫn, nguồn giá, cách đọc Word và thứ tự ảnh vào PostgreSQL; mở lại đợt sau khi tải lại trang mà không tải lại tệp đã nhận. Phiên bản bất biến và kiểm tra xung đột bảo vệ lựa chọn của người khác.
@@ -31,7 +34,7 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 - Kết nối sandbox bằng Test Partner Key / Access Token nhập ở UI, gọi `get_shop_info` trực tiếp. Khóa/token mã hóa tại server và không được trả lại UI.
 - Bổ sung 11/09: **Tra cứu & kiểm tra** dùng hai kho Shopee tại máy, mở toàn bài có metadata/hash, kiểm scope/phiên bản kế hoạch và lưu lịch sử vào PostgreSQL. Harness chỉ có công cụ đọc, giới hạn lượt/thời gian; chưa cấu hình LLM hoặc MCP. Đây chưa phải bộ kiểm chính sách ngành đầy đủ hoặc QC Shopee.
 
-Tồn thủ công đã có hợp đồng và quy tắc không tự bù sau đơn hàng; **màn hình nhập lệnh tồn và executor chưa hoàn tất**. Chưa tự suy ngành, thương hiệu, chứng từ, logistics, giới hạn ảnh hoặc quyền API từ ví dụ tài liệu.
+Mức tồn đã có chỗ nhập trong cấu hình công việc; chưa nối sang lệnh cập nhật tồn Shopee và không tự bù sau đơn hàng. Chưa tự suy ngành, thương hiệu, chứng từ, logistics hoặc quyền API từ ví dụ tài liệu. Bìa, phân loại, giá, tồn, vận chuyển và các trường còn lại chưa có executor được nghiệm thu; giới hạn sandbox không áp làm mặc định production.
 
 ## Kiểm tra
 
@@ -47,6 +50,7 @@ Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL t
 
 - [Hướng dẫn chạy](docs/runbooks/local-development.md)
 - [Cách dùng giao diện listing](docs/runbooks/listing-workspace.md)
+- [Công việc theo shop và phép thử backend](docs/delivery/2026-09-11-operation-workbench.md)
 - [Kho đầu vào và phục hồi đợt nhập](docs/delivery/2026-09-11-input-library.md)
 - [Mốc thực thi và giới hạn](docs/delivery/2026-09-10-foundation.md)
 - [Kiểm tra tiếp nối 11/09](docs/delivery/2026-09-11-checkpoint.md)

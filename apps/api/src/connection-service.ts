@@ -2,31 +2,67 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Repository, transaction } from '@shopee/persistence';
 import { SecretBox, readShopInfo } from '@shopee/gateway';
-const schema = z.object({
-  connectionId: z.string().uuid(),
-  expectedRevision: z.number().int().positive(),
-  partnerKey: z.string().min(8).max(4096),
-  accessToken: z.string().min(8).max(4096),
-  refreshToken: z.string().max(4096).optional(),
-});
-export async function connectSandbox(repo: Repository, raw: unknown) {
+const schema = z
+  .object({
+    connectionId: z.string().uuid(),
+    expectedRevision: z.number().int().positive(),
+    partnerKey: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+      z.string().trim().min(8).max(4096).optional(),
+    ),
+    accessToken: z.string().trim().min(8).max(4096),
+    refreshToken: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+      z.string().trim().min(1).max(4096).optional(),
+    ),
+  })
+  .strict();
+export async function connectSandbox(
+  repo: Repository,
+  raw: unknown,
+  options: { transport?: typeof fetch; encryptionKey?: string } = {},
+) {
   const input = schema.parse(raw),
-    box = new SecretBox(process.env.APP_ENCRYPTION_KEY ?? '');
+    box = new SecretBox(options.encryptionKey ?? process.env.APP_ENCRYPTION_KEY ?? '');
   const connection = (
     await repo.pool.query('SELECT * FROM connections WHERE id=$1', [input.connectionId])
   ).rows[0];
   if (!connection || connection.environment !== 'sandbox')
     throw new Error('INVALID_SANDBOX_CONNECTION');
   if (connection.revision !== input.expectedRevision) throw new Error('PRODUCT_REVISION_CONFLICT');
-  const result = await readShopInfo({
-    environment: 'sandbox',
-    partnerId: connection.partner_id,
-    shopId: connection.shop_id,
-    partnerKey: input.partnerKey,
-    accessToken: input.accessToken,
-  });
-  if (result.kind !== 'success') return result;
   const scopeKey = `sandbox:${connection.partner_id}:${connection.shop_id}`;
+  let partnerKey = input.partnerKey,
+    refreshToken = input.refreshToken;
+  if (!partnerKey) {
+    if (!connection.partner_key_ciphertext) throw new Error('SANDBOX_PARTNER_KEY_REQUIRED');
+    try {
+      partnerKey = z
+        .object({ partnerKey: z.string().min(8).max(4096) })
+        .parse(box.open(connection.partner_key_ciphertext, scopeKey)).partnerKey;
+    } catch {
+      throw new Error('SANDBOX_SAVED_CREDENTIAL_INVALID');
+    }
+  }
+  if (!refreshToken && connection.token_ciphertext) {
+    try {
+      refreshToken = z
+        .object({ refreshToken: z.string().max(4096).optional() })
+        .parse(box.open(connection.token_ciphertext, scopeKey)).refreshToken;
+    } catch {
+      throw new Error('SANDBOX_SAVED_CREDENTIAL_INVALID');
+    }
+  }
+  const result = await readShopInfo(
+    {
+      environment: 'sandbox',
+      partnerId: connection.partner_id,
+      shopId: connection.shop_id,
+      partnerKey,
+      accessToken: input.accessToken,
+    },
+    options.transport,
+  );
+  if (result.kind !== 'success') return result;
   const revision = connection.revision + 1,
     scope = {
       environment: 'sandbox',
@@ -56,16 +92,18 @@ export async function connectSandbox(repo: Repository, raw: unknown) {
   };
   await transaction(repo.pool, async (c) => {
     const updated = await c.query(
-      `UPDATE connections SET name=$2,region=$3,revision=$4,capability_revision=capability_revision+1,state='connected',token_ciphertext=$5,partner_key_ciphertext=$6,capabilities=$7,expires_at=NULL,updated_at=now() WHERE id=$1 AND revision=$8 RETURNING id`,
+      `UPDATE connections SET name=$2,region=$3,revision=$4,capability_revision=capability_revision+1,state='connected',token_ciphertext=$5,partner_key_ciphertext=$6,capabilities=$7,expires_at=NULL,updated_at=now() WHERE id=$1 AND revision=$8 AND environment='sandbox' AND partner_id=$9 AND shop_id=$10 RETURNING id`,
       [
         connection.id,
         result.info.shopName,
         result.info.region,
         revision,
-        box.seal({ accessToken: input.accessToken, refreshToken: input.refreshToken }, scopeKey),
-        box.seal({ partnerKey: input.partnerKey }, scopeKey),
+        box.seal({ accessToken: input.accessToken, refreshToken }, scopeKey),
+        box.seal({ partnerKey }, scopeKey),
         JSON.stringify([capability]),
         input.expectedRevision,
+        connection.partner_id,
+        connection.shop_id,
       ],
     );
     if (!updated.rowCount) throw new Error('PRODUCT_REVISION_CONFLICT');

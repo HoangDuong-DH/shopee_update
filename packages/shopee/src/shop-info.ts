@@ -49,7 +49,6 @@ export async function readShopInfo(
       signal: AbortSignal.timeout(12000),
       headers: { Accept: 'application/json' },
     });
-    if (!response.ok) return { kind: 'unknown', reason: 'transport' };
     const text = await response.text();
     if (text.length > 2 * 1024 * 1024) return { kind: 'unknown', reason: 'invalid_response' };
     const raw = JSON.parse(text);
@@ -59,6 +58,7 @@ export async function readShopInfo(
     if (!common.success) return { kind: 'unknown', reason: 'invalid_response' };
     if (common.data.error)
       return { kind: 'rejected', code: common.data.error, requestId: common.data.request_id };
+    if (!response.ok) return { kind: 'unknown', reason: 'transport' };
     // This API returns shop fields at the top level, unlike most Product endpoints.
     const parsed = z
       .object({

@@ -2,12 +2,13 @@
 
 Cập nhật ngày **11/09/2026**. Mở http://127.0.0.1:5173/ trên máy đang chạy ứng dụng. Nút **Hướng dẫn** trong ứng dụng cũng mở các bước sử dụng cơ bản.
 
-Ứng dụng tiếp nhận bộ listing công ty đã chuẩn bị, gồm danh sách SKU, tên phân loại, nội dung và ảnh. Luồng chính bắt đầu từ **thư mục của từng listing**. Bản hiện tại giúp đọc nguồn, đối chiếu và lưu bản nháp nội bộ; **chưa bật đăng/cập nhật Shopee**.
+Ứng dụng tiếp nhận bộ listing công ty đã chuẩn bị, gồm danh sách SKU, tên phân loại, nội dung và ảnh. Luồng chính bắt đầu từ **thư mục của từng listing**. Trang **Công việc đăng hàng** gắn một bản nguồn với một shop để theo dõi phần cần xử lý. Bản hiện tại có phép cập nhật giới hạn cho Lamy sandbox; **shop thật chỉ đọc, chưa có đăng mới hàng loạt**.
 
-## Ba nơi làm việc chính
+## Các nơi làm việc chính
 
 | Mục | Dùng khi nào |
 | --- | --- |
+| **Công việc đăng hàng** | Chọn bộ đã có, shop đích, công việc đăng mới/cập nhật; xử lý ngoại lệ và theo dõi phép thử sandbox |
 | **Listing của tôi** | Mở bộ đã lưu hoặc nhập các thư mục listing đã chuẩn bị |
 | **Kho đầu vào** | Bảng giá dùng chung, các đợt thư mục đang làm và bộ listing đã tiếp nhận |
 | **Kết quả** | Xem bản kiểm tra theo shop và trạng thái công việc; bản kiểm tra nội bộ chưa phải kết quả đăng Shopee |
@@ -108,7 +109,19 @@ Sau khi lưu, mở lại đúng bộ nguồn đã nhận diện có thể hiện
 
 Để sửa một bộ đã có: mở tên bộ → **Đối chiếu nguồn** → **Điều chỉnh nội dung và ảnh**. Bản đã lưu mở ở chế độ chỉ xem. Danh sách SKU, tên nhóm và nhãn đã tiếp nhận được khóa; chỉnh nội dung/ảnh không thêm SKU sang listing khác.
 
-Chỉ chọn **Shop đích** khi cần lưu bản kiểm tra theo shop. Đây vẫn là bản kiểm tra trong ứng dụng, chưa đăng mới hoặc cập nhật link đang có.
+## Công việc theo shop
+
+1. Tại **Công việc đăng hàng**, dùng **Nhận thư mục listing** cho bộ mới. Nếu bộ đã lưu, bấm **Chọn bộ đã có**; có thể chọn nhiều bộ trong một lần.
+2. Chọn rõ shop và đăng mới hay cập nhật. Ứng dụng tạo công việc nội bộ, chưa gửi lên Shopee.
+3. Mở công việc. Với cập nhật, nhập đúng mã item và chọn những trường được phép thay đổi. Với đăng mới, nhập mức tồn theo từng SKU/shop khi đã quyết định. Đổi shop sẽ bỏ lựa chọn item và mức tồn của shop trước.
+4. Xử lý các mục **Cần xử lý**. “Nguồn chưa có thông tin” khác “Ứng dụng chưa hỗ trợ”: không sửa nguồn để vượt qua một tính năng chưa được triển khai.
+5. Với đúng Lamy sandbox, bấm đọc và đối chiếu, xem bản thay đổi đã lưu, rồi mới gửi. Bước này hiện chỉ hỗ trợ tiêu đề, mô tả và ảnh sản phẩm; ảnh bìa, SKU, giá, tồn và thông tin khác được đọc lại để kiểm tra giữ nguyên.
+
+Nếu kết quả chưa rõ, mở công việc và dùng **đọc đối chiếu**. Lần thực hiện được giữ trên server, có thể tìm lại ở trình duyệt khác. Không gửi lại chỉ vì tab đã đóng. Công việc có lần gửi chưa rõ sẽ chặn thay cấu hình cho đến khi được đối chiếu.
+
+**Mã ảnh bìa thay đổi sau khi lưu:** Shopee có thể trả mã mới. Ứng dụng chưa tự kết luận hai ảnh giống nhau, nên giữ yêu cầu đối chiếu dù các trường khác đã khớp. Mở ảnh tại Shopee và nguồn để người hỗ trợ kiểm tra; bấm đọc đối chiếu chỉ đọc lại, không phục hồi hoặc gửi ảnh lần nữa. Trường hợp Lamy ngày 11/09 đã khôi phục bìa đúng bằng phép sửa riêng, nhưng còn chờ cơ chế chấp nhận ảnh đổi mã có bằng chứng trong ứng dụng.
+
+**Nhập / xuất hồ sơ** là cách dùng lại tùy chọn cho những bộ đã nhận. Hồ sơ do ứng dụng tạo, tham chiếu các tệp đã có trên cùng máy chủ; không phải tệp ảnh/Word đóng gói và không dùng để chuyển nguyên bộ sang máy chủ khác. Nhập hồ sơ chỉ lưu nguồn nội bộ sau khi xem khác biệt, chưa gửi Shopee.
 
 ## Tệp lỗi, công việc đang làm và tải lại trang
 
@@ -126,4 +139,4 @@ Nguồn thiếu, bố trí chưa hỗ trợ hoặc SKU/giá không rõ phải đ
 
 **Tra cứu & kiểm tra** dùng kho kiến thức tại máy. Kết quả tìm tài liệu chưa chứng minh chính sách hiện hành, quyền shop hoặc QC Shopee.
 
-Bản hiện tại chưa có đăng hàng loạt, nhận diện toàn bộ cấu trúc tài liệu bằng thị giác, thuộc tính ngành động đầy đủ, cập nhật item/model, nhập lệnh tồn trên UI, QC, Flash Sale hoặc vận hành 24 giờ. Nhập thư mục giúp giảm việc tải và chọn lại nguồn; không có nghĩa các khả năng đó đã được nghiệm thu.
+Bản hiện tại chưa có đăng mới hàng loạt, nhận diện toàn bộ cấu trúc tài liệu bằng thị giác, thuộc tính ngành động đầy đủ, cập nhật model/giá/tồn trên Shopee, QC, Flash Sale hoặc vận hành 24 giờ. Mức tồn trong công việc mới là quyết định được lưu, chưa được gửi. Nhập thư mục và phép thử cập nhật Lamy không chứng minh các khả năng còn lại đã được nghiệm thu.

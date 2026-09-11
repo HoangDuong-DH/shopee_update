@@ -2,6 +2,8 @@
 
 ## Ứng dụng nội bộ đang triển khai — 10/09/2026
 
+- Checkpoint 11/09 cuối ngày: đọc `docs/delivery/2026-09-11-operation-workbench.md` trước khi tiếp nối. Trang **Công việc đăng hàng**, hồ sơ bàn giao nguồn, WorkOrder CAS và sandbox intents/checkpoints đã có; migrations 005–006 đã áp dụng local. Backend đã ghi tiêu đề/mô tả/gallery vào đúng Lamy sandbox, tái dùng 17 mã ảnh. Readback phát hiện gallery update thiếu `promotion_images` làm đổi bìa; đã sửa payload và khôi phục đúng bìa bằng API riêng. Shopee đổi mã bìa khi lưu, nên run vẫn `unknown`, không phải đã nghiệm thu toàn bộ. Không gửi lại update cũ hoặc tạo Lamy trùng. Nguồn `lamy-5d` revision 1 giữ nguyên; production, đăng mới, worker 24h, refresh token và QC vẫn chưa nghiệm thu.
+
 - Bổ sung 11/09: đã thêm phần đầu harness chỉ đọc tại `packages/agent-runtime/`, API/UI **Tra cứu & kiểm tra**, migration `003_assistant_reviews.sql`. Đọc `docs/runbooks/agent-evaluation.md` và `docs/superpowers/plans/2026-09-11-harness-foundation.md`. `npm run test:eval` hiện là fixture xác định bằng chương trình, không đo LLM hoặc ghi Shopee. D2 còn in_progress; chưa có model/SDK/MCP, refresh KB hoặc kết luận policy động. Bản chép lời YC Harness Club là dữ liệu tham khảo, không cấp quyền tự sửa nguồn, code/rule live hoặc sinh agent không giới hạn.
 
 - Mã mới ở `apps/` và `packages/`; extension root được giữ nguyên. Đọc `README.md`, `docs/runbooks/local-development.md`, `docs/delivery/2026-09-10-foundation.md` và execution ledger trước khi báo tiến độ.

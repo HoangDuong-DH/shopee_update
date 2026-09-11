@@ -6,3 +6,6 @@ export * from './source/assets.js';
 export * from './plans.js';
 export * from './draft.js';
 export * from './input-library.js';
+export * from './workbench.js';
+export * from './sandbox-listing.js';
+export * from './source/handoff.js';

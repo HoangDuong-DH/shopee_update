@@ -49,6 +49,26 @@ it('does not interpret malformed success or timeout as a verified connection', a
     ).kind,
   ).toBe('unknown');
 });
+it('recognizes structured invalid token errors on HTTP403 rather than reporting a network failure', async () => {
+  const result = await readShopInfo(
+    {
+      environment: 'sandbox',
+      partnerId: '123',
+      shopId: '456',
+      partnerKey: 'test-key',
+      accessToken: 'test-access',
+    },
+    async () =>
+      new Response(JSON.stringify({ error: 'invalid_acceess_token', request_id: 'mock-auth' }), {
+        status: 403,
+      }),
+  );
+  expect(result).toEqual({
+    kind: 'rejected',
+    code: 'invalid_acceess_token',
+    requestId: 'mock-auth',
+  });
+});
 it('binds encrypted credentials to the intended connection and rejects tampering', () => {
   const box = new SecretBox('ab'.repeat(32));
   const encrypted = box.seal({ accessToken: 'private' }, 'sandbox:123:456');

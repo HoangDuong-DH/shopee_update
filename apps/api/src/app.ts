@@ -26,6 +26,9 @@ import { connectSandbox } from './connection-service.js';
 import { AssistantService, type KnowledgePort } from './assistant-service.js';
 import { KnowledgeLibrary } from '@shopee/agent-runtime';
 import { InputService } from './input-service.js';
+import { WorkbenchService } from './workbench-service.js';
+import { HandoffService } from './handoff-service.js';
+import { SandboxListingService } from './sandbox-listing-service.js';
 const REPO = Symbol('repository'),
   BLOBS = Symbol('blobs');
 const id = (s: string) => z.string().uuid().parse(s);
@@ -110,6 +113,35 @@ class ApiErrors implements ExceptionFilter {
       return reply.status(409).send({ code, message: code });
     if (/^(SOURCE_|ASSET_|NOT_FOUND|INVALID_)/.test(code))
       return reply.status(400).send({ code, message: code });
+    if (/^WORK_ORDER_/.test(code))
+      return reply.status(code === 'WORK_ORDER_NOT_FOUND' ? 404 : 409).send({
+        code,
+        message:
+          'Công việc chưa lưu được. Đối chiếu bản đã lưu, nguồn và shop đích trước khi thử lại.',
+      });
+    if (/^HANDOFF_/.test(code))
+      return reply
+        .status(409)
+        .send({
+          code,
+          message:
+            'Hồ sơ bàn giao chưa khớp nguồn hoặc bản đã lưu. Giữ tài liệu và đối chiếu lại trước khi áp dụng.',
+        });
+    if (/^SANDBOX_API_REJECTED:/.test(code)) {
+      const auth = /access|acceess|auth|token/i.test(code);
+      return reply
+        .status(409)
+        .send({
+          code: auth ? 'SANDBOX_AUTH_REQUIRED' : 'SANDBOX_API_REJECTED',
+          message: auth
+            ? 'Shopee không chấp nhận token TEST đã lưu. Mở Kết nối shop và cập nhật token hợp lệ.'
+            : 'Shopee từ chối yêu cầu. Giữ bộ nguồn và kiểm tra điều kiện của shop.',
+        });
+    }
+    if (/^SANDBOX_/.test(code))
+      return reply
+        .status(code === 'SANDBOX_RUN_NOT_FOUND' ? 404 : 409)
+        .send({ code, message: 'Lần kiểm tra sandbox cần được đối chiếu lại trước khi tiếp tục.' });
     return reply.status(503).send({
       code: 'SERVICE_UNAVAILABLE',
       message: 'Dịch vụ chưa sẵn sàng. Dữ liệu đã lưu vẫn được giữ; vui lòng thử lại.',
@@ -123,7 +155,51 @@ class AppController {
     @Inject(BLOBS) readonly blobs: BlobStore,
     @Inject(AssistantService) readonly assistant: AssistantService,
     @Inject(InputService) readonly input: InputService,
+    @Inject(WorkbenchService) readonly workbench: WorkbenchService,
+    @Inject(HandoffService) readonly handoffs: HandoffService,
+    @Inject(SandboxListingService) readonly sandbox: SandboxListingService,
   ) {}
+  @Get('handoffs/products/:key') exportHandoff(@Param('key') key: string) {
+    return this.handoffs.exportProduct(key);
+  }
+  @Post('handoffs/preview') previewHandoff(@Body() raw: unknown) {
+    return this.handoffs.preview(raw);
+  }
+  @Post('handoffs/apply') applyHandoff(@Body() raw: unknown) {
+    return this.handoffs.apply(raw);
+  }
+  @Post('sandbox-listings/read') readSandbox(@Body() raw: unknown) {
+    return this.sandbox.read(raw);
+  }
+  @Post('sandbox-listings/prepare') prepareSandbox(@Body() raw: unknown) {
+    return this.sandbox.prepare(raw);
+  }
+  @Get('sandbox-listings/runs/:id') getSandboxRun(@Param('id') key: string) {
+    return this.sandbox.get(id(key));
+  }
+  @Post('sandbox-listings/runs/:id/execute') executeSandbox(
+    @Param('id') key: string,
+    @Body() raw: unknown,
+  ) {
+    const input = z.object({ expectedRevision: z.number().int().positive() }).strict().parse(raw);
+    return this.sandbox.execute({ id: id(key), ...input });
+  }
+  @Post('sandbox-listings/runs/:id/reconcile') reconcileSandbox(
+    @Param('id') key: string,
+    @Body() raw: unknown,
+  ) {
+    const input = z.object({ expectedRevision: z.number().int().positive() }).strict().parse(raw);
+    return this.sandbox.reconcile({ id: id(key), ...input });
+  }
+  @Get('workbench') getWorkbench() {
+    return this.workbench.list();
+  }
+  @Get('work-orders/:id') workOrder(@Param('id') key: string) {
+    return this.workbench.get(id(key));
+  }
+  @Post('work-orders') saveWorkOrder(@Body() raw: unknown) {
+    return this.workbench.save(raw);
+  }
   @Get('input-library') inputLibrary() {
     return this.input.library.library();
   }
@@ -357,6 +433,9 @@ export async function createApp(
       { provide: REPO, useValue: repo },
       { provide: BLOBS, useValue: blobs },
       { provide: InputService, useValue: new InputService(repo) },
+      { provide: WorkbenchService, useValue: new WorkbenchService(repo) },
+      { provide: HandoffService, useValue: new HandoffService(repo) },
+      { provide: SandboxListingService, useValue: new SandboxListingService(repo, blobs) },
       { provide: DB_PROBE, useValue: () => repo.probe() },
       {
         provide: AssistantService,

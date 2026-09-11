@@ -30,7 +30,11 @@ import { UsageGuide } from './UsageGuide.js';
 import { FolderIntake, type FolderManualContext } from './FolderIntake.js';
 import { createFolderReader } from './folder-reader.js';
 import { newIntakeDraft, type IntakeDraft } from './intake-state.js';
+import { Workbench } from './Workbench.js';
+import { HandoffIntake } from './HandoffIntake.js';
 type Page =
+  | 'workbench'
+  | 'handoff'
   | 'products'
   | 'sources'
   | 'results'
@@ -42,12 +46,12 @@ type Page =
   | 'guide'
   | 'folder';
 const navigation = [
+  { id: 'workbench', label: 'Công việc đăng hàng', icon: CheckCheck },
   { id: 'products', label: 'Listing của tôi', icon: LayoutList },
   { id: 'sources', label: 'Kho đầu vào', icon: Files },
-  { id: 'results', label: 'Kết quả', icon: CheckCheck },
 ] as const;
 export default function Workspace() {
-  const [page, setPage] = useState<Page>('products'),
+  const [page, setPage] = useState<Page>('workbench'),
     [imports, setImports] = useState<ImportRecord[]>([]),
     [products, setProducts] = useState<ListingDraft[]>([]),
     [shops, setShops] = useState<ShopConnection[]>([]),
@@ -312,8 +316,8 @@ export default function Workspace() {
       <header className="app-header">
         <button
           className="app-brand"
-          onClick={() => go('products')}
-          aria-label="Về Listing của tôi"
+          onClick={() => go('workbench')}
+          aria-label="Về công việc đăng hàng"
         >
           <span className="brand-tile">
             <LayoutList size={23} />
@@ -363,7 +367,7 @@ export default function Workspace() {
           <span className={'dot ' + (status?.worker === 'online' ? 'online' : '')} />
           {status?.worker === 'online' ? 'Ứng dụng đang hoạt động' : 'Đang kiểm tra kết nối'}
         </span>
-        <span>Nhập và đối chiếu nguồn · Chưa bật đăng/cập nhật lên Shopee</span>
+        <span>Shop thật chỉ đọc · Thực thi sandbox theo phạm vi đã kiểm tra</span>
       </div>
       <main id="workspace-main" className="workspace-main">
         {uploadProgress}
@@ -445,6 +449,39 @@ export default function Workspace() {
           </div>
         ) : (
           <>
+            {page === 'workbench' && (
+              <Workbench
+                onReceive={() => go('handoff')}
+                onFolders={() => startBatch()}
+                onSource={open}
+                onShops={() => go('shops')}
+                onDirty={setDirty}
+                onBusy={setSaveBusy}
+              />
+            )}
+            {page === 'handoff' && (
+              <>
+                <button className="back-link" onClick={() => go('workbench')}>
+                  <ArrowLeft size={15} /> Về công việc đăng hàng
+                </button>
+                <HandoffIntake
+                  products={products}
+                  onSaved={(saved) => {
+                    setDirty(false);
+                    setProducts((current) => [
+                      saved,
+                      ...current.filter((source) => source.productKey !== saved.productKey),
+                    ]);
+                    void refresh();
+                    setPage('workbench');
+                  }}
+                  onFolder={() => startBatch()}
+                  onDirty={setDirty}
+                  onBusy={setSaveBusy}
+                  externalBusy={uploadBusy || folderBusy}
+                />
+              </>
+            )}
             {page === 'products' && (
               <>
                 <div className="page-heading">
@@ -804,7 +841,7 @@ export default function Workspace() {
             )}
             {page === 'assistant' && <AssistantPanel plans={plans} />}
             {page === 'guide' && (
-              <UsageGuide onImport={() => startBatch()} onListings={() => go('products')} />
+              <UsageGuide onImport={() => startBatch()} onListings={() => go('workbench')} />
             )}
             {page === 'shops' && (
               <>

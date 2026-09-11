@@ -252,6 +252,10 @@ const twoFolders: FolderFileFixture[] = [
 
 async function openFolders(page: Page, directory: string) {
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Listing của tôi', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Bảng giá chung', exact: true })

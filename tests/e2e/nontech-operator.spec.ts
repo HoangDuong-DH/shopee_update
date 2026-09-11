@@ -82,6 +82,10 @@ async function useIntakeFixture(page: Page) {
 
 async function openSourceStep(page: Page) {
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Listing của tôi', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   await page.getByRole('combobox', { name: 'File bảng giá', exact: true }).selectOption(sourceId);
@@ -162,6 +166,10 @@ test('fixture: offers explicit recovery after refresh without silently restoring
   await page.getByLabel('SKU dòng 1', { exact: true }).fill('SKU-A');
   await page.getByLabel('Nhãn nhóm 1 dòng 1', { exact: true }).fill('  Gói 12  cái ');
   await page.reload();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Listing của tôi', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   await expect(
@@ -221,6 +229,10 @@ test('fixture: the shared price intake accepts only workbooks and retries unchan
   await page.goto('/');
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Listing của tôi', exact: true })
+    .click();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
     .getByRole('button', { name: 'Kho đầu vào', exact: true })
     .click();
   await page.getByRole('tab', { name: /^Bảng giá chung/ }).click();
@@ -263,6 +275,10 @@ test('fixture: the shared price intake rejects Word instead of mixing listing co
 }) => {
   const unexpectedWrites = await useIntakeFixture(page);
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Listing của tôi', exact: true })
+    .click();
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
     .getByRole('button', { name: 'Kho đầu vào', exact: true })
