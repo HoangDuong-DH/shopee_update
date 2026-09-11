@@ -24,7 +24,7 @@
 - [x] Handoff agent: structured prepared-source handoff JSON import/export with source references, path-scoped images, exact SKU/price tuple and original content; explicit reuse of productKey for source revisions. Fixtures represent varied data without generating business facts. Tests prove no rewriting and rejection of ambiguous or conflicting mappings.
 - [x] Sandbox agent: source-backed Product gateway reads and narrow selected-field updates, migration006 durable operation intents/checkpoints, drift checks, outcome reconciliation and raw evidence without secrets. Gateway failures and isolated DB tests cover retry safety and item/scope invariants.
 - [x] Root integration: wire handlers/UI contracts, apply migrations, restart dev safely; run full checks and local UI acceptance. Use live direct sandbox read first; run only permitted supported writes after exact review. If credential/permission blocks, report actual response and keep unaffected work complete.
-- [ ] Root delivery: update guidance/ledger with supported capabilities and concrete limits, preserve sources and private artifacts, commit/push tested code and verify CI.
+- [x] Root delivery: update guidance/ledger with supported capabilities and concrete limits, preserve sources and private artifacts, commit/push tested code and verify CI. Code commit `2b8f1f3`; push and pull-request checks both passed on GitHub. PR remains Draft.
 
 ## Acceptance checkpoint — 11/09/2026
 

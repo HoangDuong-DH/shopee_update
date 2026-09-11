@@ -47,6 +47,7 @@ Bằng chứng riêng tại `.local/lamy-http-pilot.json`, `.local/lamy-backend-
 - Quan sát app thật: một công việc, không phát sinh lệnh ghi, không lỗi trang, không tràn ngang ở màn 390px và desktop; trạng thái `unknown` cùng cảnh báo bìa hiện đúng. Ảnh riêng trong `.local/e2e-artifacts/operation-live-*.png`.
 - Review độc lập phát hiện hai lỗi thử lại ở UI đã sửa: kết quả kết thúc phải có bước đọc/chuẩn bị mới; lỗi prepare đã xác định phải bỏ fingerprint cũ. Review cuối không phát hiện thêm P0/P1 trong phạm vi đã đọc; đây không phải chứng minh hệ thống không còn lỗi.
 - Build còn cảnh báo bundle JavaScript khoảng 514kB minified (151kB gzip); chưa đo tải nhiều nhân viên. Chưa phải nghiệm thu hiệu năng production.
+- Mã đã commit/push tại `2b8f1f3` trên `feat/internal-app`. GitHub [kiểm tra push](https://github.com/HoangDuong-DH/shopee-product-uploader/actions/runs/34587610088) và [kiểm tra pull request](https://github.com/HoangDuong-DH/shopee-product-uploader/actions/runs/34587613314) đều đạt, gồm kiểm ứng dụng và audit dependency trong workflow. [PR #1](https://github.com/HoangDuong-DH/shopee-product-uploader/pull/1) đã cập nhật tên/mô tả và giữ Draft; chưa merge/triển khai production. Commit tiếp theo chỉ ghi nhận mốc kiểm chứng này.
 
 ## Giới hạn còn lại
 
