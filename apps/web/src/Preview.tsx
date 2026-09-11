@@ -19,18 +19,22 @@ export function Preview({
   shops,
   onEdit,
   onPlan,
+  onBusy,
 }: {
   draft: ListingDraft;
   shops: ShopConnection[];
   onEdit: () => void;
   onPlan: (p: ChangePlan) => void;
+  onBusy?: (busy: boolean) => void;
 }) {
   const [active, setActive] = useState(draft.coverKey),
-    [shop, setShop] = useState(shops[0]?.id ?? ''),
+    [shop, setShop] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   async function prepare() {
+    if (!shops.some((s) => s.id === shop)) return;
     setBusy(true);
+    onBusy?.(true);
     setError('');
     try {
       onPlan(
@@ -46,21 +50,48 @@ export function Preview({
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      onBusy?.(false);
     }
   }
   return (
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">BẢN NHÁP · PHIÊN BẢN {draft.revision}</p>
-          <h1>Xem trước listing</h1>
-          <p>Ảnh và nội dung từ bộ nguồn đã chọn.</p>
+          <p className="eyebrow">
+            {draft.productKey} · Bản nguồn {draft.revision}
+          </p>
+          <h1>Kiểm tra listing</h1>
+          <p>Đối chiếu bộ đã chuẩn bị trước khi chọn shop. Mở xem không thay đổi dữ liệu.</p>
         </div>
-        <button onClick={onEdit}>Chỉnh mapping</button>
+        <button disabled={busy || !draft.sourceSelection} onClick={onEdit}>
+          Đối chiếu nguồn
+        </button>
       </div>
+      <section className="review-summary" aria-label="Các bước kiểm tra">
+        <div>
+          <strong>{draft.variants.length} SKU trong bộ</strong>
+          <span>Giữ thứ tự và tên phân loại đã lưu</span>
+        </div>
+        <div>
+          <strong>
+            {draft.issues.some((i) => i.severity === 'block')
+              ? 'Cần bổ sung nguồn'
+              : 'Đã có bản nguồn'}
+          </strong>
+          <span>Chưa kiểm đầy đủ điều kiện theo shop</span>
+        </div>
+        <div>
+          <strong>Chưa có kết quả từ Shopee</strong>
+          <span>Chức năng gửi và đọc lại chưa mở</span>
+        </div>
+      </section>
       <div className="preview-layout">
         <section className="panel photo-panel">
-          <img className="cover" src={media(active || draft.coverKey)} alt="Ảnh sản phẩm gốc" />
+          {active || draft.coverKey ? (
+            <img className="cover" src={media(active || draft.coverKey)} alt="Ảnh sản phẩm gốc" />
+          ) : (
+            <div className="empty">Chưa chọn ảnh bìa từ bộ nguồn</div>
+          )}
           <div className="filmstrip">
             {[...new Set([draft.coverKey, ...draft.galleryKeys])].filter(Boolean).map((key) => (
               <button
@@ -78,7 +109,7 @@ export function Preview({
         </section>
         <section className="panel product-detail">
           <div className="tags">
-            <span className="tag">CHƯA GỬI TỪ ỨNG DỤNG</span>
+            <span className="tag neutral">Bộ nguồn nội bộ</span>
             <span className="tag neutral">{draft.variants.length} SKU</span>
           </div>
           <h2>{draft.title.value}</h2>
@@ -94,7 +125,7 @@ export function Preview({
                 <tr>
                   <th>Phân loại / SKU</th>
                   <th>Giá gốc</th>
-                  <th>Mục tiêu KM</th>
+                  <th>Giá bán mục tiêu</th>
                 </tr>
               </thead>
               <tbody>
@@ -106,7 +137,11 @@ export function Preview({
                           <img src={media(v.imageKey)} alt={v.optionLabels.join(' / ')} />
                         )}
                         <div>
-                          <strong>{v.optionLabels.join(' / ')}</strong>
+                          <strong>
+                            {v.optionLabels.length
+                              ? v.optionLabels.join(' / ')
+                              : 'Không có phân loại'}
+                          </strong>
                           <small>{v.sku.value}</small>
                         </div>
                       </div>
@@ -121,10 +156,22 @@ export function Preview({
             </table>
           </div>
           <div className="target">
+            <h3>Kiểm tra theo shop</h3>
+            <p className="caption">
+              Chọn rõ shop để lưu một bản kiểm tra nội bộ cho luồng đăng mới. Cập nhật link đang có
+              cần đối chiếu mã sản phẩm trên Shopee; bước đó chưa mở.
+            </p>
             <label>
               Shop đích
-              <select value={shop} onChange={(e) => setShop(e.target.value)}>
-                {!shops.length && <option value="">Chưa thêm kết nối</option>}
+              <select
+                aria-label="Shop đích"
+                disabled={busy}
+                value={shop}
+                onChange={(e) => setShop(e.target.value)}
+              >
+                <option value="">
+                  {shops.length ? 'Chọn shop cần kiểm tra' : 'Chưa thêm kết nối'}
+                </option>
                 {shops.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.scope.environment === 'sandbox' ? 'TEST' : 'LIVE'} · {s.name} ·{' '}
@@ -134,11 +181,12 @@ export function Preview({
               </select>
             </label>
             <p data-testid="shop-scope" className="caption">
-              {shops.find((s) => s.id === shop)?.scope.shopId} · Kế hoạch chưa gửi API. Tồn đăng bán
-              cần lệnh riêng theo SKU/shop.
+              {shop
+                ? `${shops.find((s) => s.id === shop)?.scope.shopId} · Chỉ lưu trong ứng dụng, chưa gửi lên Shopee.`
+                : 'Chưa chọn shop đích.'}
             </p>
             <button className="primary" disabled={busy || !shop} onClick={() => void prepare()}>
-              {busy ? 'Đang lưu…' : 'Lưu kế hoạch cho shop này'}
+              {busy ? 'Đang lưu…' : 'Lưu bản kiểm tra theo shop'}
             </button>
             {error && (
               <p role="alert" className="error">
@@ -149,6 +197,33 @@ export function Preview({
         </section>
       </div>
       <Issues issues={draft.issues} />
+      <details className="coverage-details">
+        <summary>Những gì còn thiếu trước khi đăng</summary>
+        <dl>
+          <div>
+            <dt>Ngành và thuộc tính</dt>
+            <dd>
+              {draft.categoryId
+                ? 'Có ngành trong nguồn; chưa kiểm quy tắc của shop.'
+                : 'Chưa đối chiếu ngành, thương hiệu và thuộc tính theo shop.'}
+            </dd>
+          </div>
+          <div>
+            <dt>Tồn đăng bán</dt>
+            <dd>
+              Cần mức được quyết định riêng cho từng SKU/shop. Không lấy mức tồn thử làm mặc định.
+            </dd>
+          </div>
+          <div>
+            <dt>Vận chuyển</dt>
+            <dd>Chưa kiểm đầy đủ kênh, cân nặng và kích thước theo shop.</dd>
+          </div>
+          <div>
+            <dt>Đăng / cập nhật / QC</dt>
+            <dd>Chưa có bộ thực thi và đối chiếu kết quả Shopee trong ứng dụng.</dd>
+          </div>
+        </dl>
+      </details>
       <section className="panel description-panel">
         <div className="section-heading">
           <h2>Mô tả sản phẩm</h2>

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { migrate, Repository } from '../../packages/persistence/src/index.js';
 import { makePlan } from '../../packages/domain/src/index.js';
-import { fixtureDraft, fixtureScope } from '../helpers/fixtures.js';
+import { fact, fixtureDraft, fixtureScope } from '../helpers/fixtures.js';
 const schema = 'test_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const pool = new Pool({
@@ -97,4 +97,134 @@ it('uses compare-and-swap to reject lost product edits', async () => {
     repo.saveProduct({ ...d, revision: 2 }, 1),
   ]);
   expect(updates.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+});
+
+function membershipDraft() {
+  const draft = { ...fixtureDraft(), productKey: randomUUID() };
+  draft.tierNames = ['Màu sắc', 'Quy cách'];
+  draft.variants = [
+    { ...draft.variants[0], sku: fact(' SKU A '), optionLabels: ['Trắng', '100 cái'] },
+    {
+      ...draft.variants[0],
+      key: 'variant-b',
+      sku: fact('SKU B'),
+      optionLabels: ['Đen', '300 cái'],
+    },
+  ];
+  return draft;
+}
+
+it.each([
+  [
+    'adding an unrelated SKU',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants.push({ ...d.variants[0], key: 'outside', sku: fact('UNRELATED') });
+    },
+  ],
+  [
+    'removing a SKU',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants.pop();
+    },
+  ],
+  [
+    'replacing a SKU',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants[0].sku = fact('OTHER');
+    },
+  ],
+  [
+    'reordering the same SKUs',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants.reverse();
+    },
+  ],
+  [
+    'normalizing literal SKU whitespace',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants[0].sku = fact('SKU A');
+    },
+  ],
+  [
+    'renaming a tier',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.tierNames[0] = 'Loại';
+    },
+  ],
+  [
+    'removing a tier',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.tierNames.pop();
+      d.variants.forEach((v) => v.optionLabels.pop());
+    },
+  ],
+  [
+    'adding a tier',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.tierNames.push('Đóng gói');
+      d.variants.forEach((v) => v.optionLabels.push('Hộp'));
+    },
+  ],
+  [
+    'renaming an option',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants[0].optionLabels[0] = 'Trắng mới';
+    },
+  ],
+  [
+    'reordering option labels',
+    (d: ReturnType<typeof membershipDraft>) => {
+      d.variants[0].optionLabels.reverse();
+    },
+  ],
+] as const)('locks existing listing structure when %s', async (_name, change) => {
+  const original = membershipDraft();
+  await repo.saveProduct(original, 0);
+  const changed = structuredClone(original);
+  changed.revision = 2;
+  change(changed);
+
+  await expect(repo.saveProduct(changed, 1)).rejects.toThrow('PRODUCT_MEMBERSHIP_LOCKED');
+  expect(await repo.getProduct(original.productKey)).toEqual(original);
+  expect(await repo.getProduct(original.productKey, 2)).toBeNull();
+  expect(
+    (
+      await pool.query('SELECT latest_revision FROM products WHERE product_key=$1', [
+        original.productKey,
+      ])
+    ).rows[0].latest_revision,
+  ).toBe(1);
+});
+
+it('allows refreshed source rows, prices, images and content while preserving the prepared structure', async () => {
+  const original = membershipDraft();
+  await repo.saveProduct(original, 0);
+  const changed = structuredClone(original);
+  changed.revision = 2;
+  changed.title = fact('Explicitly supplied revised title');
+  changed.description = [{ type: 'text', text: 'Explicitly supplied revised content' }];
+  changed.coverKey = 'revised-cover';
+  changed.galleryKeys = ['revised-gallery'];
+  changed.variants[0].key = 'refreshed-source-row';
+  changed.variants[0].sku.sources[0].locator = 'new-workbook-row';
+  changed.variants[0].originalPrice = fact('150');
+  changed.variants[0].imageKey = 'revised-variant-image';
+
+  await expect(repo.saveProduct(changed, 1)).resolves.toEqual(changed);
+  expect(await repo.getProduct(original.productKey)).toEqual(changed);
+  expect(await repo.getProduct(original.productKey, 1)).toEqual(original);
+});
+
+it('retains revision conflicts before evaluating a membership change', async () => {
+  const original = membershipDraft();
+  await repo.saveProduct(original, 0);
+  const changed = structuredClone(original);
+  changed.variants.pop();
+  await expect(repo.saveProduct({ ...changed, revision: 2 }, 0)).rejects.toThrow(
+    'PRODUCT_REVISION_CONFLICT',
+  );
+  await expect(repo.saveProduct({ ...changed, revision: 3 }, 2)).rejects.toThrow(
+    'PRODUCT_REVISION_CONFLICT',
+  );
+  expect(await repo.getProduct(original.productKey)).toEqual(original);
 });

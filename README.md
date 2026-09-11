@@ -1,8 +1,8 @@
 # Shopee Workspace
 
-Ứng dụng nội bộ để nhập tài liệu sản phẩm có sẵn, ghép SKU, kiểm nguồn, xem trước và chuẩn bị kế hoạch đăng/cập nhật cho nhiều shop.
+Ứng dụng nội bộ để tiếp nhận bộ listing đã chuẩn bị, đối chiếu SKU/giá/nội dung/ảnh và chuẩn bị đăng/cập nhật cho nhiều shop. Bảng giá là nguồn tra cứu, không phải nơi tự ghép các SKU thành listing.
 
-**Trạng thái 10/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Luồng đăng/cập nhật Shopee, làm mới token tự động, khuyến mại, QC, đo tải và chạy bền 24 giờ còn trong kế hoạch. Không có lệnh ghi Shopee trong worker hiện tại. Kết nối sandbox mới hỗ trợ kiểm tra bằng API đọc shop.
+**Trạng thái 11/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Luồng đăng/cập nhật Shopee, làm mới token tự động, khuyến mại, QC, đo tải và chạy bền 24 giờ còn trong kế hoạch. Không có lệnh ghi Shopee trong worker hiện tại. Kết nối sandbox mới hỗ trợ kiểm tra bằng API đọc shop.
 
 ## Chạy tại máy
 
@@ -22,7 +22,8 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 
 - Nhập Excel KINI, Word và ảnh PNG/JPEG/WebP qua HTTP; xử lý bằng worker riêng và lưu tệp theo SHA-256.
 - Ánh xạ theo nhãn của từng khối, hỗ trợ khối cạnh nhau và bộ giá có tiêu đề phân nhóm. Cột mơ hồ được đánh dấu; sheet chưa có mapping được hiển thị rõ.
-- Chọn các dòng SKU, gán tiêu đề/nội dung và vai trò ảnh. Giữ nguyên nhãn phân loại, nội dung và bytes ảnh gốc.
+- Luồng mới **Listing của tôi → Nhập listing có sẵn → Kiểm tra listing**; Tệp nguồn và Kết quả tách rõ. Dán danh sách SKU/phân loại đúng theo bộ đã chuẩn bị, khớp chính xác file/sheet/bộ giá. Chưa tự nhập trọn bộ Word/ảnh hay suy danh sách SKU từ KINI.
+- Bản đã lưu mở ở chế độ xem; điều chỉnh nội dung/ảnh phải được chọn rõ. Máy chủ khóa thứ tự SKU, tên tầng và nhãn phân loại của cùng mã bộ, giữ cả hai tầng và khoảng trắng. Khóa này chưa xác minh quan hệ SKU trên Shopee.
 - Lưu bản nháp có phiên bản, xem trước và lưu kế hoạch cho từng shop. GIÁ GỐC và mục tiêu khuyến mại tách riêng.
 - PostgreSQL giữ kế hoạch bất biến, giao dịch job/outbox và ràng buộc chống gửi trùng. Có phép thử đồng thời, xung đột phiên bản và rollback.
 - Kết nối sandbox bằng Test Partner Key / Access Token nhập ở UI, gọi `get_shop_info` trực tiếp. Khóa/token mã hóa tại server và không được trả lại UI.
@@ -43,6 +44,7 @@ Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL t
 ## Tài liệu và phạm vi
 
 - [Hướng dẫn chạy](docs/runbooks/local-development.md)
+- [Cách dùng giao diện listing](docs/runbooks/listing-workspace.md)
 - [Mốc thực thi và giới hạn](docs/delivery/2026-09-10-foundation.md)
 - [Kiểm tra tiếp nối 11/09](docs/delivery/2026-09-11-checkpoint.md)
 - [Hướng dẫn lấy thông tin TEST](docs/runbooks/sandbox-connection.md)

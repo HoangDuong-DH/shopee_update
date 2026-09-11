@@ -24,12 +24,12 @@ Sau `npm run build`, API cũng phục vụ giao diện build tại cổng 4310. 
 
 ## Sử dụng
 
-1. **Nguồn tài liệu:** thêm workbook, Word và ảnh. Chờ trạng thái Sẵn sàng. Tệp không đọc được giữ nguyên và hiện lỗi.
-2. **Bảng SKU & giá:** chọn workbook/sheet, tìm SKU, chọn các hàng thuộc cùng một listing. Dòng có SKU trùng ở nhiều bộ giá vẫn giữ riêng; phải chọn đúng nguồn. Hiện tối đa 250 dòng khớp, dùng bộ lọc để tìm phần còn lại.
-3. **Chuẩn bị listing:** nhập/chọn nội dung từ Word; gán bìa, bộ ảnh, ảnh content và ảnh phân loại. Chọn thứ tự ảnh bằng mũi tên. Lưu tạo revision mới, không sửa revision cũ.
-4. **Xem trước:** xem ảnh gốc, nhãn/SKU, GIÁ GỐC và giá mục tiêu. Mô tả có toàn bộ ảnh đã chọn giữa câu mở đầu và nội dung còn lại.
+1. **Listing của tôi:** mỗi dòng là một bộ đã lưu. Bấm tên để xem, không cần nhập lại bộ Lamy.
+2. **Tệp nguồn:** thêm workbook, Word và ảnh. Chờ Đã đọc tệp. Tab **Tra bảng giá** chỉ để tra SKU/giá theo sheet, không có thao tác ghép hàng.
+3. **Nhập listing có sẵn:** nhập mã bộ cố định, chọn đúng file/sheet/bộ giá và dán bảng SKU/phân loại đã chuẩn bị. Thiếu hoặc trùng dòng phù hợp phải làm rõ; không tự chọn nguồn. Tiếp tục tới nội dung/ảnh sau khi đối chiếu danh sách. Đây chưa phải trình nhập trọn bộ tự động.
+4. **Kiểm tra listing / Đối chiếu nguồn:** bản đã lưu mặc định chỉ xem. Chọn điều chỉnh rõ ràng để sửa nội dung/ảnh; cấu trúc SKU/phân loại được giữ cố định tại UI và transaction lưu. Bộ mô tả mới cần chọn rõ bố trí đang hỗ trợ; bố trí khác chưa thể lưu. Xem [hướng dẫn thao tác](listing-workspace.md).
 5. **Kết nối shop:** với sandbox đã khai báo, nhập Test Partner Key / Access Token của đúng app/shop. Lệnh kiểm tra chỉ đọc `v2.shop.get_shop_info`. Không gửi khóa qua chat. Cấp quyền và refresh tự động còn đang làm; token nhập thủ công không có thời điểm hết hạn đã được xác minh.
-6. **Kế hoạch:** lưu scope và revision để chuẩn bị. Kế hoạch có lỗi chặn sẽ không được gửi vào hàng đợi. Executor hiện chưa được phát hành, nên chưa có lệnh ghi Shopee từ đường này.
+6. **Kết quả:** xem bản kiểm tra theo shop và hàng đợi ở hai tab riêng. Shop đích phải được chọn rõ; lưu bản kiểm tra đăng mới chỉ lưu nội bộ. Executor chưa phát hành, không có nút gửi hàng loạt khả dụng hoặc bằng chứng đã đăng từ đường này.
 7. **Tra cứu & kiểm tra:** tìm từ khóa trong hai kho tài liệu Shopee, mở bản đầy đủ hoặc kiểm một kế hoạch đã lưu. Kết quả/nguồn/lịch sử giữ trong PostgreSQL; chưa dùng model AI và chưa xác nhận đã đăng/QC. Đọc [hướng dẫn harness](agent-evaluation.md) về nguồn thiếu, deadline và bộ đánh giá.
 
 ## Kiểm tra và điều tra lỗi

@@ -59,6 +59,12 @@ class ApiErrors implements ExceptionFilter {
         fields: error.issues.map((i) => i.path.join('.')),
       });
     const code = error instanceof Error ? error.message : '';
+    if (code === 'PRODUCT_MEMBERSHIP_LOCKED')
+      return reply.status(409).send({
+        code,
+        message:
+          'Bộ listing này đã có cấu trúc cố định. Không thể thêm, bớt, thay hoặc đảo SKU; tên và thứ tự phân loại phải giữ nguyên theo bộ đã tiếp nhận.',
+      });
     if (code === 'DEADLINE_EXCEEDED')
       return reply
         .status(504)

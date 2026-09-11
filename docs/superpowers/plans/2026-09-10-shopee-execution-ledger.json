@@ -20,9 +20,7 @@
     {
       "id": "A2",
       "name": "Source contracts and provenance-preserving import",
-      "depends_on": [
-        "A1"
-      ],
+      "depends_on": ["A1"],
       "status": "in_progress",
       "remaining": [
         "Manual remapping for ambiguous columns and unsupported sheets",
@@ -32,9 +30,7 @@
     {
       "id": "A3",
       "name": "Immutable plans, persistence and manual stock commands",
-      "depends_on": [
-        "A2"
-      ],
+      "depends_on": ["A2"],
       "status": "in_progress",
       "remaining": [
         "Scope/capability refresh checks before an enabled executor",
@@ -44,22 +40,23 @@
     {
       "id": "A4",
       "name": "Import, mapping and preview UI",
-      "depends_on": [
-        "A3"
-      ],
+      "depends_on": ["A3"],
       "status": "in_progress",
       "remaining": [
+        "Automatic whole prepared-listing bundle intake with source paragraph/media mapping",
         "Column mapping editor",
         "Stock instruction UI",
-        "Source-aware edit validation beyond current import mapping"
+        "Source-aware full category/field validation and selective existing-item updates"
+      ],
+      "evidence": [
+        "2026-09-11: listing-first workspace replaces arbitrary catalog SKU grouping; explicit prepared membership intake and read-only source review",
+        "110 unit/integration, 7 legacy and 11 UI E2E passed; live local Lamy preserved; no Shopee writes"
       ]
     },
     {
       "id": "B1",
       "name": "Scoped gateway, token rotation and capabilities",
-      "depends_on": [
-        "A3"
-      ],
+      "depends_on": ["A3"],
       "status": "in_progress",
       "remaining": [
         "Authorization callback and rotating token recovery",
@@ -72,79 +69,55 @@
     {
       "id": "B2",
       "name": "Checkpointed media and listing creation",
-      "depends_on": [
-        "B1"
-      ],
+      "depends_on": ["B1"],
       "status": "planned"
     },
     {
       "id": "B3",
       "name": "Selective updates and identity-based readback",
-      "depends_on": [
-        "B2"
-      ],
+      "depends_on": ["B2"],
       "status": "planned"
     },
     {
       "id": "B4",
       "name": "Direct Lamy sandbox E2E evidence",
-      "depends_on": [
-        "A4",
-        "B3"
-      ],
+      "depends_on": ["A4", "B3"],
       "status": "planned"
     },
     {
       "id": "C1",
       "name": "Outbox, leases and scheduling",
-      "depends_on": [
-        "B3"
-      ],
+      "depends_on": ["B3"],
       "status": "planned"
     },
     {
       "id": "C2",
       "name": "Retry, rate budgets and uncertain-write reconciliation",
-      "depends_on": [
-        "C1"
-      ],
+      "depends_on": ["C1"],
       "status": "planned"
     },
     {
       "id": "C3",
       "name": "Push, polling and multidimensional QC",
-      "depends_on": [
-        "C1",
-        "B1"
-      ],
+      "depends_on": ["C1", "B1"],
       "status": "planned"
     },
     {
       "id": "C4",
       "name": "Batch progress, pause, resume and recovery UI",
-      "depends_on": [
-        "C2",
-        "C3",
-        "A4"
-      ],
+      "depends_on": ["C2", "C3", "A4"],
       "status": "planned"
     },
     {
       "id": "D1",
       "name": "Prices and promotion plans",
-      "depends_on": [
-        "B3",
-        "C2"
-      ],
+      "depends_on": ["B3", "C2"],
       "status": "planned"
     },
     {
       "id": "D2",
       "name": "Versioned knowledge, agent tools, MCP and evaluations",
-      "depends_on": [
-        "A4",
-        "B1"
-      ],
+      "depends_on": ["A4", "B1"],
       "status": "in_progress",
       "evidence": [
         "Read-only source/plan harness with scope, deadline and repeated-tool guards",
@@ -161,20 +134,13 @@
     {
       "id": "E1",
       "name": "Deployment packaging, telemetry and backup restore",
-      "depends_on": [
-        "C4"
-      ],
+      "depends_on": ["C4"],
       "status": "planned"
     },
     {
       "id": "E2",
       "name": "Load, soak, release evidence and authorized pilot",
-      "depends_on": [
-        "B4",
-        "D1",
-        "D2",
-        "E1"
-      ],
+      "depends_on": ["B4", "D1", "D2", "E1"],
       "status": "planned"
     }
   ],
@@ -214,6 +180,6 @@
     "is_statistical_confidence_interval": false,
     "excludes_external_waiting": true
   },
-  "updated_at": "2026-09-11T02:05:02.545Z",
-  "latest_evidence": "../../delivery/2026-09-11-harness-foundation.md"
+  "updated_at": "2026-09-11T02:50:13.7295762Z",
+  "latest_evidence": "../../delivery/2026-09-11-listing-workspace-redesign.md"
 }

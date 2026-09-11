@@ -45,6 +45,13 @@ const jobRow = (r: any): JobRecord => ({
   message: r.message,
   attemptCount: r.attempt_count,
 });
+const preparedStructure = (draft: ListingDraft) => ({
+  tierNames: draft.tierNames,
+  variants: draft.variants.map((variant) => ({
+    sku: variant.sku.value,
+    optionLabels: variant.optionLabels,
+  })),
+});
 export class Repository {
   constructor(readonly pool: Pool) {}
   async probe() {
@@ -89,11 +96,19 @@ export class Repository {
     await transaction(this.pool, async (c) => {
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [draft.productKey]);
       const prior = await c.query(
-        'SELECT latest_revision FROM products WHERE product_key=$1 FOR UPDATE',
+        `SELECT p.latest_revision, r.body FROM products p
+         JOIN product_revisions r ON r.product_key=p.product_key AND r.revision=p.latest_revision
+         WHERE p.product_key=$1 FOR UPDATE OF p`,
         [draft.productKey],
       );
       if ((prior.rows[0]?.latest_revision ?? 0) !== expectedRevision)
         throw new Error('PRODUCT_REVISION_CONFLICT');
+      if (
+        prior.rows[0] &&
+        canonicalJson(preparedStructure(prior.rows[0].body)) !==
+          canonicalJson(preparedStructure(draft))
+      )
+        throw new Error('PRODUCT_MEMBERSHIP_LOCKED');
       await c.query(
         'INSERT INTO products(product_key,latest_revision) VALUES($1,$2) ON CONFLICT(product_key) DO UPDATE SET latest_revision=$2,updated_at=now()',
         [draft.productKey, draft.revision],
