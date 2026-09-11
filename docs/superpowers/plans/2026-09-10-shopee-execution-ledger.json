@@ -62,9 +62,11 @@
       ],
       "status": "in_progress",
       "remaining": [
-        "User supplies sandbox backend credentials via local UI",
         "Authorization callback and rotating token recovery",
         "Endpoint/capability discovery"
+      ],
+      "evidence": [
+        "Direct authenticated sandbox get_shop_info passed twice on 2026-09-11; correct partner 1232297/shop 227418363; encrypted storage and safe connection_checks evidence"
       ]
     },
     {
@@ -174,7 +176,7 @@
     {
       "id": "sandbox_backend_connection",
       "needed_for": "B1/B4 live sandbox tests",
-      "observed": "Local configuration form ready; descriptor 1232297 / 227418363 disconnected at last check; user asked for TEST credential guidance"
+      "observed": "Resolved for shop.read: direct backend succeeded 2026-09-11 01:03/01:06 UTC; connection revision 3. Token expiry/rotation and product endpoints still require implementation/verification."
     },
     {
       "id": "production_data_and_write_scope",
@@ -201,6 +203,6 @@
     "is_statistical_confidence_interval": false,
     "excludes_external_waiting": true
   },
-  "updated_at": "2026-09-11T01:07:42.608Z",
+  "updated_at": "2026-09-11T01:13:03.753Z",
   "latest_evidence": "../../delivery/2026-09-11-checkpoint.md"
 }
