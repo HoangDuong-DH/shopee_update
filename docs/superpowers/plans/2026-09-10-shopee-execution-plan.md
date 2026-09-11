@@ -14,6 +14,8 @@
 
 ## Global Constraints
 
+- Làm rõ luồng người dùng 11/09: [Đăng bộ listing có sẵn và trường theo ngành](../specs/2026-09-11-prepared-listing-publishing.md). A2/A4 phải nhận cấu trúc listing do người dùng chuẩn bị, không tự gộp/tách hoặc bắt soạn lại; B1/B3 phải kiểm các trường theo shop/ngành và chỉ ra phần chưa hỗ trợ.
+
 - 50–80 **sản phẩm khác nhau/ngày cho toàn hệ thống** là mục tiêu ban đầu; công suất tối đa là số cần đo, không lấy con số mô hình hàng nghìn/ngày làm cam kết.
 - Nội dung và ảnh do người dùng chuẩn bị: giữ nguồn đã chọn, không tự viết lại, tạo ảnh, crop hoặc chèn chữ. Chuẩn hóa cấu trúc phải có đối chiếu, không làm mất nội dung.
 - KINI ánh xạ theo sheet/khối/tiêu đề, có nguồn từng trường. Giá đăng mới là GIÁ GỐC; GIÁ BÁN chỉ là mục tiêu khuyến mại riêng.
