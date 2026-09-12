@@ -11,6 +11,36 @@ const rec = (v: unknown): Record<string, any> =>
 const rows = (v: unknown): Record<string, any>[] => (Array.isArray(v) ? v.map(rec) : []);
 const numeric = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 
+function relationRules(value: unknown): Record<string, number[]>[] | null {
+  if (value === undefined) return [];
+  const candidates = Array.isArray(value) ? value : [value];
+  const known = new Set([
+    'related_enabled_channels',
+    'related_disabled_channels',
+    'related_dependent_block_channels',
+  ]);
+  const result: Record<string, number[]>[] = [];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+    const rule: Record<string, number[]> = {};
+    for (const [key, ids] of Object.entries(candidate)) {
+      if (!Array.isArray(ids)) return null;
+      if (!known.has(key)) {
+        if (ids.length) return null;
+        continue;
+      }
+      if (
+        ids.some((id) => typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) ||
+        new Set(ids).size !== ids.length
+      )
+        return null;
+      rule[key] = ids;
+    }
+    result.push(rule);
+  }
+  return result;
+}
+
 // This validator intentionally supports the bounded synthetic pilot, not arbitrary business sources.
 // An unsupported or incomplete rule becomes an exception; no source value is rewritten.
 export function validateTrialMetadata(items: unknown[], m: TrialMetadata): string[] {
@@ -182,7 +212,11 @@ export function validateTrialMetadata(items: unknown[], m: TrialMetadata): strin
         )
       )
         add('CHANNEL_FEE_TYPE_UNVERIFIED:' + id);
-      if (Object.keys(limits).length && limits.unit !== 'cm')
+      const noDimensionLimit = ['height', 'width', 'length', 'dimension_sum'].every(
+        (key) => limits[key] === 0,
+      );
+      // The official channel example uses UNKNOWN with four explicit zero limits.
+      if (Object.keys(limits).length && limits.unit !== 'cm' && !noDimensionLimit)
         add('CHANNEL_DIMENSION_UNIT_UNVERIFIED:' + id);
       for (const k of ['height', 'width', 'length'])
         if (limits[k] > 0 && dim['package_' + k] > limits[k]) add('CHANNEL_DIMENSIONS:' + id);
@@ -194,10 +228,18 @@ export function validateTrialMetadata(items: unknown[], m: TrialMetadata): strin
       const volume = rec(channel.volume_limit);
       if (volume.item_max_volume > 0 || volume.item_min_volume > 0)
         add('CHANNEL_VOLUME_UNIT_UNVERIFIED:' + id);
-      for (const rule of rows(channel.channel_relation_rules))
+      // The 2026-09-12 sandbox returns an object; the official schema documents an array.
+      const relations = relationRules(channel.channel_relation_rules);
+      if (relations === null) add('CHANNEL_RELATION_RULE_UNVERIFIED:' + id);
+      for (const rule of relations ?? []) {
         for (const related of rule.related_enabled_channels ?? [])
           if (!enabled.some((x) => String(x.logistic_id) === String(related)))
             add('RELATED_CHANNEL_MISSING:' + related);
+        for (const related of rule.related_disabled_channels ?? [])
+          if (enabled.some((x) => String(x.logistic_id) === String(related)))
+            add('RELATED_CHANNEL_MUST_BE_DISABLED:' + related);
+        // dependent_block applies when disabling the parent. This loop checks enabled parents only.
+      }
     }
   }
   return issues;

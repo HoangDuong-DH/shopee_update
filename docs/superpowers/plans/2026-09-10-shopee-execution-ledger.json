@@ -1,6 +1,6 @@
 {
   "created_on": "2026-09-10",
-  "status": "bounded_sandbox_create_worker_implemented_mock_80_passed_live_create_blocked_by_test_token",
+  "status": "bounded_sandbox_live_80_attempted_76_verified_4_rejected_business_source_and_production_unaccepted",
   "plan": "2026-09-10-shopee-execution-plan.md",
   "execution_mode": "sequential_integration_with_skill_requested_retrieval_and_review",
   "production_write_authorized": false,
@@ -74,7 +74,8 @@
         "Endpoint/capability discovery"
       ],
       "evidence": [
-        "Direct authenticated sandbox get_shop_info passed twice on 2026-09-11; correct partner 1232297/shop 227418363; encrypted storage and safe connection_checks evidence"
+        "Direct authenticated sandbox get_shop_info passed twice on 2026-09-11; correct partner 1232297/shop 227418363; encrypted storage and safe connection_checks evidence",
+        "2026-09-12: user renewed TEST token at UI to revision 5; live metadata and creation/readback worked. API metadata rules observed directly; no automatic refresh acceptance."
       ]
     },
     {
@@ -84,10 +85,11 @@
       "status": "in_progress",
       "evidence": [
         "2026-09-11: direct original-byte media upload and durable per-source checkpoints; 17 mappings reused with no new uploads on the final sandbox update. Cache scoped by connection, hash, media role and gallery ratio.",
-        "2026-09-12: separate synthetic sandbox create API/worker with immutable source identity, strict UNLIST payloads, metadata preflight, media receipts and standardised tier initialization. 80 sources passed isolated Postgres + stateful fake transport; live create not run because TEST token rejected."
+        "2026-09-12: separate synthetic sandbox create API/worker with immutable source identity, strict UNLIST payloads, metadata preflight, media receipts and standardised tier initialization. 80 sources passed isolated Postgres + stateful fake transport.",
+        "2026-09-12 live after token renewal: lots 1/10/69 sent 80 creates once each; 76 unique items verified, 4 product.error_busi rejections without retries. 150 tier models plus 26 single-item SKUs verified, 9 technical image uploads shared by lot. Final scan confirmed 76 new UNLIST plus two unchanged old items. See docs/delivery/2026-09-12-backend-sandbox-trial.md; not business-source or production acceptance."
       ],
       "remaining": [
-        "Accept live sandbox create/readback and integrate general prepared business sources; current executor is a bounded synthetic trial only",
+        "Integrate general prepared business sources beyond accepted bounded synthetic sandbox cases; diagnose four live product.error_busi rejections without changing source or blind retry",
         "Media expiration recovery, bounded cache indexing and unused-upload cleanup"
       ]
     },
@@ -125,7 +127,7 @@
       "name": "Outbox, leases and scheduling",
       "depends_on": ["B3"],
       "status": "in_progress",
-      "evidence": ["2026-09-12: dedicated sandbox-create trial queue in PostgreSQL with per-step lease, fencing, immutable intent, durable five-second tier wait and checkpoint recovery. Existing generic jobs/outbox executor remains disabled."],
+      "evidence": ["2026-09-12: dedicated sandbox-create trial queue in PostgreSQL with per-step lease, fencing, immutable intent, durable five-second tier wait and checkpoint recovery. Actual lots 1/10/69 processed; minimum live create-to-init wait 5.064 seconds. Existing generic jobs/outbox executor remains disabled."],
       "remaining": ["General prepared-listing queue integration, scheduling controls and real 24-hour soak"]
     },
     {
@@ -133,8 +135,8 @@
       "name": "Retry, rate budgets and uncertain-write reconciliation",
       "depends_on": ["C1"],
       "status": "in_progress",
-      "evidence": ["2026-09-12: unknown create/init holds TEST shop lane, no blind resend; late receipts retained; readback retries reads only. Fault scenarios use isolated Postgres and stateful fake gateway."],
-      "remaining": ["Live quota/rate-budget verification, automatic read-only reconciliation of unknown creates, reviewed recovery controls and token rotation"]
+      "evidence": ["2026-09-12: unknown create/init holds TEST shop lane, no blind resend; late receipts retained; readback retries reads only. Fault scenarios use isolated Postgres and stateful fake gateway.", "Actual four consecutive product.error_busi rejections did not auto-pause the live run; later distinct sources succeeded. Added a same-trial three-matching-rejected-creates pause guard afterward, verified in isolated tests only. No actual rejected source replay; no root-cause claim."],
+      "remaining": ["Live quota/rate-budget verification, sanitized remote error diagnostics including message/HTTP status, automatic read-only reconciliation of unknown creates, reviewed recovery controls and token rotation"]
     },
     {
       "id": "C3",
@@ -193,7 +195,7 @@
     {
       "id": "sandbox_backend_connection",
       "needed_for": "B1/B4 live sandbox tests",
-      "observed": "User renewed TEST token on 2026-09-11; connection revision 4. Direct shop/product/model/limit reads, media uploads and bounded update_item succeeded. No refresh token currently stored; automatic rotation remains unimplemented. Final Lamy readback awaits remapped-cover evidence review."
+      "observed": "User renewed TEST token on 2026-09-12; connection revision 5. Real bounded create trial attempted 80 sources: 76 verified, 4 business rejections. Automatic rotation remains unimplemented. Old Lamy run/source unchanged and still awaits remapped-cover evidence review."
     },
     {
       "id": "production_data_and_write_scope",

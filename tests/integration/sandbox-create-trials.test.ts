@@ -153,6 +153,7 @@ class StatefulTransport {
   requests: { path: string; body: any; at: number }[] = [];
   loseCreateFor?: string;
   rejectFor?: string;
+  rejectCodes = new Map<string, string>();
   authFor?: string;
   loseInit = false;
   badReadback = false;
@@ -207,9 +208,15 @@ class StatefulTransport {
       if (url.pathname.endsWith('/add_item')) {
         if (body.item_sku === this.authFor)
           return new Response(JSON.stringify({ error: 'error_auth', request_id: 'mock-auth' }));
-        if (body.item_sku === this.rejectFor)
+        const rejection =
+          this.rejectCodes.get(body.item_sku) ??
+          (body.item_sku === this.rejectFor ? 'error_param' : undefined);
+        if (rejection)
           return new Response(
-            JSON.stringify({ error: 'error_param', request_id: 'mock-rejected' }),
+            JSON.stringify({
+              error: rejection,
+              request_id: 'mock-rejected-' + this.requests.length,
+            }),
           );
         const id = String(910000000 + this.items.size);
         this.items.set(id, { create: body, createdAt: clock });
@@ -475,6 +482,132 @@ it('treats HTTP 200 business rejection as failure and continues other independen
   expect(result.items.map((item) => item.state)).toEqual(['failed', 'verified']);
   expect(remote.items.size).toBe(1);
   expect(result.items[0]!.result).toMatchObject({ kind: 'rejected', code: 'error_param' });
+});
+
+it('pauses after three matching create rejections and never sends the fourth create after restart', async () => {
+  const input = { ...manifest(4), items: [0, 1, 2, 3].map((index) => prepared(index, 0)) };
+  for (const source of input.items.slice(0, 3))
+    remote.rejectCodes.set(source.sourceKey, 'product.error_busi');
+  const trial = await store.submit(input, evidence());
+  const result = await drain(trial.id);
+  expect(result.state).toBe('waiting');
+  expect(result.paused).toBe(true);
+  expect(result.pauseReason).toBe('REPEATED_CREATE_REJECTION:product.error_busi');
+  expect(result.items.map((item) => item.state)).toEqual(['failed', 'failed', 'failed', 'queued']);
+  expect(result.items.map((item) => item.attemptCount)).toEqual([1, 1, 1, 0]);
+  expect(result.items[2]!.events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: 'REPEATED_CREATE_REJECTION',
+        details: expect.objectContaining({ code: 'product.error_busi', consecutiveCount: 3 }),
+      }),
+    ]),
+  );
+  for (const item of result.items.slice(0, 3))
+    expect(item.result).toMatchObject({
+      kind: 'rejected',
+      code: 'product.error_busi',
+      auth: false,
+    });
+  clock += 60000;
+  expect(await run('restarted', new SandboxCreateTrialStore(pool, { now }))).toBe(false);
+  expect(remote.requests.filter((request) => request.path.endsWith('/add_item'))).toHaveLength(3);
+  expect(remote.items.size).toBe(0);
+});
+
+it('a successful create resets the consecutive rejection count', async () => {
+  const input = { ...manifest(6), items: [0, 1, 2, 3, 4, 5].map((index) => prepared(index, 0)) };
+  for (const index of [0, 1, 3, 4])
+    remote.rejectCodes.set(`SBX-BULK-T${index}`, 'product.error_busi');
+  const trial = await store.submit(input, evidence());
+  const result = await drain(trial.id);
+  expect(result.paused).toBe(false);
+  expect(result.items.map((item) => item.state)).toEqual([
+    'failed',
+    'failed',
+    'verified',
+    'failed',
+    'failed',
+    'verified',
+  ]);
+  expect(remote.requests.filter((request) => request.path.endsWith('/add_item'))).toHaveLength(6);
+});
+
+it('rejections from a different trial do not contribute to the safeguard', async () => {
+  for (const index of [0, 1, 10, 11])
+    remote.rejectCodes.set(`SBX-BULK-T${index}`, 'product.error_busi');
+  const first = await store.submit(
+    { ...manifest(2), items: [prepared(0, 0), prepared(1, 0)] },
+    evidence(),
+  );
+  expect((await drain(first.id)).paused).toBe(false);
+  const second = await store.submit(
+    { ...manifest(3, 10), items: [prepared(10, 0), prepared(11, 0), prepared(12, 0)] },
+    evidence(),
+  );
+  const result = await drain(second.id);
+  expect(result.paused).toBe(false);
+  expect(result.items.map((item) => item.state)).toEqual(['failed', 'failed', 'verified']);
+});
+
+it('different rejection codes break the matching-code streak', async () => {
+  const input = { ...manifest(4), items: [0, 1, 2, 3].map((index) => prepared(index, 0)) };
+  for (const [index, code] of ['product.error_busi', 'error_param', 'product.error_busi'].entries())
+    remote.rejectCodes.set(`SBX-BULK-T${index}`, code);
+  const trial = await store.submit(input, evidence());
+  const result = await drain(trial.id);
+  expect(result.paused).toBe(false);
+  expect(result.items.map((item) => item.state)).toEqual([
+    'failed',
+    'failed',
+    'failed',
+    'verified',
+  ]);
+});
+
+it.each([
+  { rejected: false, state: 'verified' },
+  { rejected: true, state: 'failed' },
+])(
+  'terminal $state summary takes precedence over a later manual pause',
+  async ({ rejected, state }) => {
+    const trial = await store.submit(
+      { ...manifest(2), items: [prepared(0, 0), prepared(1, 0)] },
+      evidence(),
+    );
+    if (rejected) remote.rejectFor = 'SBX-BULK-T0';
+    const before = await drain(trial.id);
+    expect(before.state).toBe(state);
+    await pool.query(
+      "UPDATE sandbox_create_trials SET paused=true,pause_reason='OPERATOR_REPEATED_PRODUCT_REJECTION' WHERE id=$1",
+      [trial.id],
+    );
+    const after = (await store.get(trial.id))!;
+    expect(after.state).toBe(state);
+    expect(after.paused).toBe(true);
+    expect(after.pauseReason).toBe('OPERATOR_REPEATED_PRODUCT_REJECTION');
+    expect(after.items).toEqual(before.items);
+  },
+);
+
+it('readback checkpoints advance the parent timestamp while waiting and when verified', async () => {
+  const trial = await store.submit(manifest(), evidence());
+  await runReady();
+  clock += 5000;
+  remote.badReadback = true;
+  await runReady();
+  const waiting = (await store.get(trial.id))!;
+  expect(waiting.items[0]!.state).toBe('waiting');
+  expect(waiting.updatedAt).toBe(now().toISOString());
+  expect(waiting.updatedAt).toBe(waiting.items[0]!.updatedAt);
+  clock += 5000;
+  remote.badReadback = false;
+  await runReady();
+  const verified = (await store.get(trial.id))!;
+  expect(verified.state).toBe('verified');
+  expect(verified.updatedAt).toBe(now().toISOString());
+  expect(verified.updatedAt).toBe(verified.items[0]!.updatedAt);
+  expect(Date.parse(verified.updatedAt)).toBeGreaterThan(Date.parse(waiting.updatedAt));
 });
 
 it('pauses the whole trial on authentication failure and rejects stale preflight before mutation intent', async () => {

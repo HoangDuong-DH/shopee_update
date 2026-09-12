@@ -109,3 +109,98 @@ it('rejects out-of-range variant prices and GTIN requirements without rewriting 
   );
   expect(i.tiers.model[0].original_price).toBe(1);
 });
+
+it.each(['object', 'array'])(
+  'reads %s relation rules without dropping enabled or disabled requirements',
+  (shape) => {
+    const m = metadata(),
+      source = item();
+    const rule = {
+      related_enabled_channels: [99],
+      related_disabled_channels: [51022],
+      related_dependent_block_channels: [],
+    };
+    (m.channels.logistics_channel_list[0] as any).channel_relation_rules =
+      shape === 'array' ? [rule] : rule;
+    const before = JSON.stringify({ m, source });
+    expect(validateTrialMetadata([source], m)).toEqual(
+      expect.arrayContaining([
+        'RELATED_CHANNEL_MISSING:99',
+        'RELATED_CHANNEL_MUST_BE_DISABLED:51022',
+      ]),
+    );
+    expect(JSON.stringify({ m, source })).toBe(before);
+  },
+);
+
+it.each(['object', 'array'])(
+  'accepts satisfied %s relation rules and explicitly disabled related channels',
+  (shape) => {
+    const m = metadata(),
+      source = item();
+    source.create.logistic_info.push({ logistic_id: 99, enabled: false, is_free: false });
+    const rule = {
+      related_enabled_channels: [51022],
+      related_disabled_channels: [99],
+      related_dependent_block_channels: [100],
+    };
+    (m.channels.logistics_channel_list[0] as any).channel_relation_rules =
+      shape === 'array' ? [rule] : rule;
+    expect(validateTrialMetadata([source], m)).toEqual([]);
+  },
+);
+
+it.each(
+  [
+    { related_enabled_channels: [null] },
+    { related_enabled_channels: '99' },
+    { related_disabled_channels: { channel: 99 } },
+    { related_dependent_block_channels: [-1] },
+    { future_rule: [99] },
+    [null],
+    ['unknown-rule'],
+    'unknown-rule',
+  ].map((rule) => ({ rule })),
+)('blocks malformed or unsupported nonempty relation rules $rule', ({ rule }) => {
+  const m = metadata();
+  (m.channels.logistics_channel_list[0] as any).channel_relation_rules = rule;
+  expect(validateTrialMetadata([item()], m)).toContain('CHANNEL_RELATION_RULE_UNVERIFIED:51022');
+});
+
+it('accepts live empty relation object and UNKNOWN dimension units only for explicit zero limits', () => {
+  const m = metadata();
+  Object.assign(m.channels.logistics_channel_list[0], {
+    channel_relation_rules: {
+      related_enabled_channels: [],
+      related_disabled_channels: [],
+      related_dependent_block_channels: [],
+    },
+    item_max_dimension: { height: 0, width: 0, length: 0, dimension_sum: 0, unit: 'UNKNOWN' },
+  });
+  expect(validateTrialMetadata([item()], m)).toEqual([]);
+});
+
+it.each(['height', 'width', 'length', 'dimension_sum'])(
+  'requires a known dimension unit if %s imposes a positive limit',
+  (field) => {
+    const m = metadata();
+    (m.channels.logistics_channel_list[0] as any).item_max_dimension = {
+      height: 0,
+      width: 0,
+      length: 0,
+      dimension_sum: 0,
+      unit: 'UNKNOWN',
+      [field]: 60,
+    };
+    expect(validateTrialMetadata([item()], m)).toContain('CHANNEL_DIMENSION_UNIT_UNVERIFIED:51022');
+  },
+);
+
+it('continues blocking nonzero volume limits without a documented unit', () => {
+  const m = metadata();
+  (m.channels.logistics_channel_list[0] as any).volume_limit = {
+    item_max_volume: 99999,
+    item_min_volume: 0,
+  };
+  expect(validateTrialMetadata([item()], m)).toContain('CHANNEL_VOLUME_UNIT_UNVERIFIED:51022');
+});

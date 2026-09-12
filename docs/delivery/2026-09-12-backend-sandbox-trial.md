@@ -1,56 +1,79 @@
 # Kết quả thử backend sandbox — 12/09/2026
 
-**Kết luận: đã triển khai và kiểm thử nhánh đăng mới giả lập qua backend/worker. Chưa đăng mới listing thật trong lượt này vì token TEST bị Shopee từ chối. Production chưa nghiệm thu.**
+**Đã gửi 80 yêu cầu tạo qua API backend và worker: 76 listing tạo thật, đọc lại đạt; 4 bị Shopee từ chối với `product.error_busi`. Không phải 80/80 thành công. Production chưa nghiệm thu.**
 
-## Phép gọi thật
+Dữ liệu sổ tay kỹ thuật tự tạo, đúng TEST partner **1232297**, shop **227418363**, host `openplatform.sandbox.test-stable.shopee.sg`. Mọi listing mới giữ **UNLIST**. Không đăng ký Mall/brand, tạo khuyến mại hoặc ghi shop thật. Không dùng hoặc thay nguồn Lamy/KINI.
 
-- Đọc `get_shop_info` từ backend bằng kết nối mã hóa, đúng partner 1232297/shop 227418363/host sandbox: HTTP 403, `invalid_acceess_token`, request ID `e3e3e7f35b3ef39338b47d50d6912f00`.
-- 08:35:51 ICT: gọi HTTP của ứng dụng `POST /v1/sandbox-create-trials/inspect` cho một nguồn thử. API trả HTTP 409 / `SANDBOX_AUTH_REQUIRED`, 340ms. Đây là thời gian từ chối xác thực, không phải thời gian đăng listing.
-- Connection vẫn revision 4, chưa có refresh token. Người dùng đã được yêu cầu cập nhật token ở UI; không lấy khóa/token vào chat hoặc báo cáo.
-- Kiểm DB lúc 08:41 ICT: **0 trial, 0 item create trong dữ liệu chạy thật**. Không tải ảnh mới lên Shopee, không gọi add_item/init_tier_variation, không đăng ký Mall/brand, không thay đổi shop thật trong lượt này.
-- Lamy cũ 803934364 và nguồn revision 1 giữ nguyên. Run 627e471b-2054-4af8-afc0-5a0a1cc63562 vẫn revision 25, `unknown / COVER_READBACK_REVIEW`; không gửi lại hoặc nhân bản.
+## Kết quả thực tế
 
-Bằng chứng riêng: `.local/sandbox-bulk-20260912/inspect.json`, `final-state.json`; không đưa dữ liệu vận hành vào Git.
+Người dùng cập nhật token tại UI; kết nối revision 5 đọc shop thành công. Thử tăng dần 1 → 10 → 69 nguồn riêng, mỗi nguồn gửi `add_item` đúng một lần. Backend gọi OpenAPI trực tiếp, không điều khiển API Test Tool để tạo listing.
 
-## Phần đã triển khai
+| Lô | Yêu cầu | Đọc lại đạt | Bị từ chối | Chuẩn bị, gồm 3 ảnh | Xếp hàng → kết quả cuối |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A | 1 | 1 | 0 | 12,169 giây | 7,871 giây |
+| B | 10 | 10 | 0 | 6,746 giây | 46,251 giây |
+| C | 69 | 65 | 4 | 6,479 giây | 389,846 giây |
+| Tổng | **80** | **76** | **4** | | |
 
-Gateway riêng chỉ nhận nguồn kỹ thuật có tên `SANDBOX QA`, SKU `SBX-BULK-`, ngành sổ tay 301378 và UNLIST trong đúng sandbox. Có kiểm metadata ngành/thuộc tính/thương hiệu/giá/tồn/vận chuyển trước ghi; thiếu thông tin hoặc quy tắc chưa hỗ trợ thì chặn. Quét shop phải đủ trang và khớp tổng item; không tự lấy ví dụ tài liệu làm quyền hay giới hạn shop.
+Thời gian lấy từ sự kiện `QUEUED` đến kết quả cuối. Lô C xử lý hết nhưng có lỗi; 389,846 giây không phải thời gian đạt toàn bộ 69 listing. Chuẩn bị, con người xem trước, nhập token và sửa/khởi động lại ứng dụng nằm ngoài thời gian hàng đợi.
 
-API prepare lưu bản nguồn thử và ba ảnh PNG kỹ thuật có SHA/checkpoint, trả preview bất biến. Submit trả 202 sau lưu hàng đợi Postgres. Worker lưu intent trước từng mutation, pin revision kết nối và payload, lưu item ID ngay sau create, chờ tối thiểu 5 giây trước khởi tạo phân loại, rồi đọc lại độc lập. Hai worker bị điều phối thành một yêu cầu đang chạy trong luồng thử. Mất phản hồi ghi giữ unknown và khóa việc ghi tiếp; không tự tạo lại.
+76 listing đạt gồm **26 không tầng, 25 một tầng, 25 hai tầng**; **150 model phân loại**, tương đương **176 SKU bán được** khi tính thêm listing không tầng. Có 80 request tạo, 50 request khởi tạo phân loại, 126 request đọc base/model; 76 listing đạt ngay lần đối chiếu đầu. Khoảng chờ tạo xong → khởi tạo phân loại thấp nhất **5,064 giây**.
 
-Migrations 007–008 đã áp dụng local. Backend/UI khởi động lại; kiểm cuối API ready, worker online, UI HTTP 200, productionWrites=false. Worker này tách riêng khỏi WorkOrder doanh nghiệp và generic jobs cũ; chưa bật đăng mới đại trà từ giao diện vận hành.
+Kiểm độc lập khớp tên, SKU, mô tả chữ, gallery/ảnh phân loại, ngành/thuộc tính, thương hiệu theo ID, kích thước/cân nặng, kênh vận chuyển, giá và tồn từng model. Shopee trả model khác thứ tự ở một số item; ánh xạ theo SKU và `tier_index` vẫn đúng. Đây là đối chiếu dữ liệu đã gửi, không phải Shopee đã duyệt policy/QC.
 
-## Kiểm thử mô phỏng
+Mở mẫu trong Seller Center sandbox:
 
-Một ca lớn chạy cùng gateway, coordinator, schema PostgreSQL và worker sẽ dùng thật; chỉ thay transport Shopee bằng mô phỏng có trạng thái và dùng đồng hồ điều khiển cho thời gian chờ:
+- [803934774 — không phân loại](https://banhang.sandbox.test-stable.shopee.vn/portal/product/803934774)
+- [803934776 — một tầng phân loại](https://banhang.sandbox.test-stable.shopee.vn/portal/product/803934776)
+- [803934777 — hai tầng phân loại](https://banhang.sandbox.test-stable.shopee.vn/portal/product/803934777)
 
-| Chỉ số | Kết quả mô phỏng |
-|---|---:|
-| Listing kỹ thuật | 80 |
-| Không tầng / một tầng / hai tầng | 27 / 27 / 26 |
-| Lần gọi add_item | 80 |
-| Lần gọi init_tier_variation | 53 |
-| Model thuộc 53 listing có tầng | 158 |
-| Lần đọc base / model | 80 / 53 |
-| Item ID khác nhau, đọc lại đạt | 80 |
-| Lời gọi đồng thời tối đa khi hai worker tranh việc | 1 |
+Quét lại shop lúc **09:36:45 ICT** thấy **78 item = 76 mới + 2 cũ**, mọi item mới đúng SKU và UNLIST. Không thấy SKU của bốn nguồn lỗi. Hai item cũ **803934364** và **846056124** giữ nguyên các trường base được đối chiếu và `update_time`; hash trước/sau khớp. Nguồn Lamy revision 1 và run cũ `unknown / COVER_READBACK_REVIEW` giữ nguyên; không gửi lại cập nhật hoặc nhân bản.
 
-Các ca còn lại kiểm submit trùng, nguồn trùng, scope production, restart sau create, trễ phân loại, mất phản hồi create/init, lease hết hạn, phản hồi đến muộn, nguồn/kết nối đổi tại ranh giới ghi, HTTP 200 kèm lỗi nghiệp vụ, lỗi token, metadata hết hạn và readback sai. Kiểm tra số lần gọi thật trong máy chủ giả và checkpoint, không chỉ đếm trạng thái job.
+## Bốn lỗi và phát hiện từ phép thử
 
-**Không được gọi bảng trên là 80 sản phẩm đã đăng trên Shopee.** Không dùng thời gian mô phỏng để suy ra số link/24h. Phép thử không đi qua nhập thư mục/Word/KINI đầu cuối và không nghiệm thu nhiều ngành/Mall.
+| Nguồn | Mã phản hồi | Request ID |
+| --- | --- | --- |
+| SBX-BULK-20260912-C-055 | product.error_busi | e3e3e7f35b4004b3fb05d820e432fa00 |
+| SBX-BULK-20260912-C-056 | product.error_busi | e3e3e7f35b40063369d7c45080113300 |
+| SBX-BULK-20260912-C-057 | product.error_busi | e3e3e7f35b4006fcb388fda222568500 |
+| SBX-BULK-20260912-C-058 | product.error_busi | e3e3e7f35b4007c4e8d9bdf66ca3ca00 |
 
-## Kiểm chứng mã và giao diện
+Mỗi lần bị từ chối mất khoảng 10,7–11,2 giây. C059–C069 sau đó lại thành công, nên chưa có bằng chứng về trần cứng 65 listing hoặc nguyên nhân do tốc độ. Ngành, thuộc tính, thương hiệu, giới hạn và từng cấu hình kênh trước/sau C giống nhau; chỉ thứ tự mảng vận chuyển đổi.
 
-- Typecheck và build đạt; **308/308 unit/integration**, **7/7 legacy** đạt. Báo cáo `.local/verification.json` và `.local/test-results.json`, 08:38 ICT.
-- Sau đó sửa riêng một phép chờ trong test để xác nhận DB đã lưu unknown trước khi mô phỏng phản hồi đến muộn; **12/12** ca coordinator chạy lại đạt. Không thay runtime/migration sau lần kiểm toàn bộ.
-- HTTP mới: **9/9** ca kiểm chuẩn bị/submit đồng thời, checkpoint ba ảnh, gate một item trước lô, kết nối đổi, upload mất phản hồi và trang item bị cắt cụt; không gọi Shopee thật.
-- Browser regression: **42/43 đạt ở lượt đầu**; tìm KB quá giới hạn 5 giây khi chạy đồng thời test backend. Chạy riêng lại ca đó đạt (3,1 giây phần test). Không sửa hoặc tăng timeout để che lỗi; chưa kết luận tìm KB lạnh đạt mục tiêu thời gian. Báo cáo lượt đầy đủ được giữ ở `.local/sandbox-bulk-20260912/e2e-full.json`.
-- Review độc lập phát hiện và đã sửa hợp đồng tiêu đề lệch, giả định GTIN đọc lại được ở VN và quét item thiếu kiểm tổng. QC không được nới để ép đạt. Build còn cảnh báo kích thước bundle như trước.
+`product.error_busi` dùng cho nhiều nguyên nhân. **Chưa xác định được nguyên nhân cụ thể**: gateway chưa giữ thông báo lỗi, worker chưa giữ HTTP status trong bằng chứng mutation. Cần chẩn đoán đã lọc dữ liệu nhạy cảm; không suy nguyên nhân hoặc tự retry từ message.
 
-## Phần tiếp tục khi có token
+Lượt chạy thật chỉ tự dừng lô khi lỗi xác thực hoặc ghi chưa rõ; bốn lỗi nghiệp vụ liên tiếp vẫn cho nguồn khác chạy. Lệnh dừng thủ công có audit lúc **09:35:11 ICT**, **sau khi mọi item đã kết thúc**. Không gọi đây là bằng chứng tự ngắt khi lỗi lặp lại. Bốn nguồn lỗi giữ nguyên, không gửi lại để ép 80/80. Bản sửa sau phép thử phải tách khỏi hành vi đã chạy thật.
 
-Đọc metadata bằng token TEST mới → chuẩn bị một nguồn `SBX-BULK-` riêng → xem manifest → submit backend → chờ đọc lại đạt → mới thử lô nhiều nguồn. Giữ UNLIST, không dùng Lamy để thử tạo. Nếu ngành/kênh khác dự kiến hoặc readback thiếu, ghi ngoại lệ và dừng; không tự thay nguồn hoặc nối vào shop thật.
+Các phát hiện khác:
 
-Chưa có tự refresh token, tự xử lý unknown qua UI, worker 24 giờ được nghiệm thu, ảnh mô tả/gallery 3:4 trong nhánh create này, đăng nguồn doanh nghiệp nhiều ngành, khuyến mại/Flash Sale, QC chính thức hoặc nghiệm thu production. Media preparation vẫn chạy trong HTTP; chết giữa upload giữ trạng thái chưa rõ, không tự chạy lại.
+- Quy tắc vận chuyển thực tế trả object, khác dạng mảng trong schema; đã sửa parser và kiểm cả yêu cầu bật/tắt kênh.
+- SPX/Economy trả giới hạn thể tích dương nhưng không có đơn vị: vẫn giữ ngoại lệ. Chọn rõ SPF Mart 50040 trước khi chốt fixture vì metadata đủ kiểm tra; không áp làm mặc định production.
+- Một số mẫu trả `has_promotion=true`, `promotion_id=0` dù giá hiện tại bằng giá gốc. Chỉ kết luận giá khớp; chưa kết luận chương trình từ cờ này.
+- Trial cha từng báo `waiting` vì cờ dừng được ưu tiên dù mọi item đã kết thúc. `updatedAt` cũng chưa cập nhật sau mọi readback. Báo cáo này tính theo item/event, không dùng hai trường tổng hợp đó.
 
-Hướng dẫn: [Sandbox backend trials](../runbooks/sandbox-backend-trials.md). Cơ sở kỹ thuật: [chuẩn bị tạo](https://open.shopee.com/developer-guide/209), [luồng tạo](https://open.shopee.com/developer-guide/211), [add_item](https://open.shopee.com/documents/v2/v2.product.add_item?module=89&type=1), [init_tier_variation](https://open.shopee.com/documents/v2/v2.product.init_tier_variation?module=89&type=1), [get_item_base_info](https://open.shopee.com/documents/v2/v2.product.get_item_base_info?module=89&type=1) và [get_model_list](https://open.shopee.com/documents/v2/v2.product.get_model_list?module=89&type=1), bản chụp KB 08/09/2026. Đọc web trực tiếp ngày 12/09 bị HTTP 403; metadata shop hiện hành chưa đọc đủ do token lỗi. Không tuyên bố đã xác minh policy production mới nhất.
+## Bằng chứng và phạm vi
+
+Tệp riêng tại `.local/sandbox-bulk-20260912/`, không đưa lên Git:
+
+- `trial-{A,B,C}-{prepare,submit,status}.json`: nguồn, ảnh, request ID, checkpoint và readback.
+- `live-summary.json`; `live-items.csv` đủ 80 nguồn và kết quả; `live-models.csv` có **184 SKU dự kiến**, phân biệt **176 SKU đã đối chiếu** với **8 SKU thuộc nguồn lỗi**, không tự tạo model ID cho chúng.
+- `inspect-after-live.json`, `final-readback-sweep.json`: toàn shop và hai item cũ.
+- `manual-pause.json`: thời điểm dừng thủ công; không sửa trạng thái item để ép thành công.
+
+Fixture dùng chung **3 ảnh PNG 1:1 trong mỗi lô, tổng 9 upload**. Chỉ một ngành sổ tay, tối đa hai tầng/bốn model, mô tả chữ. Chưa đại diện ảnh riêng từng sản phẩm, Word/KINI đầu cuối, bìa riêng 1:1 + gallery 3:4, ảnh mô tả, nhiều ngành/Mall, nguồn doanh nghiệp hoặc chạy 24 giờ. Không ngoại suy số link/24h.
+
+## Mã và kiểm chứng
+
+API chuẩn bị lưu nguồn/ảnh/manifest bất biến, metadata và fingerprint; submit lưu Postgres trước khi trả 202. Worker pin shop/revision/payload, lưu intent trước ghi, checkpoint item ID, chờ trước init rồi đọc độc lập. Mất phản hồi ghi giữ unknown, không tự gửi lại. Migrations 007–008 áp dụng local. Nhánh thử riêng chưa bật create cho WorkOrder doanh nghiệp.
+
+Sau lượt thật đã sửa trạng thái tổng để kết quả terminal ưu tiên hơn cờ paused, cập nhật thời gian trial sau readback, và thêm guard dừng khi ba CREATE liên tiếp cùng lô bị từ chối cùng mã. Thành công hoặc mã lỗi khác ngắt chuỗi; không tự retry/resume. Bảy ca mới kiểm việc không gửi yêu cầu thứ tư, restart, cách ly lô, reset chuỗi, trạng thái tổng và thời gian. **Guard mới được kiểm thử giả lập, chưa kiểm thử lỗi này lại trên Shopee; không đổi bằng chứng 76/80.**
+
+Kiểm cuối: typecheck/build đạt, **333/333 unit/integration**, **7/7 legacy** đạt; báo cáo `.local/verification.json` và `.local/test-results.json`. Ca mô phỏng 80 nguồn dùng Postgres thật nhưng transport/đồng hồ giả, tách riêng hoàn toàn với kết quả thật **76/80**. Ca lỗi kiểm duplicate submit, scope, checkpoint/lease, mất phản hồi, token, metadata hết hạn và readback lệch.
+
+Đã nạp bản sửa local lúc 09:47 ICT. Đọc API sau nạp trả đúng lô C `failed` với 65 verified/4 failed và giữ lý do paused riêng; không có yêu cầu Shopee mới. Kiểm cuối API ready, worker online, UI HTTP 200, `productionWrites=false`; DB vẫn 3 trial/80 nguồn. Bản chụp `trial-C-status-after-fix.json` giữ riêng khỏi bằng chứng lượt chạy cũ.
+
+Browser trước đó 42/43 ở lượt đầu, một ca KB timeout khi chạy cùng test backend rồi đạt khi chạy riêng; không gọi là 43/43 cùng lượt. Lượt này không sửa giao diện. Build còn cảnh báo kích thước bundle. Chưa nghiệm thu refresh token, chẩn đoán đầy đủ lỗi, giải quyết unknown qua UI, lịch/worker 24h, nguồn doanh nghiệp nhiều ngành, khuyến mại/Flash Sale hoặc production.
+
+Hướng dẫn: [Sandbox backend trials](../runbooks/sandbox-backend-trials.md). Nguồn: [chuẩn bị tạo](https://open.shopee.com/developer-guide/209), [luồng tạo](https://open.shopee.com/developer-guide/211), [add_item](https://open.shopee.com/documents/v2/v2.product.add_item?module=89&type=1), [init_tier_variation](https://open.shopee.com/documents/v2/v2.product.init_tier_variation?module=89&type=1), [get_item_base_info](https://open.shopee.com/documents/v2/v2.product.get_item_base_info?module=89&type=1), [get_model_list](https://open.shopee.com/documents/v2/v2.product.get_model_list?module=89&type=1), [FAQ 410](https://open.shopee.com/faq/410). KB snapshot 08/09/2026; add_item cập nhật 01/09/2026, hướng dẫn 209/211 ngày 19/09/2025. Web trực tiếp 12/09 trả 403; metadata đúng sandbox đã xác minh lại qua API. Không tuyên bố policy production mới nhất đã được nghiệm thu.
+
+Đầu lượt, token revision 4 từng bị từ chối (`invalid_acceess_token`, HTTP nội bộ `SANDBOX_AUTH_REQUIRED`); bằng chứng `inspect.json` giữ riêng. Người dùng đổi token thành revision 5 trước các phép ghi ở trên; không đưa khóa/token vào chat hoặc báo cáo.

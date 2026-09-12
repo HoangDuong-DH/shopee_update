@@ -258,15 +258,13 @@ export class SandboxCreateTrialStore {
       ? 'unknown'
       : states.includes('running')
         ? 'running'
-        : row.paused
-          ? 'waiting'
-          : states.every((value) => value === 'verified')
-            ? 'verified'
-            : states.every((value) => ['verified', 'failed'].includes(value))
-              ? 'failed'
-              : states.includes('waiting')
-                ? 'waiting'
-                : 'queued';
+        : states.every((value) => value === 'verified')
+          ? 'verified'
+          : states.every((value) => ['verified', 'failed'].includes(value))
+            ? 'failed'
+            : row.paused || states.includes('waiting')
+              ? 'waiting'
+              : 'queued';
     return {
       id: row.id,
       trialKey: row.trial_key,
@@ -494,6 +492,42 @@ export class SandboxCreateTrialStore {
         outcome,
         durationMs: now.getTime() - new Date(attempt.started_at).getTime(),
       });
+      if (
+        mutation &&
+        outcome.kind === 'rejected' &&
+        !outcome.auth &&
+        outcome.code !== 'unrecognized_error' &&
+        /^[A-Za-z0-9_.-]{1,100}$/.test(outcome.code)
+      ) {
+        // Three matching completed creates is a pilot safeguard, not a Shopee quota.
+        // Include successes and different errors so either breaks the same-trial streak.
+        const recent = (
+          await client.query(
+            "SELECT a.id,a.outcome FROM sandbox_create_trial_attempts a JOIN sandbox_create_trial_items i ON i.id=a.trial_item_id WHERE i.trial_id=$1 AND a.stage='create_intent' AND a.finished_at IS NOT NULL ORDER BY a.finished_at DESC,a.started_at DESC,i.position DESC LIMIT 3",
+            [item.trial_id],
+          )
+        ).rows;
+        if (
+          recent.length === 3 &&
+          recent.every(
+            (entry) =>
+              entry.outcome?.kind === 'rejected' &&
+              !entry.outcome.auth &&
+              entry.outcome.code === outcome.code,
+          )
+        ) {
+          const paused = await client.query(
+            'UPDATE sandbox_create_trials SET paused=true,pause_reason=$2,updated_at=$3 WHERE id=$1 AND NOT paused',
+            [item.trial_id, 'REPEATED_CREATE_REJECTION:' + outcome.code, now],
+          );
+          if (paused.rowCount)
+            await this.event(client, claim.id, claim.leaseEpoch, 'REPEATED_CREATE_REJECTION', {
+              code: outcome.code,
+              consecutiveCount: 3,
+              attemptIds: recent.map((entry) => entry.id),
+            });
+        }
+      }
       await client.query('UPDATE sandbox_create_trials SET updated_at=$2 WHERE id=$1', [
         claim.trialId,
         now,
@@ -550,6 +584,10 @@ export class SandboxCreateTrialStore {
         result.verified ? 'READBACK_VERIFIED' : waiting ? 'READBACK_WAITING' : 'READBACK_BLOCKED',
         result,
       );
+      await client.query('UPDATE sandbox_create_trials SET updated_at=$2 WHERE id=$1', [
+        item.trial_id,
+        now,
+      ]);
       return true;
     });
   }

@@ -2,7 +2,7 @@
 
 Ứng dụng nội bộ để tiếp nhận bộ listing đã chuẩn bị, đối chiếu SKU/giá/nội dung/ảnh và chuẩn bị đăng/cập nhật cho nhiều shop. Bảng giá là nguồn tra cứu, không phải nơi tự ghép các SKU thành listing.
 
-**Trạng thái 12/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Trang chính là **Công việc đăng hàng**, gắn bản nguồn đã chuẩn bị với từng shop. Backend có luồng cập nhật giới hạn trên listing Lamy sandbox; kết quả cũ còn chờ đối chiếu mã bìa. Đã thêm API và worker riêng để thử tạo listing giả lập trong sandbox, luôn giữ UNLIST, có intent/lease/checkpoint và đọc lại. Phép thử 80 sản phẩm hiện là mô phỏng có PostgreSQL; gọi đọc thật ngày 12/09 bị token TEST hết hiệu lực, chưa tạo listing mới. Đăng hàng loạt từ nguồn doanh nghiệp, làm mới token tự động, khuyến mại, QC và vận hành bền 24 giờ chưa nghiệm thu. Shop thật chỉ đọc.
+**Trạng thái 12/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Trang chính là **Công việc đăng hàng**, gắn bản nguồn đã chuẩn bị với từng shop. Backend cập nhật Lamy sandbox cũ vẫn chờ đối chiếu mã bìa. Nhánh tạo thử riêng đã gửi **80 nguồn kỹ thuật qua API backend/worker: 76 listing đọc lại đạt, 4 bị Shopee từ chối**, tất cả link tạo được giữ UNLIST. Không gửi lại bốn nguồn lỗi hoặc nhân bản Lamy. Đây là phép thử thật trên sandbox với dữ liệu giả, tách khỏi ca mô phỏng 80 nguồn trong integration. Đăng hàng loạt từ nguồn doanh nghiệp, làm mới token tự động, khuyến mại, QC và vận hành bền 24 giờ chưa nghiệm thu. Shop thật chỉ đọc.
 
 ## Chạy tại máy
 
@@ -34,7 +34,7 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 - Kết nối sandbox bằng Test Partner Key / Access Token nhập ở UI, gọi `get_shop_info` trực tiếp. Khóa/token mã hóa tại server và không được trả lại UI.
 - Bổ sung 11/09: **Tra cứu & kiểm tra** dùng hai kho Shopee tại máy, mở toàn bài có metadata/hash, kiểm scope/phiên bản kế hoạch và lưu lịch sử vào PostgreSQL. Harness chỉ có công cụ đọc, giới hạn lượt/thời gian; chưa cấu hình LLM hoặc MCP. Đây chưa phải bộ kiểm chính sách ngành đầy đủ hoặc QC Shopee.
 
-Mức tồn đã có chỗ nhập trong cấu hình công việc; chưa nối sang lệnh cập nhật tồn Shopee và không tự bù sau đơn hàng. Chưa tự suy ngành, thương hiệu, chứng từ, logistics hoặc quyền API từ ví dụ tài liệu. Bìa, phân loại, giá, tồn, vận chuyển và các trường còn lại chưa có executor được nghiệm thu; giới hạn sandbox không áp làm mặc định production.
+Mức tồn đã có chỗ nhập trong cấu hình công việc; chưa nối sang lệnh cập nhật tồn Shopee và không tự bù sau đơn hàng. Chưa tự suy ngành, thương hiệu, chứng từ, logistics hoặc quyền API từ ví dụ tài liệu. Nhánh thử kỹ thuật đã đối chiếu phân loại/giá/tồn/vận chuyển trên sandbox; executor cho nguồn doanh nghiệp và các trường còn lại vẫn chưa nghiệm thu. Giới hạn sandbox không áp làm mặc định production.
 
 ## Kiểm tra
 

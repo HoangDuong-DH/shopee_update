@@ -11,6 +11,14 @@ Phạm vi: nhánh thử kỹ thuật ngày 12/09/2026, chỉ TEST partner 123229
 5. `GET /v1/sandbox-create-trials/{trialId}` trả trạng thái từng nguồn, item ID, bước, lỗi, bằng chứng đọc lại và thời gian. Worker lưu intent trước mutation, không gửi lại create/init khi mất phản hồi. Sau create phải chờ ít nhất 5 giây trước khởi tạo phân loại.
 6. Lần đầu chỉ một item. Lô nhiều item chỉ được submit khi có một item đã đọc lại đạt trên cùng revision kết nối. Giữ `UNLIST` toàn bộ. Không có bước tự bật bán, xóa mẫu, cập nhật Lamy hoặc tạo chương trình giá.
 
+## Khác biệt metadata đã quan sát ngày 12/09/2026
+
+- `channel_relation_rules` trong sandbox trả object, trong schema tài liệu là mảng. Bộ kiểm tra nhận cả hai dạng, kiểm kênh cần bật/tắt; dữ liệu không hiểu được trở thành ngoại lệ. Không bỏ qua object để mặc nhiên cho qua.
+- Kích thước có đơn vị `UNKNOWN` chỉ được xem là không giới hạn khi cả chiều cao/rộng/dài/tổng đều trả rõ số 0. Giới hạn dương vẫn cần đơn vị xác định.
+- SPX/Economy trong shop thử trả giới hạn thể tích dương nhưng không có đơn vị. Phép thử giữ ngoại lệ này; chọn rõ SPF Mart 50040 trước khi chốt nguồn thử vì metadata kênh đó đủ để kiểm kích thước/cân nặng. Không biến SPF hoặc giới hạn sandbox thành mặc định cho shop thật.
+- Đo thời gian bằng sự kiện `QUEUED` đến kết quả cuối, tách prepare/upload/submit và thời gian con người xem trước. Nếu có item lỗi, gọi là hoàn tất xử lý với lỗi, không phải toàn bộ đã verified. Bản trước sửa 12/09 chưa cập nhật `trial.updatedAt` sau mọi readback; dữ liệu lịch sử phải dùng item/event.
+- Có mẫu trả `has_promotion=true`, `promotion_id=0`, giá hiện tại bằng giá gốc. Chỉ kết luận giá đã khớp; cần API khuyến mại riêng khi muốn kết luận về chương trình. Luồng thử này không gửi yêu cầu tạo chương trình.
+
 ## Nội dung fixture và giới hạn
 
 - Sổ tay giả lập ngành 301378, tên `SANDBOX QA`, parent/model SKU riêng. Ngành, thuộc tính giấy 200134/101205 và No Brand phải được xác minh lại bằng metadata; sai hoặc thiếu thì chặn, không đổi nguồn để vượt kiểm tra.
@@ -19,7 +27,8 @@ Phạm vi: nhánh thử kỹ thuật ngày 12/09/2026, chỉ TEST partner 123229
 - Nguồn không khai GTIN. Chỉ chấp nhận quy tắc Optional; Flexible/Mandatory dừng trước tải ảnh. API VN không bảo đảm trả GTIN để đối chiếu.
 - 80 là trần lô thử do ứng dụng đặt. Không phải quota Shopee và không chứng minh số link/ngày.
 - Snapshot metadata có thời hạn 15 phút, pin revision kết nối. Token đổi hoặc snapshot hết hạn không tự sửa manifest/lặp mutation. Chưa có cơ chế tự refresh token.
-- Worker dừng lô khi lỗi xác thực hoặc ghi chưa rõ. Intent chưa rõ còn giữ khóa ghi shop qua lần khởi động lại. Hiện chưa có màn hình/endpoint giải quyết tự động các trạng thái unknown; cần đọc và đối chiếu bằng chứng, không chỉnh DB để ép verified.
+- Worker dừng lô khi lỗi xác thực hoặc ghi chưa rõ. Bản sửa sau phép thử thật 12/09 còn dừng khi ba CREATE đã kết thúc liên tiếp trong cùng lô bị từ chối cùng mã lỗi nghiệp vụ: `REPEATED_CREATE_REJECTION:<code>`. Thành công/mã khác ngắt chuỗi; đây là guard của pilot, không phải quota Shopee. Không tự retry/resume. Guard mới chỉ nghiệm thu bằng mô phỏng lỗi, không gán ngược cho hành vi lượt thật 76/80.
+- Intent chưa rõ còn giữ khóa ghi shop qua lần khởi động lại. Hiện chưa có màn hình/endpoint giải quyết tự động unknown; cần đọc và đối chiếu bằng chứng, không chỉnh DB để ép verified. Khi mọi item đã kết thúc, trạng thái tổng là verified/failed theo item dù cờ paused còn được giữ để lưu lý do.
 - Chuẩn bị media đang chạy trong request API; mất tiến trình giữ record chưa rõ, không tự phục hồi upload. Worker listing tách khỏi vòng đời HTTP. Chưa nghiệm thu vận hành 24 giờ.
 
 ## Phân biệt bằng chứng
