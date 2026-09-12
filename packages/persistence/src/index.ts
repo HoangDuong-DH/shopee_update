@@ -3,3 +3,4 @@ export * from './repository.js';
 export * from './blob-store.js';
 export * from './input-library.js';
 export * from './work-orders.js';
+export * from './sandbox-create-trials.js';

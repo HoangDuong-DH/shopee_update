@@ -2,7 +2,7 @@
 
 Ứng dụng nội bộ để tiếp nhận bộ listing đã chuẩn bị, đối chiếu SKU/giá/nội dung/ảnh và chuẩn bị đăng/cập nhật cho nhiều shop. Bảng giá là nguồn tra cứu, không phải nơi tự ghép các SKU thành listing.
 
-**Trạng thái 11/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Trang chính là **Công việc đăng hàng**, gắn bản nguồn đã chuẩn bị với từng shop. Backend có luồng cập nhật giới hạn trên listing Lamy sandbox: đọc, xem thay đổi, gửi các trường được chọn và đọc lại. Đăng mới hàng loạt, làm mới token tự động, khuyến mại, QC, đo tải và chạy bền 24 giờ còn trong kế hoạch. Shop thật chỉ đọc; worker hiện tại xử lý nguồn, chưa chạy hàng đợi đăng listing.
+**Trạng thái 12/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Trang chính là **Công việc đăng hàng**, gắn bản nguồn đã chuẩn bị với từng shop. Backend có luồng cập nhật giới hạn trên listing Lamy sandbox; kết quả cũ còn chờ đối chiếu mã bìa. Đã thêm API và worker riêng để thử tạo listing giả lập trong sandbox, luôn giữ UNLIST, có intent/lease/checkpoint và đọc lại. Phép thử 80 sản phẩm hiện là mô phỏng có PostgreSQL; gọi đọc thật ngày 12/09 bị token TEST hết hiệu lực, chưa tạo listing mới. Đăng hàng loạt từ nguồn doanh nghiệp, làm mới token tự động, khuyến mại, QC và vận hành bền 24 giờ chưa nghiệm thu. Shop thật chỉ đọc.
 
 ## Chạy tại máy
 
@@ -48,6 +48,8 @@ Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL t
 
 ## Tài liệu và phạm vi
 
+- [Thử hàng loạt bằng API backend sandbox](docs/runbooks/sandbox-backend-trials.md)
+- [Kết quả backend ngày 12/09](docs/delivery/2026-09-12-backend-sandbox-trial.md)
 - [Hướng dẫn chạy](docs/runbooks/local-development.md)
 - [Cách dùng giao diện listing](docs/runbooks/listing-workspace.md)
 - [Công việc theo shop và phép thử backend](docs/delivery/2026-09-11-operation-workbench.md)

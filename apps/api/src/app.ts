@@ -29,6 +29,7 @@ import { InputService } from './input-service.js';
 import { WorkbenchService } from './workbench-service.js';
 import { HandoffService } from './handoff-service.js';
 import { SandboxListingService } from './sandbox-listing-service.js';
+import { SandboxTrialService } from './sandbox-trial-service.js';
 const REPO = Symbol('repository'),
   BLOBS = Symbol('blobs');
 const id = (s: string) => z.string().uuid().parse(s);
@@ -120,23 +121,19 @@ class ApiErrors implements ExceptionFilter {
           'Công việc chưa lưu được. Đối chiếu bản đã lưu, nguồn và shop đích trước khi thử lại.',
       });
     if (/^HANDOFF_/.test(code))
-      return reply
-        .status(409)
-        .send({
-          code,
-          message:
-            'Hồ sơ bàn giao chưa khớp nguồn hoặc bản đã lưu. Giữ tài liệu và đối chiếu lại trước khi áp dụng.',
-        });
+      return reply.status(409).send({
+        code,
+        message:
+          'Hồ sơ bàn giao chưa khớp nguồn hoặc bản đã lưu. Giữ tài liệu và đối chiếu lại trước khi áp dụng.',
+      });
     if (/^SANDBOX_API_REJECTED:/.test(code)) {
       const auth = /access|acceess|auth|token/i.test(code);
-      return reply
-        .status(409)
-        .send({
-          code: auth ? 'SANDBOX_AUTH_REQUIRED' : 'SANDBOX_API_REJECTED',
-          message: auth
-            ? 'Shopee không chấp nhận token TEST đã lưu. Mở Kết nối shop và cập nhật token hợp lệ.'
-            : 'Shopee từ chối yêu cầu. Giữ bộ nguồn và kiểm tra điều kiện của shop.',
-        });
+      return reply.status(409).send({
+        code: auth ? 'SANDBOX_AUTH_REQUIRED' : 'SANDBOX_API_REJECTED',
+        message: auth
+          ? 'Shopee không chấp nhận token TEST đã lưu. Mở Kết nối shop và cập nhật token hợp lệ.'
+          : 'Shopee từ chối yêu cầu. Giữ bộ nguồn và kiểm tra điều kiện của shop.',
+      });
     }
     if (/^SANDBOX_/.test(code))
       return reply
@@ -158,7 +155,31 @@ class AppController {
     @Inject(WorkbenchService) readonly workbench: WorkbenchService,
     @Inject(HandoffService) readonly handoffs: HandoffService,
     @Inject(SandboxListingService) readonly sandbox: SandboxListingService,
+    @Inject(SandboxTrialService) readonly trials: SandboxTrialService,
   ) {}
+  @Post('sandbox-create-trials/inspect') inspectTrial(@Body() raw: unknown) {
+    return this.trials.inspect(raw);
+  }
+  @Post('sandbox-create-trials/prepare') prepareTrial(@Body() raw: unknown) {
+    return this.trials.prepare(raw);
+  }
+  @Get('sandbox-create-trials/preparations/:id') getTrialPreparation(@Param('id') key: string) {
+    return this.trials.get(key);
+  }
+  @Post('sandbox-create-trials/preparations/:id/submit') submitTrial(
+    @Param('id') key: string,
+    @Body() raw: unknown,
+    @Res({ passthrough: true }) reply: any,
+  ) {
+    reply.status(202);
+    return this.trials.submit(key, raw);
+  }
+  @Get('sandbox-create-trials') listTrials() {
+    return this.trials.list();
+  }
+  @Get('sandbox-create-trials/:id') getTrial(@Param('id') key: string) {
+    return this.trials.getTrial(key);
+  }
   @Get('handoffs/products/:key') exportHandoff(@Param('key') key: string) {
     return this.handoffs.exportProduct(key);
   }
@@ -253,6 +274,7 @@ class AppController {
     return {
       productionWrites: false,
       listingExecutor: 'not_configured',
+      sandboxTrialExecutor: 'bounded_synthetic_unlisted',
       worker: r.rows[0].last_seen ? 'online' : 'offline',
       version: '0.1.0',
       mode: 'internal',
@@ -425,7 +447,12 @@ export async function createApp(
   repo: Repository,
   blobs: BlobStore,
   origins: string[],
-  options: { knowledge?: KnowledgePort } = {},
+  options: {
+    knowledge?: KnowledgePort;
+    trialTransport?: typeof fetch;
+    trialEncryptionKey?: string;
+    trialPause?: () => Promise<void>;
+  } = {},
 ): Promise<NestFastifyApplication> {
   @Module({
     controllers: [AppController, HealthController],
@@ -436,6 +463,14 @@ export async function createApp(
       { provide: WorkbenchService, useValue: new WorkbenchService(repo) },
       { provide: HandoffService, useValue: new HandoffService(repo) },
       { provide: SandboxListingService, useValue: new SandboxListingService(repo, blobs) },
+      {
+        provide: SandboxTrialService,
+        useValue: new SandboxTrialService(repo, blobs, {
+          transport: options.trialTransport,
+          encryptionKey: options.trialEncryptionKey,
+          pause: options.trialPause,
+        }),
+      },
       { provide: DB_PROBE, useValue: () => repo.probe() },
       {
         provide: AssistantService,
