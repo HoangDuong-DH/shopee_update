@@ -1,26 +1,103 @@
-# Shopee Workspace
+# Shopee Bulk Listing Workspace
 
-**Checkpoint hiện tại — 16/09/2026:** đã đăng qua backend OpenAPI và đối chiếu đạt **xịt thơm ô tô / 48 phân loại** và **xịt khử mùi thảm / 48 phân loại** trên shop **1423724897 / vuatinhdau.vn**. Cùng can 5L và Ngọc Lan Tây của lượt trước, GET mới xác nhận **4 listing đều NORMAL**. Xịt khử mùi tủ giày và giày da nam chưa gửi vì ngành yêu cầu bảng kích cỡ; đã có [phiếu xử lý tay](docs/operator-guides/pass1-viec-can-xu-ly-tay.md). Đọc [bằng chứng và giới hạn mới nhất](docs/delivery/2026-09-16-pass1-continuation.md).
+[![Node.js 24](https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white)](.node-version)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.base.json)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111827)](apps/web)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](infra/local/compose.yaml)
+[![Application checks](https://github.com/HoangDuong-DH/shopee_update/actions/workflows/check.yml/badge.svg)](https://github.com/HoangDuong-DH/shopee_update/actions/workflows/check.yml)
 
-Kiểm mới **1753 unit/integration + 7 legacy, typecheck/build đạt**; một browser fixture gọi tên sản phẩm đạt riêng. 17 browser fixture của workflow thuộc ngày 15/09. Đã nối **listing đã lưu → kiểm nguồn/metadata → chuẩn bị lô → hàng đợi API → đọc lại/QC** trong phạm vi được cho phép; xem [hướng dẫn nhân viên](docs/operator-guides/dang-hang-tu-bo-listing-da-luu.md). Chưa nghiệm thu 80 listing thật, nhiều shop, mọi nhóm cập nhật hoặc chạy liên tục 24h. 80 bộ ở test chỉ chứng minh chuẩn bị nguồn/manifest tại máy. Các mốc bên dưới là lịch sử, không thay thế checkpoint mới.
+Ứng dụng nội bộ để chuẩn hóa dữ liệu sản phẩm, chuẩn bị lô và đăng hoặc cập nhật nhiều listing Shopee qua OpenAPI. Hệ thống giữ liên kết từ dữ liệu trên sàn về đúng Word, ảnh và dòng SKU/giá nguồn để người vận hành có thể kiểm tra, phục hồi và tiếp tục công việc mà không phải nhập lại từng sản phẩm.
 
-## Các mốc trước ngày 15/09
+> **Trạng thái:** đang được phát triển và vận hành có kiểm soát. Các thao tác ghi production bị khóa theo shop, quyền và cấu hình máy chủ. Kết quả chạy thử tại máy không được coi là bằng chứng sản phẩm đã được Shopee chấp nhận.
 
-Bổ sung 14/09: **Kho listing** là trang đầu; đã nhận bộ nội dung Vina Tươi gồm 604 dòng và danh mục 227 thiết kế Canva/5.961 trang vào database nội bộ. Mỗi phần giữ nguồn theo ô; ảnh và tham khảo shop cũ chưa tự áp dụng. Xem [bàn giao kho nguồn và giao diện](docs/delivery/2026-09-14-source-catalog-and-ux.md). Chưa có ảnh gốc, giá/tồn/SKU đầy đủ hoặc luồng xác nhận catalog thành bộ đăng.
+## Bài toán hệ thống giải quyết
 
-Ứng dụng nội bộ để tiếp nhận bộ listing đã chuẩn bị, đối chiếu SKU/giá/nội dung/ảnh và chuẩn bị đăng/cập nhật cho nhiều shop. Bảng giá là nguồn tra cứu, không phải nơi tự ghép các SKU thành listing.
+Đăng hàng loạt không chỉ là lặp một lệnh tạo sản phẩm. Mỗi listing còn phải khớp ảnh, nội dung, phân loại, SKU, giá, tồn kho, ngành hàng, thuộc tính và kênh vận chuyển của đúng shop. Một request thành công cũng chưa đủ: dữ liệu có thể chỉ được tạo một phần hoặc được Shopee chuẩn hóa khác với dữ liệu gửi lên.
 
-**Trạng thái 14/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Luồng nhập 80 thư mục đã đạt tại tầng ứng dụng với gateway mô phỏng. Lớp gửi OpenAPI mới có nhật ký từng yêu cầu, kiểm metadata/nguồn và đối chiếu sau ghi; 80 sản phẩm / 200 SKU / 3 shop / 4 ngành giả lập đã được kiểm ở lớp HTTP. Một patch tiêu đề mới trên mẫu kỹ thuật sandbox 803935036 đã gửi thật và đọc lại đúng, giữ nguyên phần không chọn. Xem [bàn giao OpenAPI](docs/delivery/2026-09-14-openapi-wire-bridge.md) để phân biệt phạm vi. Worker cho nguồn doanh nghiệp vẫn chưa nối trọn với lớp gửi này; refresh token, production và vận hành 24h chưa nghiệm thu. Shop thật chỉ đọc.
+Workspace xây dựng một quy trình có thể kiểm chứng:
 
-Lượt sandbox kỹ thuật trước đó tạo 76/80 nguồn và có 4 nguồn bị từ chối; đó không phải 80 listing doanh nghiệp đã được nghiệm thu. Không gửi lại 4 nguồn lỗi, không nhân bản Lamy 803934364 hoặc chạy lại phép ghi bìa đang `unknown`.
+1. Nhận Word, ảnh và bảng giá từ thư mục nguồn.
+2. Ghép từng lựa chọn bán với SKU và giá có bằng chứng.
+3. Cho người vận hành xem và sửa mapping trước khi đăng.
+4. Đóng băng một bản chuẩn bị có phiên bản cho đúng shop.
+5. Tạo listing ẩn theo lô, giữ nhịp gọi API và chống gửi lặp.
+6. Đọc lại từ Shopee để đối chiếu trước khi đánh dấu hoàn tất.
+7. Chuyển link ẩn cho người QC bổ sung và quyết định mở bán.
 
-Bổ sung kiểm thử cập nhật 14/09: tồn 0 và ảnh phân loại hai tầng đạt trên sandbox. Phép chuyển gallery 1:1 → 3:4 phát hiện Shopee thay bìa ngoài yêu cầu; bìa mẫu đã khôi phục bằng lệnh riêng, QC ảnh tự động chưa được nghiệm thu. Luồng tự động chuyển tỷ lệ bị chặn. Xem [kết quả từng tình huống](docs/delivery/2026-09-14-patch-scenarios.md) trước khi chạy thêm; không phát lại intent cũ.
+## Chức năng chính
 
-## Chạy tại máy
+- **Kho đầu vào:** nhận nhiều thư mục listing, workbook giá dùng chung, Word và ảnh; lưu tệp theo SHA-256 để tránh ghi đè nguồn.
+- **Nhận diện ảnh:** hỗ trợ ảnh bìa, ảnh sản phẩm, ảnh phân loại và ảnh mô tả; lưu lựa chọn tay và thứ tự ảnh theo từng listing.
+- **Ánh xạ SKU và giá:** đối chiếu theo bộ giá, sheet, cột giá và dòng nguồn; giữ trạng thái thiếu hoặc mơ hồ thay vì tự tạo SKU.
+- **Bản nháp có phiên bản:** nội dung, ảnh và cấu trúc phân loại được lưu bền trong PostgreSQL; thay đổi đồng thời được phát hiện bằng kiểm tra revision.
+- **Chuẩn bị theo shop:** đọc metadata ngành hàng, thương hiệu, thuộc tính và logistics từ kết nối của chính shop.
+- **Đăng theo lô:** chia công việc thành nhóm nhỏ, ghi journal trước khi gửi và dùng khóa để ngăn hai worker xử lý cùng mục tiêu.
+- **Đăng ẩn để QC:** tạo sản phẩm ở trạng thái ẩn, hiển thị tiến độ từng listing và tách bước mở bán khỏi bước tạo link.
+- **Đối chiếu sau ghi:** kiểm tra lại tiêu đề, ảnh, phân loại, SKU, giá, tồn và trạng thái; phản hồi chưa rõ không được tự động gửi lại.
+- **Nhập bộ cập nhật:** chuẩn bị thay đổi có phạm vi cho giá, tồn, nội dung hoặc ảnh mà không cần nhập lại toàn bộ listing.
+- **Kho kiến thức Shopee:** tra tài liệu Open Platform và Seller Education đã lưu tại máy, kèm nguồn và ngày thu thập.
 
-Cần Node **24.20.0**, npm và Docker Desktop chạy Linux containers. Bản Node riêng của dự án đang ở `.local/runtime/` trên máy phát triển; thư mục này không nằm trong Git.
+## Luồng tổng thể
+
+```mermaid
+flowchart LR
+    A[Word, ảnh, bảng giá] --> B[Worker nhập nguồn]
+    B --> C[(PostgreSQL + Blob store)]
+    C --> D[Đối chiếu và lưu bản nháp]
+    D --> E[Chuẩn bị lô theo shop]
+    E --> F{Kiểm tra trước khi gửi}
+    F -- Thiếu hoặc mơ hồ --> D
+    F -- Đạt --> G[Journal + hàng đợi]
+    G --> H[Shopee OpenAPI]
+    H --> I[Đọc lại và QC]
+    I -- Khớp --> J[Link ẩn chờ người QC]
+    I -- Lệch hoặc chưa rõ --> K[Giữ trạng thái để phục hồi]
+```
+
+Hệ thống ưu tiên tính đúng và khả năng phục hồi hơn tốc độ gửi thuần túy. Một listing dự kiến có phân loại chỉ hoàn tất khi dữ liệu đọc lại có đủ phân loại và SKU tương ứng; việc chỉ nhận được `item_id` không đồng nghĩa listing đã sẵn sàng.
+
+## Nguyên tắc an toàn dữ liệu
+
+- Không tự tạo SKU bán hàng. SKU phải truy được về dòng dữ liệu nguồn đã chọn.
+- Không dùng tên tệp, tên ảnh hoặc listing cũ làm bằng chứng duy nhất cho ngành hàng, giá hay thuộc tính.
+- Không xem HTTP `200` hoặc ACK là kết quả cuối; mọi phép ghi quan trọng đều cần đọc lại.
+- Không tự phát lại request có kết quả chưa xác định vì có thể tạo listing trùng.
+- Không tự mở bán. Tạo link ẩn và mở bán là hai quyết định riêng.
+- Không đưa token, partner key, dữ liệu shop, workbook hay ảnh riêng vào Git.
+- Credentials được mã hóa ở server và không được trả lại giao diện sau khi lưu.
+- Các giới hạn API được lấy từ tài liệu hoặc phản hồi thật của Shopee, không lấy giá trị ví dụ làm quota chung.
+
+## Kiến trúc
+
+Đây là npm workspace dùng TypeScript end-to-end:
+
+| Thành phần             | Vai trò                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `apps/web`             | Giao diện React/Vite cho nhập nguồn, mapping, chuẩn bị lô, kết nối shop và theo dõi tiến độ |
+| `apps/api`             | API NestJS/Fastify, validation phía server, quản lý kết nối và điều phối nghiệp vụ          |
+| `apps/worker`          | Worker nhập nguồn và các công việc nền đã được xếp hàng rõ ràng                             |
+| `packages/domain`      | Contract, kiểu dữ liệu và quy tắc nghiệp vụ dùng chung                                      |
+| `packages/persistence` | PostgreSQL repositories, migrations và blob store                                           |
+| `packages/shopee`      | Ký request, transport OpenAPI, codec payload và logic đọc lại/QC                            |
+| `knowledge-base`       | Bản chụp tài liệu Shopee dùng để đối chiếu kỹ thuật; không được commit mặc định             |
+| `docs`                 | Runbook, hướng dẫn vận hành, thiết kế, review và hồ sơ bàn giao                             |
+
+PostgreSQL là nguồn trạng thái công việc có thẩm quyền. Tệp gốc nằm trong blob store; UI không giữ một bản trạng thái riêng để thay thế server.
+
+## Yêu cầu
+
+- Windows 10/11 hoặc môi trường tương thích PowerShell
+- Node.js **24.20.x** và npm
+- Docker Desktop chạy Linux containers
+- Tài khoản Shopee Open Platform và shop đã cấp quyền nếu cần dùng chức năng API thật
+
+Phiên bản Node được ghim trong [`.node-version`](.node-version). PostgreSQL local dùng image `postgres:17.11-alpine`.
+
+## Khởi động tại máy
 
 ```powershell
+git clone https://github.com/HoangDuong-DH/shopee_update.git
+cd shopee_update
 npm ci
 npm run setup:local
 docker compose --env-file .local/docker.env -f infra/local/compose.yaml up -d postgres
@@ -28,53 +105,89 @@ npm run db:migrate
 npm run dev
 ```
 
-Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**, API dùng **4310**. `setup:local` tạo khóa/password ngẫu nhiên và giữ `.env` đã có. Không cần tài khoản nhân viên để sử dụng app.
+Mở [http://127.0.0.1:5173](http://127.0.0.1:5173). Các dịch vụ mặc định:
 
-## Phần đã triển khai
+| Dịch vụ    | Địa chỉ                 |
+| ---------- | ----------------------- |
+| Web        | `http://127.0.0.1:5173` |
+| API        | `http://127.0.0.1:4310` |
+| PostgreSQL | `127.0.0.1:5442`        |
 
-- **Nhập bộ cập nhật** nhận riêng Excel giá/tồn, Word và ảnh, không bắt nhập lại bộ listing đầy đủ. Mỗi sheet/bộ giá có nhóm công việc/shop riêng; SKU được ghép chính xác, ô trống giữ nguyên và tồn 0 được nhận diện. Xem trước theo bản nguồn đã lưu, chọn/bỏ chọn nhóm thay đổi, lưu biên nhận qua API/PostgreSQL rồi mở lại. Cùng ảnh có thể dùng nhiều vai trò với thứ tự riêng; không tự viết/crop nguồn. Luồng này chỉ chuẩn bị nội bộ, chưa đọc trạng thái hiện tại hoặc gửi patch lên Shopee. Xem [cách nhập cập nhật](docs/runbooks/import-updates.md).
-- Bảng công việc tách bộ nguồn khỏi nơi đăng: chọn nhiều bộ, shop đích, đăng mới/cập nhật và trường cần cập nhật. Lưu cấu hình có phiên bản; phân biệt thiếu nguồn, cần ánh xạ, lỗi kết nối, xung đột và tính năng chưa hỗ trợ. Tồn đăng bán nhập riêng theo SKU/shop, để trống không được hiểu là 0.
-- Hồ sơ bàn giao tùy chọn được xuất từ nguồn đã lưu, dùng lại ánh xạ nội dung/ảnh/SKU/giá. Nhập lại cần xem khác biệt trước khi lưu; không thay thế các tệp nguồn và không yêu cầu nhân viên tự viết JSON. Luồng đầu vào chính vẫn là thư mục Word/ảnh với bảng giá chung.
-- Luồng sandbox trực tiếp chỉ cho phép partner `1232297`, shop `227418363`, item `803934364`; các trường `title`, `description`, `gallery`. Giữ byte ảnh và bố cục nguồn; kiểm SKU/nhãn, giới hạn thật từ API, phiên bản công việc và dữ liệu trước khi gửi. Ghi checkpoint, khóa mục tiêu, đọc lại cả trường được chọn và trường giữ nguyên. Kết quả chưa rõ được phục hồi từ server để đối chiếu, không tự gửi lại.
-- Nhập Excel KINI, Word và ảnh PNG/JPEG/WebP qua HTTP; xử lý bằng worker riêng và lưu tệp theo SHA-256.
-- Ánh xạ theo nhãn của từng khối, hỗ trợ khối cạnh nhau và bộ giá có tiêu đề phân nhóm. Cột mơ hồ được đánh dấu; sheet chưa có mapping được hiển thị rõ.
-- **Kho đầu vào** tách bảng giá dùng chung khỏi các bộ Word/ảnh theo thư mục listing. Nhận nhiều thư mục trong một đợt, lưu đường dẫn, nguồn giá, cách đọc Word và thứ tự ảnh vào PostgreSQL; mở lại đợt sau khi tải lại trang mà không tải lại tệp đã nhận. Phiên bản bất biến và kiểm tra xung đột bảo vệ lựa chọn của người khác.
-- Luồng nhập thư mục giữ riêng nguồn của từng listing. Phần SKU/nhãn chưa rõ có bước bổ sung bằng bảng hoặc dán Excel; không suy danh sách SKU từ KINI. Định danh bộ trong đợt đã lưu ổn định; nhập cùng sản phẩm vào một đợt mới vẫn cần đối chiếu trùng.
-- Nội dung Word có chọn đoạn và xem trước trước khi áp dụng. Ảnh chọn riêng theo vai trò, hình thu nhỏ và thứ tự; có tải tệp ngay trong luồng và thử lại từng tệp lỗi. Ba tab Nội dung / Bộ ảnh / SKU & phân loại giúp xem từng phần. Chưa tự đọc trọn mọi bộ listing hoặc phục hồi nội dung/ảnh chưa lưu sau tải lại trang.
-- Bản đã lưu mở ở chế độ xem; điều chỉnh nội dung/ảnh phải được chọn rõ. Máy chủ khóa thứ tự SKU, tên tầng và nhãn phân loại của cùng mã bộ, giữ cả hai tầng và khoảng trắng. Khóa này chưa xác minh quan hệ SKU trên Shopee.
-- Lưu bản nháp có phiên bản, xem trước và lưu kế hoạch cho từng shop. GIÁ GỐC và mục tiêu khuyến mại tách riêng.
-- PostgreSQL giữ kế hoạch bất biến, giao dịch job/outbox và ràng buộc chống gửi trùng. Có phép thử đồng thời, xung đột phiên bản và rollback.
-- Kết nối sandbox bằng Test Partner Key / Access Token nhập ở UI, gọi `get_shop_info` trực tiếp. Khóa/token mã hóa tại server và không được trả lại UI.
-- Bổ sung 11/09: **Tra cứu & kiểm tra** dùng hai kho Shopee tại máy, mở toàn bài có metadata/hash, kiểm scope/phiên bản kế hoạch và lưu lịch sử vào PostgreSQL. Harness chỉ có công cụ đọc, giới hạn lượt/thời gian; chưa cấu hình LLM hoặc MCP. Đây chưa phải bộ kiểm chính sách ngành đầy đủ hoặc QC Shopee.
+`npm run setup:local` tạo mật khẩu database và khóa mã hóa ngẫu nhiên khi máy chưa có cấu hình. Nếu `.env` đã tồn tại, script giữ nguyên tệp đó và không in secrets ra terminal.
 
-Mức tồn đã có chỗ nhập trong cấu hình công việc; chưa nối sang lệnh cập nhật tồn Shopee và không tự bù sau đơn hàng. Chưa tự suy ngành, thương hiệu, chứng từ, logistics hoặc quyền API từ ví dụ tài liệu. Nhánh thử kỹ thuật đã đối chiếu phân loại/giá/tồn/vận chuyển trên sandbox; executor cho nguồn doanh nghiệp và các trường còn lại vẫn chưa nghiệm thu. Giới hạn sandbox không áp làm mặc định production.
+### Cấu hình quan trọng
 
-## Kiểm tra
+Sao chép từ [`.env.example`](.env.example) khi cần cấu hình thủ công.
+
+| Biến                       | Mục đích                              |
+| -------------------------- | ------------------------------------- |
+| `DATABASE_URL`             | Kết nối PostgreSQL                    |
+| `DATA_ROOT`                | Nơi lưu blob và dữ liệu runtime riêng |
+| `APP_ENCRYPTION_KEY`       | Mã hóa credentials đã lưu             |
+| `ALLOWED_ORIGINS`          | Danh sách origin được phép gọi API    |
+| `SHOPEE_PRODUCTION_WRITES` | Cờ bảo vệ các lệnh ghi production     |
+
+Không commit `.env`, `.local/`, dữ liệu nguồn hoặc khóa API.
+
+## Lệnh thường dùng
 
 ```powershell
-node scripts/verify.mjs
+npm run dev             # Chạy API, worker và giao diện
+npm run db:migrate      # Áp dụng migration PostgreSQL
+npm run typecheck       # Kiểm tra kiểu TypeScript
+npm run build           # Build toàn bộ ứng dụng
+npm run test            # Legacy + unit + integration
+node scripts/verify.mjs # Chuỗi kiểm tra đầy đủ dùng trong CI
+npm run test:e2e        # Kiểm tra trình duyệt khi app local đang chạy
 ```
 
-Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL thật. Test tự tạo schema riêng. Không thay DB bằng mock để báo đạt.
+Test integration dùng PostgreSQL thật trong schema riêng. Browser fixtures chặn kết nối ngoài localhost và không gửi lệnh lên Shopee.
 
-`npm run test:e2e` cần Edge trên Windows và app local đang chạy. Suite gồm kiểm tra chỉ đọc với Lamy, các fixture trình duyệt và luồng nhập cập nhật chạy API/worker nhập/PostgreSQL thật trong schema và blob riêng. Runner cập nhật giới hạn DB localhost:5442, chặn fetch ra ngoài localhost và dọn fixture khi kết thúc. Không gửi lệnh Shopee hoặc seed bộ cập nhật vào dữ liệu doanh nghiệp chính. CI hiện chỉ chạy fixture unit/integration, không tải dữ liệu doanh nghiệp.
+## Cách sử dụng
 
-## Tài liệu và phạm vi
+1. Vào **Kho listing → Nhập Word / ảnh / bảng giá** để nhận nguồn.
+2. Kiểm tra ảnh bìa, ảnh mô tả, ảnh phân loại, cấu trúc lựa chọn bán và SKU/giá.
+3. Lưu bộ listing; bản lưu có thể mở lại mà không cần chọn lại thư mục.
+4. Vào **Đăng hàng → Chuẩn bị lô mới**, chọn shop và các listing cần tạo.
+5. Xem các trường còn thiếu hoặc bị chặn, sau đó đăng ký lô.
+6. Theo dõi **Đợt đang làm**; hệ thống hiển thị trạng thái riêng cho từng listing.
+7. Khi tạo link ẩn thành công, mở link Shopee để QC và chỉ mở bán sau khi dữ liệu đạt yêu cầu.
 
-- [Bàn giao và nghiệm thu luồng nhập cập nhật](docs/delivery/2026-09-12-import-patch-workflow.md)
-- [Hướng dẫn nhập giá, tồn, Word và ảnh cập nhật](docs/runbooks/import-updates.md)
-- [Phản biện UX/API luồng cập nhật](docs/reviews/2026-09-12-import-patch-ui-backend-review.md)
-- [Thử hàng loạt bằng API backend sandbox](docs/runbooks/sandbox-backend-trials.md)
-- [Kết quả backend ngày 12/09](docs/delivery/2026-09-12-backend-sandbox-trial.md)
-- [Hướng dẫn chạy](docs/runbooks/local-development.md)
-- [Cách dùng giao diện listing](docs/runbooks/listing-workspace.md)
-- [Công việc theo shop và phép thử backend](docs/delivery/2026-09-11-operation-workbench.md)
-- [Kho đầu vào và phục hồi đợt nhập](docs/delivery/2026-09-11-input-library.md)
-- [Mốc thực thi và giới hạn](docs/delivery/2026-09-10-foundation.md)
-- [Kiểm tra tiếp nối 11/09](docs/delivery/2026-09-11-checkpoint.md)
-- [Hướng dẫn lấy thông tin TEST](docs/runbooks/sandbox-connection.md)
-- [Harness và bộ đánh giá](docs/runbooks/agent-evaluation.md)
-- [Kế hoạch E2E](docs/superpowers/plans/2026-09-10-shopee-execution-plan.md)
-- [Quy tắc tra cứu Shopee](AGENTS.md)
+Hướng dẫn chi tiết: [Đăng hàng từ bộ listing đã lưu](docs/operator-guides/dang-hang-tu-bo-listing-da-luu.md).
 
-Kho kiến thức, workbook, Word, ảnh Canva và bằng chứng shop riêng nằm tại máy, không được đưa vào repository tự động. Các file extension ở root được giữ nguyên như một baseline riêng; ứng dụng mới ở `apps/` và `packages/`.
+## Phạm vi hiện tại
+
+Đã có luồng production có kiểm soát từ listing đã lưu đến tạo listing ẩn và đọc lại. Tuy nhiên, khả năng dùng được còn phụ thuộc quyền của từng partner/shop, ngành hàng, metadata bắt buộc và API Shopee tại thời điểm chạy.
+
+Các phần chưa nên suy rộng từ kết quả hiện có:
+
+- Chưa coi hệ thống là đã nghiệm thu cho mọi shop, mọi ngành hàng hoặc vận hành liên tục 24 giờ.
+- Một số kiểu cập nhật listing hiện có vẫn cần quy trình riêng.
+- Size chart, video, chứng từ và các ngành hạn chế có thể cần thao tác hoặc phê duyệt bổ sung.
+- Tự động retry chỉ phù hợp với lỗi được phân loại là tạm thời; kết quả không xác định phải được đối chiếu trước.
+- Không có cơ chế tự sửa dữ liệu nguồn để vượt validation của Shopee.
+
+Xem [workflow production](docs/delivery/2026-09-15-production-workflow.md) để biết ranh giới đã nghiệm thu và [hướng dẫn chạy local](docs/runbooks/local-development.md) để xử lý lỗi môi trường.
+
+## Tài liệu
+
+- [Hướng dẫn chạy và điều tra lỗi](docs/runbooks/local-development.md)
+- [Đăng hàng từ bộ listing đã lưu](docs/operator-guides/dang-hang-tu-bo-listing-da-luu.md)
+- [Chuẩn bị bộ listing](docs/operator-guides/chuan-bi-bo-listing.md)
+- [Nhập bộ cập nhật](docs/runbooks/import-updates.md)
+- [Kết nối sandbox](docs/runbooks/sandbox-connection.md)
+- [Thiết kế workflow production](docs/superpowers/specs/2026-09-15-production-workflow-design.md)
+- [Quy tắc tra cứu kiến thức Shopee](AGENTS.md)
+
+Các báo cáo theo ngày trong `docs/delivery/` ghi lại bằng chứng và giới hạn tại từng checkpoint. Chúng là hồ sơ kỹ thuật, không phải trang bắt đầu cho người mới.
+
+## CI và đóng góp
+
+GitHub Actions chạy typecheck, build, unit/integration tests và kiểm tra dependency mức `high` trên mỗi push hoặc pull request. Trước khi gửi thay đổi:
+
+1. Không thêm credentials hoặc dữ liệu shop thật vào commit.
+2. Cập nhật contract ở cả backend và frontend nếu API thay đổi.
+3. Chạy `node scripts/verify.mjs`.
+4. Mô tả rõ kiểm thử nào chỉ dùng fixture và kiểm thử nào đã đọc hoặc ghi API thật.
+
+Repository hiện phục vụ quy trình nội bộ và chưa công bố giấy phép nguồn mở. Shopee và các nhãn hiệu liên quan thuộc về chủ sở hữu tương ứng; dự án này không phải sản phẩm chính thức của Shopee.

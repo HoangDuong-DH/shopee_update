@@ -70,6 +70,12 @@ Lô thử Hương Thảo, Hoa Hồng, Hoa Lài và Cam Sả đã đăng ký trư
 | Đã tạo và đối chiếu đạt, vẫn ẩn | Kiểm tra listing rồi xác nhận mở bán riêng. |
 | Đã mở bán và đối chiếu đạt | Đã hoàn tất bước mở bán. |
 
+**Link tạo dở dang:** có thể Shopee đã trả `item_id` cho bước tạo sản phẩm gốc nhưng bước tạo phân loại sau đó thất bại. Link lúc này tồn tại trên shop nhưng không được tính là đã đăng hoàn chỉnh. Ứng dụng phải hiển thị **Đã tạo link, thiếu phân loại/SKU**, kèm lỗi của bước phân loại và hướng xử lý; không đưa vào tổng số đã hoàn tất và không tự gửi lại. Trường hợp đã ghi nhận: item `48768076595`, dự kiến có phân loại nhưng bước tạo 40 phân loại bị từ chối do tỷ lệ giá cao nhất/thấp nhất vượt giới hạn phản hồi từ Shopee. Sau quyết định mới của người vận hành ngày 21/09/2026, item này đã được phục hồi thành 24 phân loại DORIS gồm 8 mùi × 500ml/300ml/100ml, tồn 1.000/SKU, vẫn ẩn và để trống SKU cấp sản phẩm.
+
+Với sản phẩm thực sự bán lẻ không có phân loại, SKU cấp sản phẩm phải lấy từ đúng dòng của bảng giá đã chọn. Không dùng mã bộ, số thứ tự, source key hoặc chuỗi do hệ thống tạo làm SKU bán hàng.
+
+**Ảnh nguồn thiếu không được tự bù từ sản phẩm khác:** item `56818042688` / STT 329 từng có một ảnh sai do nguồn chỉ có `g02`–`g09` nhưng quy trình cố lấp vị trí còn thiếu bằng ảnh tham khảo của bộ khác. Người vận hành đã sửa trực tiếp trên Shopee ngày 21/09/2026; không gửi cập nhật lại item này. Khi tái diễn, ứng dụng phải báo đúng vị trí thiếu và chờ bổ sung hoặc xác nhận giảm số ảnh, không tự mượn ảnh từ listing khác dù cùng mùi, dung tích hoặc dùng chung chai.
+
 Nếu có **Xem chênh lệch cân nặng**, xem số nguồn, số Shopee lưu và từng SKU. Chỉ chấp nhận mức làm tròn khi đúng quyết định vận hành; nguồn không bị sửa. Với đợt hoãn ảnh, sau khi lưu phiếu cân, bấm **Tiếp tục listing này** để hoàn tất đăng ẩn.
 
 Khi sẵn sàng kiểm ảnh của listing đã hoãn QC:
