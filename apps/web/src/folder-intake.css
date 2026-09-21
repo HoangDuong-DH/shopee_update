@@ -529,3 +529,18 @@
     padding: 10px 7px;
   }
 }
+
+.folder-name-hints { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border, #d2dcd7); border-radius: 8px; background: #f6f9f7; }
+.folder-name-hints h3 { margin-top: 0; }
+.folder-name-actions, .folder-name-filters { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end; }
+.folder-name-actions label { display: grid; gap: .3rem; max-width: 100%; }
+.folder-name-actions select { max-width: 100%; }
+.folder-name-filters button { white-space: normal; text-align: left; }
+.folder-name-filters button[aria-pressed="true"] { border-color: #b44d31; background: #fff0e9; }
+.folder-image-hint { display: block; margin: .3rem 0; font-size: .8rem; color: #526b60; overflow-wrap: anywhere; }
+.folder-name-warning { border-left: 3px solid #b88a3e; padding-left: .6rem; color: #705421; }
+
+.folder-pending-status { padding: 14px 16px; margin: 14px 0; border: 1px solid #c9d9cd; border-radius: 8px; background: #f4f8f4; }
+.folder-pending-status p { margin: 7px 0; }
+.folder-variant-location { padding: 14px 0; border-top: 1px solid var(--line, #dce4dc); }
+.folder-name-actions > button { font-weight: 650; border-color: #ba4a2e; color: #a53b22; }

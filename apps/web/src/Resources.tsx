@@ -1,13 +1,90 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, FileSpreadsheet, FolderOpen, Search, Upload } from 'lucide-react';
-import type { InputLibrary, ListingDraft, WorkbookImport } from '@shopee/domain';
+import type {
+  CatalogRow,
+  CatalogSourceField,
+  InputLibrary,
+  ListingDraft,
+  WorkbookImport,
+} from '@shopee/domain';
 import { api, date, media, money, type ImportRecord } from './api.js';
 import { Issues } from './Preview.js';
+import { ListingFolderGuide } from './ListingFolderGuide.js';
+import { ArchiveAction, LifecycleFilter, type Lifecycle } from './LocalArchive.js';
 import './input-library.css';
 
 const sourceStatus = (status: string) =>
   ({ ready: 'Đã đọc', queued: 'Chờ đọc', running: 'Đang đọc', failed: 'Cần kiểm tra' })[status] ??
   'Chưa xác định';
+const priceValue = (value?: string) => (value === undefined || value === '' ? '—' : money(value));
+const sourceFields: [CatalogSourceField, string][] = [
+  ['sku', 'SKU trong nguồn'],
+  ['name', 'Tên trong nguồn'],
+  ['brand', 'Thương hiệu trong nguồn'],
+  ['category', 'Ngành hàng trong nguồn'],
+  ['unitOfMeasure', 'Đơn vị tính'],
+  ['physicalWeightGrams', 'Cân nặng thực (g)'],
+  ['declaredWeightGrams', 'Cân nặng khai báo (g)'],
+  ['originalPrice', 'GIÁ GỐC'],
+  ['promotionTarget', 'GIÁ BÁN'],
+];
+function PriceSourceDetails({ row, filename }: { row: CatalogRow; filename?: string }) {
+  return (
+    <details data-testid="price-source-details" style={{ marginTop: 8, overflowWrap: 'anywhere' }}>
+      <summary style={{ cursor: 'pointer', minHeight: 44, paddingBlock: 10 }}>
+        Thông tin nguồn
+      </summary>
+      <p className="caption">
+        {filename}
+        <br />
+        {row.sheet} · dòng {row.row} · {row.priceProfile ?? 'Theo bảng nguồn'}
+      </p>
+      <p className="caption">
+        Giữ giá trị trong file để đối chiếu; chưa xác nhận thành thuộc tính hoặc cấu hình Shopee.
+      </p>
+      <dl style={{ margin: 0 }}>
+        {sourceFields.map(([field, label]) => {
+          const fact = row[field],
+            header = row.sourceHeaders?.[field];
+          if (!fact && !header && field !== 'originalPrice' && field !== 'promotionTarget')
+            return null;
+          return (
+            <div key={field} style={{ borderTop: '1px solid #e2e6eb', paddingBlock: 8 }}>
+              <dt style={{ fontWeight: 600 }}>{label}</dt>
+              <dd style={{ margin: '4px 0 0' }}>
+                <span data-testid={'source-fact-' + field} style={{ whiteSpace: 'pre-wrap' }}>
+                  {fact?.value === undefined || fact.value === '' ? '—' : fact.value}
+                </span>
+                {fact?.sources.map((source, index) => (
+                  <small key={index}>
+                    {source.filename && source.filename !== filename ? source.filename + ' · ' : ''}
+                    {source.locator}
+                  </small>
+                ))}
+                {header && (
+                  <small>
+                    <span>Nhãn cột: </span>
+                    <span data-testid={'source-header-' + field} style={{ whiteSpace: 'pre-wrap' }}>
+                      {header.value}
+                    </span>
+                    {header.sources.map((source, index) => (
+                      <span key={index} style={{ display: 'block' }}>
+                        {source.filename && source.filename !== filename
+                          ? source.filename + ' · '
+                          : ''}
+                        {source.locator}
+                      </span>
+                    ))}
+                  </small>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </details>
+  );
+}
 export function Resources({
   imports,
   products,
@@ -26,6 +103,8 @@ export function Resources({
   onOpenListing: (draft: ListingDraft) => void;
 }) {
   const [tab, setTab] = useState<'bundles' | 'prices'>('bundles');
+  const [lifecycle, setLifecycle] = useState<Lifecycle>('active');
+  const [viewProducts, setViewProducts] = useState<ListingDraft[]>(products);
   const [library, setLibrary] = useState<InputLibrary | null>(null);
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(''),
@@ -42,10 +121,13 @@ export function Resources({
   const request = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
-    void api<InputLibrary>('/v1/input-library', { signal: controller.signal })
-      .then((value) => {
+    void Promise.all([
+      api<InputLibrary>('/v1/input-library?lifecycle=' + lifecycle, { signal: controller.signal }),
+      api<ListingDraft[]>('/v1/products?lifecycle=' + lifecycle, { signal: controller.signal }),
+    ]).then(([value, listings]) => {
         if (!controller.signal.aborted) {
           setLibrary(value);
+          setViewProducts(listings);
           setError('');
         }
       })
@@ -57,7 +139,16 @@ export function Resources({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [imports, reload]);
+  }, [imports, reload, lifecycle]);
+  function archiveChanged() {
+    request.current++;
+    setSourceId(''); setCatalog(null); setReading(false);
+    setReload((value) => value + 1);
+  }
+  function changeLifecycle(value: Lifecycle) {
+    setLifecycle(value); setLibrary(null); setViewProducts([]); setLoading(true);
+    archiveChanged();
+  }
   useEffect(
     () => () => {
       request.current++;
@@ -98,7 +189,7 @@ export function Resources({
   const batches = (library?.batches ?? []).filter((batch) =>
     batch.name.toLocaleLowerCase('vi').includes(keyword),
   );
-  const completed = products.filter((product) =>
+  const completed = viewProducts.filter((product) =>
     `${product.title.value} ${product.productKey} ${product.variants.map((v) => v.sku.value).join(' ')}`
       .toLocaleLowerCase('vi')
       .includes(keyword),
@@ -150,8 +241,11 @@ export function Resources({
         </div>
       )}
       {loading && <p role="status">Đang mở kho đầu vào…</p>}
+      <LifecycleFilter value={lifecycle} onChange={changeLifecycle} disabled={uploading} />
+      <p className="caption">Lưu trữ trong ứng dụng để dọn danh sách. Chọn Đã lưu trữ để khôi phục; tệp gốc và lịch sử được giữ.</p>
       {tab === 'bundles' ? (
         <>
+          <ListingFolderGuide onOpenPrices={() => setTab('prices')} />
           <div className="input-library-toolbar">
             <p>Tiếp tục đợt đang làm hoặc mở bộ đã lưu để đối chiếu.</p>
             <label className="library-search">
@@ -190,9 +284,11 @@ export function Resources({
                           : ' · Chưa chọn bảng giá'}
                       </small>
                     </div>
-                    <button disabled={uploading} onClick={() => onResumeBatch(batch.id)}>
+                    <button disabled={uploading || lifecycle === 'archived'} onClick={() => onResumeBatch(batch.id)}>
                       Tiếp tục xử lý <ArrowRight size={16} />
                     </button>
+                    <ArchiveAction kind="input_batch" resourceId={batch.id} name={batch.name}
+                      archived={lifecycle === 'archived'} disabled={uploading} onChanged={archiveChanged} />
                   </article>
                 ))}
               </div>
@@ -200,14 +296,14 @@ export function Resources({
               <div className="library-empty">
                 <FolderOpen size={27} />
                 <div>
-                  <h3>{search ? 'Không tìm thấy đợt nhập' : 'Nhận một lần, làm tiếp khi cần'}</h3>
+                  <h3>{search ? 'Không tìm thấy đợt nhập' : lifecycle === 'archived' ? 'Chưa có đợt nhập nào được lưu trữ' : 'Nhận một lần, làm tiếp khi cần'}</h3>
                   <p>
                     {search
                       ? 'Thử tên thư mục khác.'
-                      : 'Chọn thư mục chứa các listing. Những nguồn và vị trí ảnh đã lưu sẽ nằm ở đây để mở lại.'}
+                      : lifecycle === 'archived' ? 'Đợt nhập được lưu trữ sẽ xuất hiện ở đây để khôi phục.' : 'Chọn thư mục chứa các listing. Những nguồn và vị trí ảnh đã lưu sẽ nằm ở đây để mở lại.'}
                   </p>
                 </div>
-                {!search && (
+                {!search && lifecycle === 'active' && (
                   <button disabled={uploading} onClick={() => onNewBatch()}>
                     Chọn thư mục listing
                   </button>
@@ -244,15 +340,17 @@ export function Resources({
                       </p>
                       <small>Đã lưu trong ứng dụng</small>
                     </div>
-                    <button disabled={uploading} onClick={() => onOpenListing(product)}>
+                    <button disabled={uploading || lifecycle === 'archived'} onClick={() => onOpenListing(product)}>
                       Mở bộ đã lưu
                     </button>
+                    <ArchiveAction kind="product" resourceId={product.productKey} name={product.title.value}
+                      archived={lifecycle === 'archived'} disabled={uploading} onChanged={archiveChanged} />
                   </article>
                 ))}
               </div>
             ) : (
               <p className="caption">
-                {search ? 'Không có bộ khớp từ khóa.' : 'Các bộ hoàn thiện sẽ xuất hiện tại đây.'}
+                {search ? 'Không có bộ khớp từ khóa.' : lifecycle === 'archived' ? 'Chưa có bộ listing nào được lưu trữ.' : 'Các bộ hoàn thiện sẽ xuất hiện tại đây.'}
               </p>
             )}
           </section>
@@ -321,12 +419,12 @@ export function Resources({
                   <p>
                     {sourceStatus(book.status)}
                     {book.status === 'ready'
-                      ? ` · ${book.rowCount} dòng giá · ${book.sheetCount} trang tính`
+                      ? ` · ${book.rowCount} dòng theo bộ giá · ${book.sheetCount} trang tính`
                       : ''}
                   </p>
                   <small>
                     Nhập {date(book.createdAt)}
-                    {book.issueCount ? ` · ${book.issueCount} điểm cần đối chiếu` : ''}
+                    {book.issueCount ? ' · Có mục cần đối chiếu theo bộ giá' : ''}
                   </small>
                 </div>
                 <div className="actions">
@@ -337,11 +435,13 @@ export function Resources({
                     Tra giá
                   </button>
                   <button
-                    disabled={uploading || book.status !== 'ready'}
+                    disabled={uploading || book.status !== 'ready' || lifecycle === 'archived'}
                     onClick={() => onNewBatch(book.id)}
                   >
                     Dùng cho đợt mới <ArrowRight size={15} />
                   </button>
+                  <ArchiveAction kind="pricebook" resourceId={book.id} name={book.filename}
+                    archived={lifecycle === 'archived'} disabled={uploading} onChanged={archiveChanged} />
                 </div>
               </article>
             ))}
@@ -350,9 +450,9 @@ export function Resources({
             <div className="library-empty">
               <FileSpreadsheet size={30} />
               <div>
-                <h3>Thêm bảng giá dùng chung của công ty</h3>
+                <h3>{lifecycle === 'archived' ? 'Chưa có bảng giá nào được lưu trữ' : 'Thêm bảng giá dùng chung của công ty'}</h3>
                 <p>
-                  Chọn file Excel bằng nút phía trên. Word và ảnh được nhận cùng thư mục listing.
+                  {lifecycle === 'archived' ? 'Bảng giá được lưu trữ sẽ xuất hiện ở đây để khôi phục.' : 'Chọn file Excel bằng nút phía trên. Word và ảnh được nhận cùng thư mục listing.'}
                 </p>
               </div>
             </div>
@@ -430,7 +530,7 @@ export function Resources({
                   <Issues issues={catalog.issues} />
                   <div className="library-pagination">
                     <span>
-                      {priceRows.length} dòng giá · Hiển thị{' '}
+                      {priceRows.length} dòng theo bộ giá · Hiển thị{' '}
                       {priceRows.length ? currentPage * 50 + 1 : 0}–
                       {Math.min((currentPage + 1) * 50, priceRows.length)}
                     </span>
@@ -463,6 +563,13 @@ export function Resources({
                             <td>
                               <strong>{row.sku.value}</strong>
                               <small>{row.name.value}</small>
+                              <PriceSourceDetails
+                                row={row}
+                                filename={
+                                  catalog.source.filename ??
+                                  priceBooks.find((book) => book.id === sourceId)?.filename
+                                }
+                              />
                             </td>
                             <td>
                               {row.sheet}
@@ -471,9 +578,9 @@ export function Resources({
                               </small>
                             </td>
                             <td title={row.originalPrice?.sources[0]?.locator}>
-                              {money(row.originalPrice?.value)}
+                              {priceValue(row.originalPrice?.value)}
                             </td>
-                            <td>{money(row.promotionTarget?.value)}</td>
+                            <td>{priceValue(row.promotionTarget?.value)}</td>
                             <td>
                               {row.issues.length ? (
                                 <details>

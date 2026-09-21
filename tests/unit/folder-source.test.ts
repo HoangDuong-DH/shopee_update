@@ -108,6 +108,25 @@ function fixture(): FolderAssemblyInput {
     },
   };
 }
+it('shows name-ranked price candidates without creating membership or replacing exact SKU mappings', async () => {
+  const input = fixture();
+  delete input.rules.membership;
+  const path = 'Bộ/Tinh-dầu-xịt-Hoa-hồng-VINA-TƯƠI-100ml.png';
+  input.group.files.push(file(path));
+  input.files.push(uploaded(path, 'image'));
+  input.priceSource.rows = [
+    row('SKU-100', {
+      name: fact('Tinh dầu xịt cao cấp Hoa hồng VNT 100ml'),
+      brand: fact('VINA TƯƠI'),
+    }),
+    row('SKU-300', { name: fact('Tinh dầu xịt Hoa hồng VNT 300ml'), brand: fact('VINA TƯƠI') }),
+  ];
+  const result = await assembleFolderListing(input);
+  expect(result.candidates.variants.map((v) => v.sku)).toEqual(['SKU-100']);
+  expect(result.seed).toBeUndefined();
+  expect(result.issues.some((i) => i.code === 'MEMBERSHIP_NOT_MAPPED')).toBe(true);
+  expect(result.issues.some((i) => i.code === 'IMAGE_NAME_RANKED_CANDIDATES')).toBe(true);
+});
 
 describe('prepared listing folder grouping', () => {
   it('uses the explicitly selected grouping depth and keeps identical filenames in separate listing folders', () => {
@@ -281,6 +300,40 @@ describe('prepared listing folder assembly', () => {
     input.rules.membership!.variants[1].rowKey = 'row-SKU-A';
     result = await assembleFolderListing(input);
     expect(result.seed).toBeDefined();
+  });
+
+  it('clears only resolved duplicate-SKU warnings after an exact price-row selection', async () => {
+    const input = fixture();
+    input.priceSource.rows[1].issues = [
+      {
+        code: 'DUPLICATE_SKU',
+        message: 'Repeated across price profiles',
+        field: 'sku',
+        severity: 'warn',
+        sources: [source],
+      },
+      {
+        code: 'SOURCE_REVIEW',
+        message: 'Keep this source concern',
+        field: 'price',
+        severity: 'warn',
+        sources: [source],
+      },
+    ];
+    input.priceSource.rows.push(row('SKU-B', { key: 'mall-only', priceProfile: 'MALL' }));
+    let result = await assembleFolderListing(input);
+    expect(result.seed).toBeDefined();
+    expect(result.issues.map((item) => item.code)).not.toContain('DUPLICATE_SKU');
+    expect(result.issues.map((item) => item.code)).toContain('SOURCE_REVIEW');
+    input.priceSource.rows.push(row('SKU-B', { key: 'same-profile-duplicate' }));
+    result = await assembleFolderListing(input);
+    expect(result.seed).toBeUndefined();
+    expect(result.issues.map((item) => item.code)).toContain('VARIANT_PRICE_SOURCE_UNRESOLVED');
+    input.rules.membership!.variants[0].rowKey = 'row-SKU-B';
+    result = await assembleFolderListing(input);
+    expect(result.seed).toBeDefined();
+    expect(result.issues.map((item) => item.code)).not.toContain('DUPLICATE_SKU');
+    expect(result.issues.map((item) => item.code)).toContain('SOURCE_REVIEW');
   });
 
   it('rejects cross-folder image references and duplicate role positions while retaining valid source candidates', async () => {

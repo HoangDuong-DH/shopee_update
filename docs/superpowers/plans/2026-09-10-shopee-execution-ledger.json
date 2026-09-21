@@ -1,9 +1,32 @@
 {
   "created_on": "2026-09-10",
-  "status": "bounded_sandbox_live_80_attempted_76_verified_4_rejected_business_source_and_production_unaccepted",
+  "status": "manual_hidden_workflow_verified_vina_range_inputs_with_explicit_exceptions",
   "plan": "2026-09-10-shopee-execution-plan.md",
   "execution_mode": "sequential_integration_with_skill_requested_retrieval_and_review",
-  "production_write_authorized": false,
+  "production_write_authorized": true,
+  "checkpoint_variation_image_qc_2026_09_14": {
+    "delivery": "docs/delivery/2026-09-14-variation-and-image-qc.md",
+    "verification": "865/865 unit/integration, 7/7 legacy, typecheck/build pass at2026-09-14T07:51:22.673Z; separate QC browser1/1 pass",
+    "live": "Three technical TEST mutation intents verified: one-tier rename/reorder803934786 and two-tier rename803934787. Add/delete blocked beforePOST by missing promotion detail. No production writes or new image uploads.",
+    "image_qc": "Actual restored cover803935036 newly reconciled through scoped image_manual_review plus two complete readbacks; reviewer explicitly Codex QA(agent). Wrong gallery-cover remains mismatch. Historical journal states unchanged.",
+    "architecture": "Variation planner/stage executor and immutable image review/cover reconciliation, migrations016-017. Shared mutation lane across6 legacy/new families. Separate sandbox service; general source-import pipeline and production not accepted.",
+    "recovery_gap": "Existing main Lamyunknown keeps shared owner lane held. Do not remove history or replay. Evidence-based readonly resolution and terminal variationunknown reconciliation remain incomplete."
+  },
+  "checkpoint_2026_09_14": {
+    "delivery": "docs/delivery/2026-09-14-live-backend-acceptance.md",
+    "real_local_intake": "80 DOCX + 240 PNG in 80 folders; source text, SHA, folder identity and persistence verified. Three subset drafts and WorkOrders across three explicit fixture shops; not 80 complete listings.",
+    "category_scope": "Four source category labels only; editor/API category routing and per-folder shop assignment remain missing.",
+    "field_backend": "Dedicated SBX-BULK technical intents; selected and unchanged readback; no repeat mutation; fixed TEST owner and protected existing items. Business import-patch executor not enabled.",
+    "live_field_result": "Connection revision6: FIELD-20260914-B 14 verified, 1 zero-tier price blocked before mutation, 0 unknown, 0 unattempted. Independent raw readback verified preservation of all returned fields and unselected models. Detail promotion read omitted promotion field, so ambiguous true flag remains blocked.",
+    "live_create_result": "One new technical canary803935036 UNLIST verified via backend/worker, trial SBX-BULK-20260914-R6A. Queue-to-verification7.752s. Prior12Sep76/80 result remains separate.",
+    "root_checks": "Fresh453 unit/integration +7 legacy and build/typecheck pass after diagnostic/comparator changes. Earlier same-day65 browser pass; root bulk import44.894s, isolated suite33.375s. Reports separated under LIVE-REV6 and FIELD-20260914-B.",
+    "applied_migrations": [
+      "010_connection_display_names.sql",
+      "011_sandbox_field_trials.sql"
+    ],
+    "shop_alias": "Shop thử nghiệm VN; official name unchanged. User renewed TEST connection to revision6/capability5 at2026-09-14T02:16:28Z.",
+    "pending_user_input": "Token renewal fulfilled. Additional TEST shop connection still needed for live multi-shop acceptance; business input routing/executor/media remain implementation gaps."
+  },
   "tasks": [
     {
       "id": "A1",
@@ -20,7 +43,9 @@
     {
       "id": "A2",
       "name": "Source contracts and provenance-preserving import",
-      "depends_on": ["A1"],
+      "depends_on": [
+        "A1"
+      ],
       "status": "in_progress",
       "remaining": [
         "Manual remapping for ambiguous columns and unsupported sheets",
@@ -30,7 +55,9 @@
     {
       "id": "A3",
       "name": "Immutable plans, persistence and manual stock commands",
-      "depends_on": ["A2"],
+      "depends_on": [
+        "A2"
+      ],
       "status": "in_progress",
       "evidence": [
         "2026-09-11: versioned per-shop work orders with exact-source references, CAS/idempotent saves, prepared-run invalidation and active/unknown-target locking. Manual stock decisions persist per SKU/shop without writing Shopee stock."
@@ -43,7 +70,9 @@
     {
       "id": "A4",
       "name": "Import, mapping and preview UI",
-      "depends_on": ["A3"],
+      "depends_on": [
+        "A3"
+      ],
       "status": "in_progress",
       "remaining": [
         "Membership changes require a separately designed explicit source migration; current handoff revisions preserve membership",
@@ -67,7 +96,9 @@
     {
       "id": "B1",
       "name": "Scoped gateway, token rotation and capabilities",
-      "depends_on": ["A3"],
+      "depends_on": [
+        "A3"
+      ],
       "status": "in_progress",
       "remaining": [
         "Authorization callback and rotating token recovery",
@@ -81,7 +112,9 @@
     {
       "id": "B2",
       "name": "Checkpointed media and listing creation",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "status": "in_progress",
       "evidence": [
         "2026-09-11: direct original-byte media upload and durable per-source checkpoints; 17 mappings reused with no new uploads on the final sandbox update. Cache scoped by connection, hash, media role and gallery ratio.",
@@ -96,7 +129,9 @@
     {
       "id": "B3",
       "name": "Selective updates and identity-based readback",
-      "depends_on": ["B2"],
+      "depends_on": [
+        "B2"
+      ],
       "status": "in_progress",
       "evidence": [
         "2026-09-11: title/description/gallery update bound to immutable work-order/source/connection revisions, direct reads, dynamic limits, drift gates and checkpointed uncertain-outcome reconciliation.",
@@ -111,7 +146,10 @@
     {
       "id": "B4",
       "name": "Direct Lamy sandbox E2E evidence",
-      "depends_on": ["A4", "B3"],
+      "depends_on": [
+        "A4",
+        "B3"
+      ],
       "status": "in_progress",
       "evidence": [
         "2026-09-11: direct backend update_item acknowledged on existing Lamy sandbox item; later reads confirm title, exact description and gallery, with six models/prices/stocks preserved. No production writes or duplicate listing.",
@@ -125,41 +163,67 @@
     {
       "id": "C1",
       "name": "Outbox, leases and scheduling",
-      "depends_on": ["B3"],
+      "depends_on": [
+        "B3"
+      ],
       "status": "in_progress",
-      "evidence": ["2026-09-12: dedicated sandbox-create trial queue in PostgreSQL with per-step lease, fencing, immutable intent, durable five-second tier wait and checkpoint recovery. Actual lots 1/10/69 processed; minimum live create-to-init wait 5.064 seconds. Existing generic jobs/outbox executor remains disabled."],
-      "remaining": ["General prepared-listing queue integration, scheduling controls and real 24-hour soak"]
+      "evidence": [
+        "2026-09-12: dedicated sandbox-create trial queue in PostgreSQL with per-step lease, fencing, immutable intent, durable five-second tier wait and checkpoint recovery. Actual lots 1/10/69 processed; minimum live create-to-init wait 5.064 seconds. Existing generic jobs/outbox executor remains disabled."
+      ],
+      "remaining": [
+        "General prepared-listing queue integration, scheduling controls and real 24-hour soak"
+      ]
     },
     {
       "id": "C2",
       "name": "Retry, rate budgets and uncertain-write reconciliation",
-      "depends_on": ["C1"],
+      "depends_on": [
+        "C1"
+      ],
       "status": "in_progress",
-      "evidence": ["2026-09-12: unknown create/init holds TEST shop lane, no blind resend; late receipts retained; readback retries reads only. Fault scenarios use isolated Postgres and stateful fake gateway.", "Actual four consecutive product.error_busi rejections did not auto-pause the live run; later distinct sources succeeded. Added a same-trial three-matching-rejected-creates pause guard afterward, verified in isolated tests only. No actual rejected source replay; no root-cause claim."],
-      "remaining": ["Live quota/rate-budget verification, sanitized remote error diagnostics including message/HTTP status, automatic read-only reconciliation of unknown creates, reviewed recovery controls and token rotation"]
+      "evidence": [
+        "2026-09-12: unknown create/init holds TEST shop lane, no blind resend; late receipts retained; readback retries reads only. Fault scenarios use isolated Postgres and stateful fake gateway.",
+        "Actual four consecutive product.error_busi rejections did not auto-pause the live run; later distinct sources succeeded. Added a same-trial three-matching-rejected-creates pause guard afterward, verified in isolated tests only. No actual rejected source replay; no root-cause claim."
+      ],
+      "remaining": [
+        "Live quota/rate-budget verification, sanitized remote error diagnostics including message/HTTP status, automatic read-only reconciliation of unknown creates, reviewed recovery controls and token rotation"
+      ]
     },
     {
       "id": "C3",
       "name": "Push, polling and multidimensional QC",
-      "depends_on": ["C1", "B1"],
+      "depends_on": [
+        "C1",
+        "B1"
+      ],
       "status": "planned"
     },
     {
       "id": "C4",
       "name": "Batch progress, pause, resume and recovery UI",
-      "depends_on": ["C2", "C3", "A4"],
+      "depends_on": [
+        "C2",
+        "C3",
+        "A4"
+      ],
       "status": "planned"
     },
     {
       "id": "D1",
       "name": "Prices and promotion plans",
-      "depends_on": ["B3", "C2"],
+      "depends_on": [
+        "B3",
+        "C2"
+      ],
       "status": "planned"
     },
     {
       "id": "D2",
       "name": "Versioned knowledge, agent tools, MCP and evaluations",
-      "depends_on": ["A4", "B1"],
+      "depends_on": [
+        "A4",
+        "B1"
+      ],
       "status": "in_progress",
       "evidence": [
         "Read-only source/plan harness with scope, deadline and repeated-tool guards",
@@ -176,13 +240,20 @@
     {
       "id": "E1",
       "name": "Deployment packaging, telemetry and backup restore",
-      "depends_on": ["C4"],
+      "depends_on": [
+        "C4"
+      ],
       "status": "planned"
     },
     {
       "id": "E2",
       "name": "Load, soak, release evidence and authorized pilot",
-      "depends_on": ["B4", "D1", "D2", "E1"],
+      "depends_on": [
+        "B4",
+        "D1",
+        "D2",
+        "E1"
+      ],
       "status": "planned"
     }
   ],
@@ -195,12 +266,12 @@
     {
       "id": "sandbox_backend_connection",
       "needed_for": "B1/B4 live sandbox tests",
-      "observed": "User renewed TEST token on 2026-09-12; connection revision 5. Real bounded create trial attempted 80 sources: 76 verified, 4 business rejections. Automatic rotation remains unimplemented. Old Lamy run/source unchanged and still awaits remapped-cover evidence review."
+      "observed": "User renewed TEST token on2026-09-14; connection revision6. New one-item canaryverified and14/15 selected-fieldcasesverified, onepriceprewriteblocked. Prior12Sep80sourcecreate remains76verified/4businessrejections. Automatic rotation remains unimplemented; oldLamyunknown/sourceunchanged."
     },
     {
       "id": "production_data_and_write_scope",
       "needed_for": "E2 production pilot",
-      "observed": "Real shops remain read-only; stock and source revisions required per SKU/shop"
+      "observed": "Superseded 15Sep: user authorized scoped production at shop1423724897. Two pilots verified NORMAL. PASS1 510 created UNLIST pending a new weight decision; 775 not sent, 777/772 held on missing required size charts. Other shops are not authorized."
     },
     {
       "id": "hosting_choice",
@@ -222,6 +293,457 @@
     "is_statistical_confidence_interval": false,
     "excludes_external_waiting": true
   },
-  "updated_at": "2026-09-11T10:06:00Z",
-  "latest_evidence": "../../delivery/2026-09-11-operation-workbench.md"
+  "updated_at": "2026-09-17T02:16:55.662421+00:00",
+  "latest_evidence": "../../delivery/2026-09-16-manual-hidden-workflow-and-vina-range.md",
+  "import_patch_checkpoint": {
+    "scope": "local_import_preview_select_save_reopen_only",
+    "migration": "009_import_patch_receipts.sql applied locally",
+    "independent_review": "spec_and_quality_pass_scoped",
+    "fresh_checks": {
+      "unit_integration": 361,
+      "legacy": 7,
+      "browser": 56
+    },
+    "new_real_local_api_database_browser_cases": 13,
+    "main_products_and_workbench_unchanged": true,
+    "lamy_source_revision": 1,
+    "shopee_calls_in_this_change": 0,
+    "patch_executor_released": false,
+    "production_accepted": false,
+    "remaining": [
+      "Remote item/model binding and fresh shop snapshot",
+      "Per-field executor, applied stock ledger and recovery/readback",
+      "Automatic token refresh, category/policy/promotion/QC capability checks",
+      "New-file mapping reuse and whole-draft intake autosave",
+      "Deployment, backup/restore, 24-hour soak and authorized production pilot"
+    ]
+  },
+  "checkpoint_2026_09_14_patch_matrix": {
+    "delivery": "docs/delivery/2026-09-14-patch-scenarios.md",
+    "final_checks": "2026-09-14T07:03:08.065Z: 725/725 unit/integration, 7/7 legacy, typecheck/build passed, no skips. 73 new cases: 46 boundary/QC, 15 stateful HTTP/PG, 12 transport faults. Fresh protected-data audit passes. No browser rerun in this increment.",
+    "final_evidence": ".local/acceptance-20260914/patch-matrix/final-verification.json",
+    "connection_revision": 7,
+    "capability_revision": 6,
+    "live": "Four new technical sandbox patches only. Stock0 and shared first-option image on 2-tier item803934787 passed two readbacks. Gallery1:1to3:4 on803935036 actually replaced the protected cover despite retained promotion_images; QC caught it. Separate cover restore visually returned original notebook, but automaticQC staysfalse because returnedID/bytes differ. Do not replay these intents.",
+    "image_uploads": 3,
+    "new_price_write": false,
+    "price_block": "Fresh get_item_promotion on all3 technical targets omits promotion field; not treated as empty ongoing/upcoming list.",
+    "main_business_execution_enabled": false,
+    "production_accepted": false,
+    "fixes": [
+      "Require complete remote model coverage before variation-image patch",
+      "Block unsupported wholesale configuration before original-price patch",
+      "Preserve observed standard variation_group_id inQC",
+      "Block automatic gallery ratio transition after real cover replacement evidence"
+    ],
+    "remaining": [
+      "Durable image identity reconciliation and verified multi-step ratio transition",
+      "Remote baseline check and QC state integration inmainworker",
+      "Live broad price permissions/promotions and otherfield scenarios",
+      "Production release and multi-shop endurance remain unaccepted"
+    ]
+  },
+  "checkpoint_2026_09_14_wire": {
+    "delivery": "docs/delivery/2026-09-14-openapi-wire-bridge.md",
+    "scope_review": "docs/reviews/2026-09-14-wire-acceptance-scope-review.md",
+    "mode": "sandbox_wire_boundary_not_main_pipeline",
+    "wire_simulation": "80 prepared documents / 200 SKUs / 4 synthetic categories / 3 synthetic shops. Actual transport, codec and PostgreSQL stage journal; injected HTTP responses. 9 field groups plus 12 mixed-shop price/stock patches with raw remainder preserved; partial model failure unknown and not replayed.",
+    "live": "Single title-only update on technical UNLIST canary 803935036, sandbox shop 227418363. Operation 8bb19101-220b-4693-af7b-4fcf85aca6c3 acknowledged; two independent raw readbacks match expected title and unselected fields. Do not resend.",
+    "migrations": [
+      "014_prepared_wire_journal.sql",
+      "015_prepared_wire_source_reservation.sql"
+    ],
+    "final_checks": "2026-09-14T06:32:27.581Z: 652/652 unit/integration, 7/7 legacy, typecheck and build passed, no skipped tests. Subsequent main-data audit: protected sources, revisions, WorkOrders, input batches and old sandbox runs unchanged; exactly one wire operation and one mutating request. API ready and UI HTTP200. Browser intake evidence remains a separate earlier run.",
+    "final_evidence": ".local/acceptance-20260914/wire-bridge/verification/final-verification.json",
+    "main_business_execution_enabled": false,
+    "production_accepted": false,
+    "remaining": [
+      "Join actual source intake, versioned operational context and raw readback to the main worker",
+      "Unify wire and legacy owner locks; durable image cache and reconciliation of server image aliases",
+      "Resolve missing live size-chart requirement without changing metadata to force acceptance",
+      "Multiple real sandbox connections/categories and full live bulk acceptance",
+      "Automatic refresh token, production pilot, deployment and 24-hour recovery/soak acceptance"
+    ]
+  },
+  "checkpoint_2026_09_14_business": {
+    "delivery": "docs/delivery/2026-09-14-prepared-business-acceptance.md",
+    "mode": "simulation_only",
+    "intake": "80 DOCX +440 PNG +1 shared workbook,200 SKUs,4 synthetic categories,3 synthetic shops; real browser/API/PG/import worker and full source/WorkOrder persistence.",
+    "create": "80 drafts +80 WorkOrders +80 simulated remote listings,80 readback verified,90.425 seconds local fixture flow; not Shopee throughput.",
+    "updates": "9 source-backed field groups verified; combined price+stock12listings across3shops changed12 models while24unselected models and68other listings stayed unchanged.",
+    "negative": "6source faults isolated; extra valid neighbor executed, batch remainsblocked. Separate partial-model update remainsunknown after2read-only reconciliations, no resend.",
+    "checks": "490 unit/integration +7legacy, type/build pass.15/15 new stateful business browser cases,65/65 existing browser regression after mobilefix,3/3 recovery UI fixtures;83unique browsercases in separatedscopes. Final summary .local/acceptance-20260914/prepared-verification/final-verification.json.",
+    "evidence": ".local/acceptance-20260914/business-batch/run-Mi6iLo/",
+    "applied_migrations": [
+      "012_prepared_execution.sql",
+      "013_prepared_source_batches.sql"
+    ],
+    "limitations": [
+      "Normalized business gateway only; no generalized OpenAPI adapter for this pipeline",
+      "No live multi-shop/category or production acceptance",
+      "No 24h endurance, automatic token refresh or promotion/QC acceptance",
+      "Explicit fixture source structure; arbitrary Word and all listing fields remain unaccepted"
+    ]
+  },
+  "production_write_scope": {
+    "partner_id": 2010476,
+    "shop_id": 1423724897,
+    "shop": "vuatinhdau.vn",
+    "authorization": "User explicitly authorized the two prepared pilots and PASS1 sources 510/775/777/772 with source-specific decisions. Other shops and unrelated mutations are outside this scope.",
+    "mandatory_source_decisions": "Keep exact source revisions, DORIS SHOP MALL original prices, stock 100/SKU for these approved batches, approved image selections and dimensions. Do not reuse these choices as defaults for new batches.",
+    "pending": "As of 2026-09-16, Xit khu mui tu giay (777) and Xit khu mui giay da nam (772) remain held for missing required size chart. VINA TUOI brand 1252097 was found in category 100265. Scoped weight rounding approvals were recorded for the car and carpet operations; they are not defaults for other sources."
+  },
+  "checkpoint_2026_09_15_production_workflow": {
+    "updated_at": "2026-09-15T11:53:26.0417019Z",
+    "delivery": "docs/delivery/2026-09-15-production-workflow.md",
+    "migration": "025_production_preparations.sql (applied local)",
+    "implementation": [
+      "Saved ListingDraft preparation and immutable v2 manifests",
+      "Exact workbook cell and original asset checks",
+      "Live category/brand/attribute/logistics metadata and verified warehouse mapping",
+      "Parent queue dispatches existing production batch coordinator in groups of up to four",
+      "Database locks and read-only crash recovery",
+      "Operation-bound weight review UI; no implicit approval",
+      "Two workflow tabs retaining preparation state"
+    ],
+    "verification": {
+      "unit_integration": 1751,
+      "unit_integration_skipped": 0,
+      "legacy": 7,
+      "browser_fixture": 17,
+      "typecheck": "passed",
+      "typescript_build": "passed",
+      "web_build": "passed",
+      "full_result_at": "2026-09-15T11:35:15.636Z"
+    },
+    "local_source_acceptance": {
+      "folders": 80,
+      "docx": 80,
+      "png": 240,
+      "excel": 1,
+      "saved_drafts": 80,
+      "sku": 160,
+      "fixture_categories": 3,
+      "manifests": 20,
+      "elapsed_ms": 25583,
+      "shopee_requests": 0
+    },
+    "live_read_performance": {
+      "source": "775/row-193",
+      "cold_gets": 48,
+      "cold_ms": 25770,
+      "warm_new_gets": 4,
+      "warm_cached_responses": 44,
+      "warm_ms": 3241,
+      "qualification": "Same session, source-specific duplicate waiver. Not publishing throughput.",
+      "mutations": 0
+    },
+    "production_state": {
+      "verified_normal_items": [
+        "51467852283",
+        "51267858328"
+      ],
+      "pass1_510": {
+        "item_id": "53267854751",
+        "operation_id": "2c492b36-39d3-4536-92fa-6232e0efeb4e",
+        "status": "UNLIST; weight decision pending; no replay"
+      },
+      "pass1_775": "not sent",
+      "pass1_777_772": "held: required size chart unavailable"
+    },
+    "preservation": "13 protected tables unchanged between before.json and after.json. No Shopee mutation in workflow-improvement turn.",
+    "remaining": [
+      "Generic raw-folder/catalog604 to fully mapped ListingDraft is not automatically complete",
+      "PASS1 source exceptions and batch publication remain pending",
+      "No live 80-listing/multi-shop/24h acceptance",
+      "No scheduled token refresh",
+      "Field-group production patch acceptance remains separate",
+      "Parent queue is not a replacement for all older outbox consumers"
+    ],
+    "evidence_directory": ".local/production-workflow-20260915/"
+  },
+  "checkpoint_2026_09_16_pass1_continuation": {
+    "updated_at": "2026-09-16T02:08:11.330Z",
+    "delivery": "docs/delivery/2026-09-16-pass1-continuation.md",
+    "handoff_section": 21,
+    "source_decisions": {
+      "authorization_date": "2026-09-16",
+      "scope": "Reasonable test weights/dimensions and human-in-loop handling for the authorized PASS1 sources, without waiving API requirements or changing category/brand to bypass restrictions.",
+      "weight_source": "DORIS column J: CAN NANG KHAI BAO (G); original source and request values preserved",
+      "source_grams": [
+        130.9,
+        322.3,
+        503.8
+      ],
+      "shopee_grams": [
+        131,
+        322,
+        504
+      ],
+      "approval": "Separate operation/model/SKU-bound rounding reviews using two fresh raw reads",
+      "package_cm": [
+        12,
+        12,
+        28
+      ],
+      "package_basis": "User-authorized estimate for this trial, not measured workbook data",
+      "price_stock": "DORIS SHOP MALL original prices and stock 100/SKU for these approved sources only"
+    },
+    "ready_batch": {
+      "batch_id": "e60446aa-8fed-45e6-8cd8-52b0eee04a47",
+      "manifest_sha256": "61929783333e7895167055a9083084f6e8ca948289fdebd655e9dc3c96d594e2",
+      "published_verified": 2,
+      "total_listings": 2,
+      "sku_instances": 96,
+      "execute_available": false,
+      "listings": [
+        {
+          "name": "Xịt thơm ô tô VINA TƯƠI",
+          "source": "510 / row-119 revision 3",
+          "item_id": "53267854751",
+          "sku_count": 48,
+          "operation_id": "2c492b36-39d3-4536-92fa-6232e0efeb4e",
+          "publication_id": "0b003112-4929-4191-8fc0-aea9d7a1fa49",
+          "publication_state": "verified",
+          "normal_read_at": [
+            "2026-09-16T01:41:48.463Z",
+            "2026-09-16T01:41:49.537Z"
+          ],
+          "independent_checks_passed": 266,
+          "evidence": ".local/production-pass1-20260916/510-publication-audit.json"
+        },
+        {
+          "name": "Xịt khử mùi thảm VINA TƯƠI",
+          "source": "775 / row-193 revision 2",
+          "item_id": "45467915350",
+          "sku_count": 48,
+          "operation_id": "7d712c1c-9c92-4e85-8ece-96bd6a4f4ee7",
+          "publication_id": "a0ae5d7d-1dd2-4a43-8b08-bdfb4a7c47a7",
+          "publication_state": "verified",
+          "normal_read_at": [
+            "2026-09-16T02:05:27.992Z",
+            "2026-09-16T02:05:28.868Z"
+          ],
+          "independent_checks_passed": 266,
+          "evidence": ".local/production-pass1-20260916/carpet-publication-audit.json"
+        }
+      ],
+      "preservation": "Each operation has 26 media + create + init acknowledged and one publication request. No replay; original sources and receipts preserved. Protected raw fields unchanged except publication status, with scoped image and weight QC evidence. Both operation lanes released."
+    },
+    "held_batch": {
+      "batch_id": "4d653a20-c148-45de-b02f-dda6f2232e7b",
+      "listings": [
+        "Xịt khử mùi tủ giày (777)",
+        "Xịt khử mùi giày da nam (772)"
+      ],
+      "status": "not sent; registry unchanged",
+      "category_id": 100265,
+      "brand_id": 1252097,
+      "brand_evidence": "VINA TUOI found in this category; not the current blocker",
+      "blocker": "Fresh 2026-09-16 GET confirms size_chart_mandatory=true and zero available charts; source has no chart",
+      "operator_guide": "docs/operator-guides/pass1-viec-can-xu-ly-tay.md",
+      "evidence": ".local/production-batch-pass1-20260915/size-chart/4a8ca4d1-7645-420e-bf25-b66f707d522c/summary.json"
+    },
+    "timestamp_fix": {
+      "actual_failure": "Stock read was 403ms newer than the aggregate metadata observedAt; blocked before operation or upload",
+      "observed_at": "Newest original evidence timestamp",
+      "expires_at": "Oldest original evidence timestamp + 15 minutes",
+      "preservation": "Cache timestamps/request IDs/file provenance retained; runner stock guard unchanged; cold/warm regressions use real validation",
+      "targeted_tests_passed": 72
+    },
+    "verification": {
+      "unit_integration": 1753,
+      "legacy": 7,
+      "typecheck": "passed",
+      "typescript_build": "passed",
+      "web_build": "passed",
+      "full_result_at": "2026-09-16T02:01:21.972Z",
+      "full_result": ".local/production-pass1-20260916/full-verification.json",
+      "browser_product_name_fixture": 1,
+      "browser_result": ".local/production-workflow-20260916/product-name-results.json",
+      "browser_scope": "One separate fixture on 2026-09-16; excludes the 17 fixtures from 2026-09-15"
+    },
+    "final_independent_get": {
+      "observed_at": "2026-09-16T02:08:11.330Z",
+      "connection_revision": 3,
+      "normal_items": [
+        {
+          "name": "Can tinh dầu 5L",
+          "item_id": "51467852283",
+          "sku_count": 12
+        },
+        {
+          "name": "Ngọc Lan Tây",
+          "item_id": "51267858328",
+          "sku_count": 3
+        },
+        {
+          "name": "Xịt thơm ô tô VINA TƯƠI",
+          "item_id": "53267854751",
+          "sku_count": 48
+        },
+        {
+          "name": "Xịt khử mùi thảm VINA TƯƠI",
+          "item_id": "45467915350",
+          "sku_count": 48
+        }
+      ],
+      "sku_instances": 111,
+      "qualification": "Two older pilots and two newly published PASS1 listings; not 111 distinct product SKUs or 4/4 PASS1",
+      "mutations": 0,
+      "evidence": ".local/production-pass1-20260916/status-read/e30ae4bc-7029-4c74-b6d5-b032e29682bb/summary.json"
+    },
+    "runtime": {
+      "api_pid_at_checkpoint": 22356,
+      "api_port": 4310,
+      "ui_pid_at_checkpoint": 23320,
+      "ui_port": 5173,
+      "connection_revision": 3,
+      "token_expires_at": "2026-09-16T05:38:40.316Z",
+      "refresh": "One invoked backend refresh from revision 2 to 3; no periodic scheduler"
+    },
+    "remaining": [
+      "Two shoe-product sources still require human resolution of the required size chart",
+      "PASS1 size chart codec and automatic reconciliation of manual Seller Center publication are not implemented",
+      "Catalog604 does not automatically become fully mapped publishable sources",
+      "No live 80-listing, multi-shop or 24-hour acceptance",
+      "Production field-group patch acceptance remains separate",
+      "No automatic periodic token refresh; whole project is not complete"
+    ],
+    "evidence_directory": ".local/production-pass1-20260916/"
+  },
+  "production_execution_mode": "user_initiated_only",
+  "checkpoint_2026_09_16_manual_hidden_workflow": {
+    "delivery": "docs/delivery/2026-09-16-manual-hidden-workflow-and-vina-range.md",
+    "verification": {
+      "observed_at": "2026-09-16T12:03:33.467Z",
+      "unit_integration": 2057,
+      "files": 112,
+      "legacy": 7,
+      "typecheck": "passed",
+      "typescript_build": "passed",
+      "web_build": "passed",
+      "evidence": ".local/hidden-manual-20260916/verification-final-frozen.json"
+    },
+    "runtime": {
+      "observed_at": "2026-09-16T12:17:45.463Z",
+      "api_pid": 6608,
+      "api_port": 4310,
+      "ui_port": 5173,
+      "busy_batches": 0,
+      "migration": 31,
+      "evidence": ".local/hidden-manual-20260916/runtime-final-frozen.json"
+    },
+    "new_source": {
+      "source_range": "VINA TUOI STT712-836",
+      "rows": 46,
+      "canva_designs_downloaded": 53,
+      "original_png": 1327,
+      "word_documents": 46,
+      "strict_sidecars": 18,
+      "sku_positions_in_strict_sources": 675,
+      "pending_worksheets": 28,
+      "fully_preflight_ready": 0,
+      "evidence": ".local/vina-input-712-836-20260916/range-readiness.json"
+    },
+    "authority": {
+      "shop_id": "1423724897",
+      "price": "DORIS SHOP MALL original price",
+      "stock_per_sku": 100,
+      "publication": "hidden_for_review",
+      "execution": "User clicks in app; do not auto-execute or publish",
+      "missing_sku": "Keep complete source membership; do not send placeholder SKUs"
+    },
+    "fixes": [
+      "Stable folder claims and persisted pending SKU worksheet",
+      "Cam Sa JSONB-equivalent reopen",
+      "Resolved duplicate-price warning projection without raw/history mutation",
+      "Placeholder guard in shared draft validation and wire planning",
+      "Reject stale preview responses after selection edits",
+      "Bounded verified intake completion counter"
+    ],
+    "real_source_smoke": {
+      "sources": 3,
+      "sku_positions": 63,
+      "workflow_assertions": 116,
+      "preservation_assertions": 37,
+      "independent_file_hashes": 62,
+      "artifact_recheck_assertions": 168,
+      "transport": "in-memory fixture",
+      "main_db_calls": 0,
+      "shopee_calls": 0
+    },
+    "seller_knowledge": {
+      "live_checkpoint": "docs/delivery/2026-09-16-seller-knowledge.md",
+      "shops_live": 1,
+      "listings": 57,
+      "models": 839,
+      "categories": 13,
+      "deleted_status_only": 73,
+      "draft_acceptance_bridge": true,
+      "automatic_post_publish_sync": false
+    },
+    "limits": [
+      "No new-source production publication in this review",
+      "18 importable mappings are not 18 publish-ready products",
+      "General production update from folders for existing IDs remains incomplete",
+      "Production writer remains scoped to pilot shop",
+      "DATE and multiple custom value_id=0 readback still blocked",
+      "No full46-folder browser load or multi-shop/24h production acceptance",
+      "Source composition, cover context and Hoa Lai/Hoa Hong conflict require scoped human decisions"
+    ],
+    "shopee_writes_this_review": 0,
+    "historical_task_note": "Earlier task rows and checkpoints describe their dated scope. Use this checkpoint and linked delivery for current integration and unresolved boundaries; do not mark historical unknown operations successful or replay them.",
+    "portable_delivery": {
+      "folder": "D:/VINA_TUOI_712_836_20260916/Bo_nguon",
+      "groups": 8,
+      "reader_assertions": 374,
+      "pending_positions": 1526,
+      "missing_sku_positions": 444,
+      "source_files_sha_checked": 1372,
+      "image_hint_paths": 827,
+      "zip": "D:\\VINA_TUOI_712_836_20260916\\VINA_TUOI_46_BO_712-836.zip",
+      "zip_bytes": 2986861083,
+      "zip_sha256": "7cc4ce46815ddf0b55674bb3ddee49b0a236740192ee76dd64b3b63761978fc1",
+      "zip_entries_verified": 1536,
+      "receipt": ".local/vina-input-712-836-20260916/portable-zip-receipt.json",
+      "independent_review": "docs/reviews/2026-09-16-portable-source-bundle.md",
+      "browser_full46_verified": false,
+      "publication_ready": false
+    }
+  },
+  "checkpoint_2026_09_17_source_mapping_local_archive": {
+    "delivery": "docs/delivery/2026-09-17-source-mapping-and-local-archive.md",
+    "source": {
+      "listings": 46,
+      "positions": 1773,
+      "distinctSku": 82,
+      "missingSku": 0,
+      "pendingWorksheets": 28,
+      "publishReadyClaim": false,
+      "zipPath": "D:\\VINA_TUOI_712_836_20260916\\VINA_TUOI_46_BO_712-836_V3.zip",
+      "zipSha256": "25ddb998559c995e69e7ee282e11b42b41a4a330bbc8bf36f0489f7dc2ab792f"
+    },
+    "cleanup": {
+      "archived": 562,
+      "activeCatalog": 46,
+      "protectedPriorDrafts": 10,
+      "protectedTablesUnchanged": true
+    },
+    "verification": {
+      "unitIntegration": 2065,
+      "legacy": 7,
+      "typeBuildPassed": true,
+      "sourceParser": 841,
+      "sourceCountercheck": 859
+    },
+    "noShopeeWritesThisCheckpoint": true,
+    "userExecutesHiddenManually": true,
+    "approvedStagingCleanup": {
+      "receipt": ".local/lifecycle-20260917/approved-staging-removal.json",
+      "bytesFreed": 2986837080,
+      "backupPath": "D:\\VINA_TUOI_712_836_20260916\\Luu_tru_goi_cu\\Bo_nguon_C_truoc_portable",
+      "sourceCopyRemoved": true
+    }
+  }
 }

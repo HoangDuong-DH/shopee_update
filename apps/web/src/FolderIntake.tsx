@@ -17,6 +17,7 @@ import type {
   ListingDraft,
   WorkbookImport,
   WordImport,
+  StoredFolderManifest,
 } from '@shopee/domain';
 import { api, media, money, type ImportRecord } from './api.js';
 import type { EditorSeed } from './Editor.js';
@@ -34,6 +35,12 @@ import {
   type BatchSaveStatus,
 } from './input-batch-client.js';
 import './folder-intake.css';
+import { classifyFolderImage } from './folder-image-names.js';
+import { FolderImageHints, imageRoleLabel, type ImageRoleFilter } from './FolderImageHints.js';
+import { PendingSkuMapping, type PendingMappingFile } from './PendingSkuMapping.js';
+import { isMissingPendingSku, type PendingListingMapping } from '../../../packages/domain/src/pending-listing-mapping.js';
+import { pendingSlotSku } from './pending-listing-mapping.js';
+import { folderBulkStateKey, folderBulkStorageKey, readFolderBulkRecovery, readyFolderBulkEntries, mergeFolderBulkEntries, runFolderBulkSave, type FolderBulkEntry } from './folder-bulk-save.js';
 
 export type FolderManualContext = {
   productKey: string;
@@ -102,18 +109,50 @@ export function FolderIntake({
 }) {
   const initial = initialBatch?.state;
   const [batchId] = useState(() => initialBatch?.id ?? crypto.randomUUID());
+  const [bulkRecovery] = useState(() => {
+    try { return { entries: readFolderBulkRecovery(sessionStorage.getItem(folderBulkStorageKey(batchId)), batchId), error: '' }; }
+    catch { return { entries: [] as FolderBulkEntry[], error: 'Chưa đọc được biên nhận lưu hàng loạt. Giữ đợt này và kiểm tra quyền lưu trữ của trình duyệt trước khi thử lại.' }; }
+  });
+  const [bulkEntries, setBulkEntries] = useState(bulkRecovery.entries);
+  const [bulkError, setBulkError] = useState(bulkRecovery.error);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkGuard = useRef(false);
+  const [bulkSavedProducts, setBulkSavedProducts] = useState<ListingDraft[]>([]);
+  const allProducts = useMemo(() => {
+    const merged = new Map(products.map(product => [product.productKey, product]));
+    for (const product of bulkSavedProducts)
+      if ((merged.get(product.productKey)?.revision ?? 0) <= product.revision) merged.set(product.productKey, product);
+    return [...merged.values()];
+  }, [products, bulkSavedProducts]);
+  const savedBatch = useRef<InputBatchRecord | undefined>(initialBatch);
   const [batchName, setBatchName] = useState(initial?.name ?? 'Đợt listing mới');
   const [chosenFiles, setChosenFiles] = useState<File[]>([]);
   const [descriptors, setDescriptors] = useState<InputBatchState['files']>(initial?.files ?? []);
   const [productKeys, setProductKeys] = useState<Record<string, string>>(
     initial?.productKeys ?? {},
   );
+  const [manifests, setManifests] = useState<Record<string, StoredFolderManifest>>(
+    initial?.manifests ?? {},
+  );
   const [mode, setMode] = useState<FolderMode>(initial?.mode ?? 'single_listing');
+  const [pendingMappings, setPendingMappings] = useState<Record<string, PendingListingMapping>>(
+    initial?.pendingMappings ?? {},
+  );
   const [uploaded, setUploaded] = useState<UploadedFolderFile[]>(() =>
     (initial?.files ?? []).map((file) => ({
       relativePath: file.relativePath,
       sha256: file.sha256,
       record: initialBatch?.imports.find((record) => record.id === file.importId) ?? null,
+      pendingMapping: Object.values(initial?.pendingMappings ?? {}).find(
+        (m) => m.relativePath === file.relativePath,
+      ),
+      ...(Object.values(initial?.manifests ?? {}).find((m) => m.relativePath === file.relativePath)
+        ? {
+            manifest: Object.values(initial!.manifests!).find(
+              (m) => m.relativePath === file.relativePath,
+            )!.document,
+          }
+        : {}),
       ...(file.error ? { error: file.error } : {}),
     })),
   );
@@ -141,6 +180,7 @@ export function FolderIntake({
       ]),
     ),
   );
+  const [imageRoleFilter, setImageRoleFilter] = useState<ImageRoleFilter>('all');
   const [selectedImages, setSelectedImages] = useState<Record<string, string[]>>({});
   const [wordPaths, setWordPaths] = useState<Record<string, string>>(initial?.wordPaths ?? {});
   const [wordConfirmed, setWordConfirmed] = useState(!!initial?.wordRule);
@@ -168,7 +208,7 @@ export function FolderIntake({
     sourceGeneration = useRef(0),
     assemblyGeneration = useRef(0),
     mounted = useRef(true);
-  const locked = busy || externalBusy;
+  const locked = busy || externalBusy || bulkBusy;
   const grouped = useMemo(() => groupDirectoryFiles(descriptors, mode), [descriptors, mode]);
   const workbooks = useMemo(
     () =>
@@ -204,10 +244,27 @@ export function FolderIntake({
   const groupImages = readableGroupFiles.filter(
     (item) => item.record.kind === 'image' && item.record.status === 'ready',
   );
+  const visibleGroupImages = [...groupImages]
+    .filter((item) => imageRoleFilter === 'all' || classifyFolderImage(item.relativePath).role === imageRoleFilter)
+    .sort((a, b) => folderFilename(a.relativePath).localeCompare(folderFilename(b.relativePath), 'vi', { numeric: true }) || a.relativePath.localeCompare(b.relativePath));
+  useEffect(() => setImageRoleFilter('all'), [group?.key]);
   const groupWords = readableGroupFiles.filter(
     (item) => item.record.kind === 'docx' && item.record.status === 'ready',
   );
-  const groupMedia = group ? (visual[group.key] ?? emptyMedia()) : emptyMedia();
+  const groupManifest = group ? manifests[group.key]?.document : undefined;
+  const groupMedia: VisualMedia =
+    group && groupManifest
+      ? {
+          convention: 'explicit_selection',
+          ...(groupManifest.media.cover
+            ? { coverPath: group.key + '/' + groupManifest.media.cover.path }
+            : {}),
+          galleryPaths: groupManifest.media.gallery.map((f) => group.key + '/' + f.path),
+          descriptionPaths: groupManifest.media.description.map((f) => group.key + '/' + f.path),
+        }
+      : group
+        ? (visual[group.key] ?? emptyMedia())
+        : emptyMedia();
   const imageSelection = group ? (selectedImages[group.key] ?? []) : [];
   const effectiveRules = useMemo(
     () =>
@@ -255,14 +312,31 @@ export function FolderIntake({
     groups: grouped.bundles.map((item) => item.key),
     rules: effectiveRules,
     productKeys,
+    manifests,
+    pendingMappings,
   });
   const assemblies = assemblyState.context === context ? assemblyState.values : [];
   const selectedAssembly = assemblies.find((item) => item.key === group?.key);
+  const selectedPending = group ? pendingMappings[group.key] : undefined;
+  const selectedMissingSku = selectedPending
+    ? selectedPending.document.slots.filter((slot) => isMissingPendingSku(pendingSlotSku(selectedPending, slot.slotId))).length
+    : 0;
+  // A loaded pending worksheet supplies membership through its own review flow.
+  // Keep real media/Word/price exceptions; do not display the generic absent-membership message.
+  const selectedIssues = (selectedAssembly?.issues ?? []).filter((issue) =>
+    !selectedPending || issue.code !== 'MEMBERSHIP_NOT_MAPPED');
+  const namedVariantCount = groupImages.filter((image) => classifyFolderImage(image.relativePath).role === 'variant').length;
+
   const wordNeedsSelection =
     selectedAssembly?.issues.some((issue) => issue.code.startsWith('WORD_')) ?? false;
   const selectedExisting =
     selectedAssembly &&
-    products.find((product) => product.productKey === selectedAssembly.productKey);
+    allProducts.find(
+      (product) =>
+        product.productKey ===
+        (selectedAssembly.existingProductKey ??
+          (!selectedAssembly.manifest ? selectedAssembly.productKey : undefined)),
+    );
   const selectedWordPath = group ? wordPaths[group.key] : undefined;
   const visibleWord =
     groupWords.find((item) => item.relativePath === selectedWordPath) ??
@@ -305,11 +379,16 @@ export function FolderIntake({
       ? { titleHeader, descriptionHeader, headline: headlineMode, paragraphSeparator }
       : null,
     productKeys,
+    ...(Object.keys(manifests).length ? { manifests } : {}),
+    ...(Object.keys(pendingMappings).length ? { pendingMappings } : {}),
   };
   const persistenceKey = JSON.stringify(persistenceState);
   const wordRuleIncomplete = wordConfirmed && (!titleHeader.trim() || !descriptionHeader.trim());
   const unsaved =
     saveStatus !== 'saved' || (!!descriptors.length && !hasSaved) || wordRuleIncomplete;
+  const bulkCandidates = readyFolderBulkEntries(assemblies, savedBatch.current, allProducts);
+  const bulkUnfinished = bulkEntries.filter(entry => entry.status !== 'saved');
+  const bulkHasUncertain = bulkEntries.some(entry => entry.status === 'uncertain' || entry.status === 'saving');
 
   useEffect(() => {
     mounted.current = true;
@@ -334,6 +413,7 @@ export function FolderIntake({
         );
       },
       onSaved: (record) => {
+        savedBatch.current = record;
         setHasSaved(true);
         callbacks.current.onBatchSaved?.(record);
       },
@@ -354,8 +434,8 @@ export function FolderIntake({
     onDirty?.(unsaved);
   }, [unsaved, onDirty]);
   useEffect(() => {
-    onBusy?.(busy || saveStatus === 'saving');
-  }, [busy, saveStatus, onBusy]);
+    onBusy?.(busy || bulkBusy || saveStatus === 'saving');
+  }, [busy, bulkBusy, saveStatus, onBusy]);
   useEffect(() => {
     if (!active || busy || !pendingImportIds.length) return;
     const controller = new AbortController();
@@ -438,6 +518,19 @@ export function FolderIntake({
     return () => controller.abort();
   }, [sourceId, localSources]);
   useEffect(() => {
+    const sources = Object.values(manifests).map((m) => m.document.priceSource);
+    if (!sources.length || new Set(sources.map((s) => JSON.stringify(s))).size !== 1) return;
+    const desired = sources[0],
+      matches = workbooks.filter((w) => w.sha256 === desired.sha256);
+    if (matches.length !== 1) return;
+    if (!sourceId) setSourceId(matches[0].id);
+    if ((!sourceId || sourceId === matches[0].id) && !sheet && profileChoice === '') {
+      setSheet(desired.sheet);
+      if (desired.selectionMode !== 'operator_choice')
+        setProfileChoice(JSON.stringify(desired.priceProfile));
+    }
+  }, [manifests, workbooks, sourceId, sheet, profileChoice]);
+  useEffect(() => {
     const generation = ++assemblyGeneration.current;
     if (!priceReady || !catalog || profile === undefined || !uploaded.length) {
       setAssembling(false);
@@ -449,9 +542,17 @@ export function FolderIntake({
         assembleFolderListing({
           group: item,
           files: uploaded,
-          priceSource: { importId: sourceId, sheet, priceProfile: profile, rows: catalog.rows },
+          priceSource: {
+            importId: sourceId,
+            sheet,
+            priceProfile: profile,
+            rows: catalog.rows,
+            sha256: catalog.source.fileSha256,
+          },
           rules: effectiveRules[item.key],
           productKey: productKeys[item.key],
+          manifest: manifests[item.key]?.document,
+          savedProducts: allProducts,
         }),
       ),
     )
@@ -466,7 +567,7 @@ export function FolderIntake({
       .finally(() => {
         if (mounted.current && generation === assemblyGeneration.current) setAssembling(false);
       });
-  }, [context, priceReady, catalog, profile]);
+  }, [context, priceReady, catalog, profile, allProducts]);
 
   function choosePrice(id: string) {
     if (locked) return;
@@ -502,7 +603,49 @@ export function FolderIntake({
         setProfileChoice('');
         setCatalog(null);
       } else {
+        const nextManifests: Record<string, StoredFolderManifest> = {};
+        const nextPending: Record<string, PendingListingMapping> = {};
+        for (const received of result) {
+          if (!received.pendingMapping) continue;
+          const key = received.relativePath
+            .split('/')
+            .slice(0, mode === 'single_listing' ? 1 : 2)
+            .join('/');
+          if (received.relativePath !== key + '/listing-mapping.pending.json' || nextPending[key])
+            throw new Error('Mỗi thư mục chỉ nhận một bảng phân loại chờ hoàn thiện.');
+          const prior = pendingMappings[key];
+          if (prior && prior.sha256 !== received.pendingMapping.sha256)
+            throw new Error(
+              'Hồ sơ phân loại đã khác bản đang bổ sung. Giữ nguyên các ô SKU đã nhập và mở đúng bộ nguồn.',
+            );
+          nextPending[key] = prior ?? received.pendingMapping;
+        }
+        for (const received of result) {
+          if (!received.manifest || !received.sha256) continue;
+          const groupKey = received.relativePath
+            .split('/')
+            .slice(0, mode === 'single_listing' ? 1 : 2)
+            .join('/');
+          if (
+            received.relativePath !== groupKey + '/listing-source.json' ||
+            nextManifests[groupKey]
+          )
+            throw new Error(
+              'Mỗi thư mục listing cần đúng một listing-source.json ở ngay trong thư mục đó.',
+            );
+          nextManifests[groupKey] = {
+            relativePath: received.relativePath,
+            sha256: received.sha256,
+            document: received.manifest,
+          };
+        }
+        if (Object.keys(nextPending).some((key) => nextManifests[key]))
+          throw new Error(
+            'Một thư mục có cả hồ sơ hoàn chỉnh và bảng chờ bổ sung. Chọn đúng bộ nguồn để đối chiếu.',
+          );
         setUploaded(result);
+        setManifests(nextManifests);
+        setPendingMappings(nextPending);
         setDescriptors((all) =>
           all.map((file) => {
             const received = result.find((item) => item.relativePath === file.relativePath);
@@ -576,6 +719,8 @@ export function FolderIntake({
     setBatchName(selected[0]?.webkitRelativePath.split('/')[0] || 'Đợt listing mới');
     setSetupCollapsed(false);
     setUploaded([]);
+    setManifests({});
+    setPendingMappings({});
     setAssemblyState({ context: '', values: [] });
     setVisual({});
     setSelectedImages({});
@@ -600,7 +745,7 @@ export function FolderIntake({
     setWordPaths({});
   }
   function chooseImage(path: string) {
-    if (!group || locked) return;
+    if (!group || locked || groupManifest) return;
     setSelectedImages((all) => {
       const current = all[group.key] ?? [];
       return {
@@ -614,6 +759,7 @@ export function FolderIntake({
   function assignImages(role: 'cover' | 'gallery' | 'description' | 'both') {
     if (
       !group ||
+      !!groupManifest ||
       locked ||
       !imageSelection.length ||
       (role === 'cover' && imageSelection.length !== 1)
@@ -642,7 +788,7 @@ export function FolderIntake({
     path: string,
     direction: -1 | 0 | 1,
   ) {
-    if (!group || locked) return;
+    if (!group || locked || groupManifest) return;
     setVisual((all) => {
       const current = all[group.key] ?? emptyMedia(),
         ids = [...current[role]],
@@ -658,7 +804,15 @@ export function FolderIntake({
     });
   }
   function manual() {
-    if (!selectedAssembly || !priceReady || profile === undefined || locked || unsaved) return;
+    if (
+      !selectedAssembly ||
+      !priceReady ||
+      profile === undefined ||
+      locked ||
+      unsaved ||
+      groupManifest
+    )
+      return;
     const candidates = selectedAssembly.candidates;
     onManual({
       productKey: selectedAssembly.productKey,
@@ -690,19 +844,108 @@ export function FolderIntake({
   }
   function continueAssembly(assembly: FolderAssembly) {
     if (locked || unsaved) return;
-    const existing = products.find((product) => product.productKey === assembly.productKey);
+    if (pendingMappings[assembly.key]) {
+      setSelectedFolder(assembly.key);
+      setPanel('sku');
+      return;
+    }
+    const existing = allProducts.find(
+      (product) =>
+        product.productKey ===
+        (assembly.existingProductKey ?? (!assembly.manifest ? assembly.productKey : undefined)),
+    );
     if (existing) {
       onOpenExisting(existing);
       return;
     }
     if (!assembly.seed) return;
     onContinue(
-      assembly.seed,
+      assembly.manifest?.product.sourceRevision === 0 && savedBatch.current
+        ? {
+            ...assembly.seed,
+            folderBinding: {
+              batchId,
+              revision: savedBatch.current.revision,
+              groupKey: assembly.key,
+            },
+          }
+        : assembly.seed,
       assembly.seed.variants.map((variant) => {
         const row = catalog?.rows.find((value) => value.key === variant.rowKey);
         return { sku: row?.sku.value ?? '', originalPrice: row?.originalPrice?.value };
       }),
     );
+  }
+
+  function importPending(mapping: PendingListingMapping, file: PendingMappingFile) {
+    if (!group || locked || manifests[group.key]) return;
+    const previous = pendingMappings[group.key];
+    if (previous && previous.sha256 !== mapping.sha256) {
+      setError('Hồ sơ này khác bảng đang bổ sung. Giữ nguyên các ô đã nhập và mở đúng bộ nguồn.');
+      return;
+    }
+    const value = previous ?? mapping;
+    setPendingMappings((all) => ({ ...all, [group.key]: value }));
+    setDescriptors((all) => [...all.filter((f) => f.relativePath !== file.relativePath), file]);
+    setUploaded((all) => [
+      ...all.filter((f) => f.relativePath !== file.relativePath),
+      { relativePath: file.relativePath, sha256: file.sha256, record: null, pendingMapping: value },
+    ]);
+    setProductKeys((all) =>
+      all[group.key] ? all : { ...all, [group.key]: `input-${crypto.randomUUID()}` },
+    );
+    setError('');
+  }
+
+  function continuePending(seed: EditorSeed, variants: { sku: string; originalPrice?: string }[]) {
+    if (!group || locked || unsaved || !savedBatch.current || !pendingMappings[group.key]) return;
+    const candidates = selectedAssembly?.candidates,
+      document = pendingMappings[group.key].document;
+    onContinue(
+      {
+        ...seed,
+        productKey: document.product.productKey,
+        sourceListingId: document.sourceListingId,
+        title: document.title,
+        headline: candidates?.headline ?? '',
+        body: candidates?.body ?? '',
+        coverId: candidates?.cover?.importId,
+        galleryIds: candidates?.gallery.map((i) => i.importId) ?? [],
+        descriptionImageIds: candidates?.descriptionImages.map((i) => i.importId) ?? [],
+        folderBinding: { batchId, revision: savedBatch.current.revision, groupKey: group.key },
+      },
+      variants,
+    );
+  }
+
+  async function saveReadyFolders() {
+    if (locked || bulkGuard.current || bulkRecovery.error || unsaved || assembling || !savedBatch.current) return;
+    if (folderBulkStateKey(savedBatch.current.state) !== folderBulkStateKey(persistenceState)) {
+      setBulkError('Đợi các lựa chọn hiện tại lưu xong vào đợt nhập rồi thử lại.');
+      return;
+    }
+    const entries = mergeFolderBulkEntries(bulkEntries, bulkCandidates);
+    if (!entries.some(entry => entry.status !== 'saved')) return;
+    bulkGuard.current = true;
+    setBulkBusy(true);
+    setBulkError('');
+    try {
+      await runFolderBulkSave(entries, {
+        readBatch: id => api<InputBatchRecord>('/v1/input-batches/' + encodeURIComponent(id)),
+        readProduct: key => api<ListingDraft>('/v1/products/' + encodeURIComponent(key)),
+        save: request => api<ListingDraft>('/v1/products', { method: 'POST', body: JSON.stringify(request) }),
+        checkpoint: next => {
+          sessionStorage.setItem(folderBulkStorageKey(batchId), JSON.stringify({ version: 1, batchId, entries: next }));
+          if (mounted.current) setBulkEntries(next);
+        },
+        onSaved: draft => { if (mounted.current) setBulkSavedProducts(current => [...current.filter(item => item.productKey !== draft.productKey), draft]); },
+      });
+    } catch (cause) {
+      if (mounted.current) setBulkError(cause instanceof Error ? cause.message : 'Chưa lưu được biên nhận. Giữ trang này và thử lại.');
+    } finally {
+      bulkGuard.current = false;
+      if (mounted.current) setBulkBusy(false);
+    }
   }
 
   return (
@@ -782,8 +1025,11 @@ export function FolderIntake({
                 {profile === undefined ? 'Chưa chọn bộ giá' : (profile ?? 'Giá của sheet đã chọn')}
               </p>
               <p className="caption">
-                {uploaded.filter((item) => item.record?.status === 'ready').length}/
-                {uploaded.length} tệp đã đọc được. Word và ảnh vẫn được giữ trong từng thư mục.
+                {
+                  uploaded.filter((item) => item.record?.status === 'ready' || !!item.manifest || !!item.pendingMapping)
+                    .length
+                }
+                /{uploaded.length} tệp đã đọc được. Word và ảnh vẫn được giữ trong từng thư mục.
               </p>
             </div>
           </div>
@@ -997,6 +1243,32 @@ export function FolderIntake({
         </section>
       </div>
       {grouped.bundles.length > 0 && (
+        <section className="panel" aria-label="Lưu các bộ đã sẵn sàng">
+          <div className="section-heading">
+            <div>
+              <h2>Lưu bộ listing vào kho</h2>
+              <p>{bulkCandidates.length} bộ đã có hồ sơ ghép đầy đủ · Giữ nguyên nội dung, ảnh, phân loại và bảng giá đã chọn.</p>
+            </div>
+            <button type="button" className="primary" disabled={locked || unsaved || assembling || !!bulkRecovery.error || (!bulkCandidates.length && !bulkUnfinished.length)} onClick={() => void saveReadyFolders()}>
+              {bulkBusy ? 'Đang lưu các bộ…' : bulkHasUncertain ? 'Đọc lại kết quả và tiếp tục lưu' : bulkUnfinished.length ? 'Thử lưu các bộ còn lại' : `Lưu tất cả ${bulkCandidates.length} bộ đã sẵn sàng`}
+            </button>
+          </div>
+          <p className="caption">Chỉ lưu bản nháp trong ứng dụng. Sau đó vào Đăng hàng để chuẩn bị lô và tự bấm đăng qua API. Bộ còn thiếu thông tin vẫn được giữ để bổ sung.</p>
+          {unsaved && <p className="caption">Đợi đợt nhập lưu xong trước khi lưu các bộ listing.</p>}
+          {bulkError && <p role="alert" className="error">{bulkError}</p>}
+          {!!bulkEntries.length && <>
+            <p role="status">Đã lưu {bulkEntries.filter(entry => entry.status === 'saved').length}/{bulkEntries.length} bộ{bulkBusy ? ' · Đang xử lý' : ''}.</p>
+            <details open={bulkEntries.some(entry => entry.status === 'failed' || entry.status === 'uncertain')}>
+              <summary>Kết quả lưu từng bộ</summary>
+              <ul>{bulkEntries.map(entry => <li key={entry.request.productKey}>
+                <strong>{entry.title}</strong> — {entry.status === 'saved' ? 'Đã lưu vào kho' : entry.status === 'saving' ? 'Đang lưu' : entry.status === 'queued' ? 'Chờ lưu' : entry.status === 'uncertain' ? 'Cần đọc lại kết quả' : 'Cần xử lý'}
+                {entry.message && <p>{entry.message}</p>}
+              </li>)}</ul>
+            </details>
+          </>}
+        </section>
+      )}
+      {grouped.bundles.length > 0 && (
         <div className="folder-batch-layout">
           <section className="panel folder-queue" aria-label="Danh sách thư mục">
             <div className="section-heading">
@@ -1008,10 +1280,17 @@ export function FolderIntake({
                 const assembly = assemblies.find((value) => value.key === item.key),
                   existing =
                     assembly &&
-                    products.find((product) => product.productKey === assembly.productKey);
+                    allProducts.find(
+                      (product) =>
+                        product.productKey ===
+                        (assembly.existingProductKey ??
+                          (!assembly.manifest ? assembly.productKey : undefined)),
+                    );
                 const readCount = uploaded.filter(
                   (value) =>
-                    value.record?.status === 'ready' &&
+                    (value.record?.status === 'ready' ||
+                      !!value.manifest ||
+                      !!value.pendingMapping) &&
                     item.files.some((file) => file.relativePath === value.relativePath),
                 ).length;
                 const attemptedCount = uploaded.filter((value) =>
@@ -1056,6 +1335,8 @@ export function FolderIntake({
                                 ? 'Chọn bảng giá chung'
                                 : assembling
                                   ? 'Đang đối chiếu'
+                                  : pendingMappings[item.key]
+                                    ? `Đã đọc ${pendingMappings[item.key].document.slots.length} phân loại`
                                   : assembly?.seed
                                     ? 'Có thể xem bản nháp'
                                     : 'Cần bạn đối chiếu'}
@@ -1069,7 +1350,10 @@ export function FolderIntake({
                           <ArrowRight size={15} aria-hidden="true" />
                         </button>
                       ) : (
-                        <button onClick={() => setSelectedFolder(item.key)}>Xem nguồn</button>
+                        <button onClick={() => {
+                          setSelectedFolder(item.key);
+                          if (pendingMappings[item.key]) setPanel('sku');
+                        }}>{pendingMappings[item.key] ? 'Xem bảng phân loại' : 'Xem nguồn'}</button>
                       )}
                     </div>
                   </article>
@@ -1090,22 +1374,60 @@ export function FolderIntake({
                 </div>
                 <span className="tag neutral">{group.files.length} tệp</span>
               </div>
-              {selectedAssembly && (
+              {selectedPending && (
+                <section className="folder-pending-status" aria-label="Trạng thái phân loại đã nhập">
+                  <strong>Đã đọc {selectedPending.document.slots.length} phân loại từ hồ sơ đi kèm.</strong>
+                  <p>{selectedMissingSku
+                    ? `Còn ${selectedMissingSku} phân loại chưa có SKU; giữ các mã đã có để bổ sung tiếp.`
+                    : 'Đã có mã SKU cho mọi phân loại; không cần nhập lại bảng.'}</p>
+                  <p className="caption">{selectedPending.structureConfirmed
+                    ? 'Bạn đã xác nhận cấu trúc. Mở bảng để xem kết quả đối chiếu với giá đang chọn và tiếp tục.'
+                    : 'Mở bảng để đối chiếu giá và xác nhận các lựa chọn trước khi tiếp tục.'}</p>
+                  {panel !== 'sku' && <button type="button" onClick={() => setPanel('sku')}>Xem bảng phân loại</button>}
+                </section>
+              )}
+              {selectedIssues.length > 0 && (
                 <div className="folder-exceptions">
-                  {selectedAssembly.issues.slice(0, 3).map((issue, index) => (
+                  {selectedIssues.slice(0, 3).map((issue, index) => (
                     <p key={index}>{issue.message}</p>
                   ))}
-                  {selectedAssembly.issues.length > 3 && (
+                  {selectedIssues.length > 3 && (
                     <details>
                       <summary>
-                        Xem thêm {selectedAssembly.issues.length - 3} phần cần đối chiếu
+                        Xem thêm {selectedIssues.length - 3} phần cần đối chiếu
                       </summary>
-                      {selectedAssembly.issues.slice(3).map((issue, index) => (
+                      {selectedIssues.slice(3).map((issue, index) => (
                         <p key={index}>{issue.message}</p>
                       ))}
                     </details>
                   )}
                 </div>
+              )}
+              {!groupManifest && panel === 'sku' && (
+                <PendingSkuMapping
+                  groupKey={group.key}
+                  value={pendingMappings[group.key]}
+                  onImport={importPending}
+                  onChange={(mapping) =>
+                    setPendingMappings((all) => ({ ...all, [group.key]: mapping }))
+                  }
+                  priceSource={
+                    priceReady && catalog && profile !== undefined
+                      ? { importId: sourceId, sheet, priceProfile: profile, rows: catalog.rows }
+                      : undefined
+                  }
+                  imageContext={{ group, files: uploaded }}
+                  onContinue={continuePending}
+                  disabled={locked}
+                  saved={!unsaved}
+                />
+              )}
+              {groupManifest && (
+                <p className="caption">
+                  Đã đọc hồ sơ đi kèm: {groupManifest.variants.length} SKU, đúng thứ tự phân loại và
+                  vai trò ảnh. Các lựa chọn trong hồ sơ được giữ nguyên; mở bản nháp để kiểm tra nội
+                  dung.
+                </p>
               )}
               <div className="editor-tabs" role="tablist" aria-label="Nguồn trong thư mục">
                 <button
@@ -1140,11 +1462,27 @@ export function FolderIntake({
               ) : (
                 <>
                   {panel === 'images' && (
-                    <div className="folder-visual-assignment">
+                    <fieldset
+                      className="folder-visual-assignment"
+                      disabled={!!groupManifest}
+                      style={{ border: 0, padding: 0, minWidth: 0 }}
+                    >
                       <p>
-                        Chọn ảnh bằng hình bên dưới, rồi chọn vị trí sử dụng. Không cần đổi tên tệp
-                        thành SKU.
+                        {groupManifest
+                          ? 'Vai trò và thứ tự ảnh đã được ghi trong hồ sơ. Các ảnh còn lại được giữ để đối chiếu.'
+                          : 'Chọn ảnh bằng hình bên dưới, rồi chọn vị trí sử dụng. Không cần đổi tên tệp thành SKU.'}
                       </p>
+                      {!groupManifest && <FolderImageHints
+                        paths={groupImages.map((item) => item.relativePath)}
+                        selection={groupMedia}
+                        disabled={locked}
+                        filter={imageRoleFilter}
+                        onFilter={setImageRoleFilter}
+                        onApply={(next) => {
+                          if (locked || groupManifest) return;
+                          setVisual((all) => ({ ...all, [group.key]: { ...next, convention: 'explicit_selection' } }));
+                        }}
+                      />}
                       <div className="folder-role-toolbar">
                         <strong>{imageSelection.length} ảnh đang chọn</strong>
                         <button
@@ -1157,7 +1495,7 @@ export function FolderIntake({
                           disabled={locked || !imageSelection.length}
                           onClick={() => assignImages('gallery')}
                         >
-                          Thêm vào ảnh sản phẩm
+                          Thêm vào bộ ảnh đầu trang
                         </button>
                         <button
                           disabled={locked || !imageSelection.length}
@@ -1173,7 +1511,7 @@ export function FolderIntake({
                         </button>
                       </div>
                       <div className="folder-image-grid">
-                        {groupImages.map((item) => (
+                        {visibleGroupImages.map((item) => (
                           <label
                             className={`folder-image-option${imageSelection.includes(item.relativePath) ? ' chosen' : ''}`}
                             key={item.relativePath}
@@ -1193,11 +1531,15 @@ export function FolderIntake({
                             <span className="folder-image-name">
                               {folderFilename(item.relativePath)}
                             </span>
+                            {!groupManifest && <span className="folder-image-hint" title={classifyFolderImage(item.relativePath).reason}>
+                              {imageRoleLabel[classifyFolderImage(item.relativePath).role]}
+                              {classifyFolderImage(item.relativePath).ordinal !== undefined ? ` · ${classifyFolderImage(item.relativePath).ordinal}` : ''}
+                            </span>}
                             <span className="folder-image-roles">
                               {groupMedia.coverPath === item.relativePath && <b>Bìa</b>}
                               {groupMedia.galleryPaths.includes(item.relativePath) && (
                                 <b>
-                                  Ảnh SP {groupMedia.galleryPaths.indexOf(item.relativePath) + 1}
+                                  Đầu trang {groupMedia.galleryPaths.indexOf(item.relativePath) + 1}
                                 </b>
                               )}
                               {groupMedia.descriptionPaths.includes(item.relativePath) && (
@@ -1209,6 +1551,7 @@ export function FolderIntake({
                           </label>
                         ))}
                       </div>
+                      {!!groupImages.length && !visibleGroupImages.length && <p className="caption">Không có ảnh thuộc nhóm này. Chọn Tất cả để xem các ảnh còn lại.</p>}
                       {!groupImages.length && (
                         <p className="empty">
                           Chưa có ảnh đọc được trong thư mục này. Xem trạng thái tệp bên dưới.
@@ -1216,6 +1559,9 @@ export function FolderIntake({
                       )}
                       <div className="folder-assigned-summary">
                         <h3>Ảnh đã phân vào vị trí</h3>
+                        {!groupManifest && !groupMedia.coverPath && !groupMedia.galleryPaths.length &&
+                          <p className="caption">Tên ảnh đã được nhận diện nhưng chưa được áp dụng. Bấm “Điền vị trí trống theo tên” ở trên để dùng bìa và ảnh g, hoặc chọn từng ảnh bằng tay.</p>}
+
                         <p>
                           Ảnh bìa: {groupMedia.coverPath?.split('/').at(-1) ?? 'Chưa chọn'}{' '}
                           {groupMedia.coverPath && (
@@ -1239,7 +1585,7 @@ export function FolderIntake({
                         {(['galleryPaths', 'descriptionPaths'] as const).map((role) => (
                           <details key={role} open={groupMedia[role].length > 0}>
                             <summary>
-                              {role === 'galleryPaths' ? 'Ảnh sản phẩm' : 'Ảnh mô tả'} ·{' '}
+                              {role === 'galleryPaths' ? 'Bộ ảnh đầu trang' : 'Ảnh mô tả'} ·{' '}
                               {groupMedia[role].length} ảnh
                             </summary>
                             <ol>
@@ -1249,21 +1595,21 @@ export function FolderIntake({
                                   <div className="actions">
                                     <button
                                       disabled={locked || index === 0}
-                                      aria-label={`Đưa ${role === 'galleryPaths' ? 'ảnh sản phẩm' : 'ảnh mô tả'} ${index + 1} lên trước`}
+                                      aria-label={`Đưa ${role === 'galleryPaths' ? 'bộ ảnh đầu trang' : 'ảnh mô tả'} ${index + 1} lên trước`}
                                       onClick={() => adjustImage(role, path, -1)}
                                     >
                                       <ChevronUp size={14} />
                                     </button>
                                     <button
                                       disabled={locked || index === groupMedia[role].length - 1}
-                                      aria-label={`Đưa ${role === 'galleryPaths' ? 'ảnh sản phẩm' : 'ảnh mô tả'} ${index + 1} về sau`}
+                                      aria-label={`Đưa ${role === 'galleryPaths' ? 'bộ ảnh đầu trang' : 'ảnh mô tả'} ${index + 1} về sau`}
                                       onClick={() => adjustImage(role, path, 1)}
                                     >
                                       <ChevronDown size={14} />
                                     </button>
                                     <button
                                       disabled={locked}
-                                      aria-label={`Bỏ ${path.split('/').at(-1)} khỏi ${role === 'galleryPaths' ? 'ảnh sản phẩm' : 'ảnh mô tả'}`}
+                                      aria-label={`Bỏ ${path.split('/').at(-1)} khỏi ${role === 'galleryPaths' ? 'bộ ảnh đầu trang' : 'ảnh mô tả'}`}
                                       onClick={() => adjustImage(role, path, 0)}
                                     >
                                       <X size={14} />
@@ -1274,8 +1620,15 @@ export function FolderIntake({
                             </ol>
                           </details>
                         ))}
+                        <section className="folder-variant-location" aria-label="Vị trí ảnh phân loại">
+                          <strong>Ảnh phân loại · {groupManifest
+                            ? `${groupManifest.variants.filter((variant) => variant.image).length} SKU đã có ảnh trong hồ sơ`
+                            : `${namedVariantCount} ảnh nhận diện theo tên`}</strong>
+                          <p className="caption">Ảnh này gắn riêng với từng mùi/dung tích. Trong “Xem và hoàn thiện nội dung”, mở “SKU & phân loại” để chọn ảnh cho từng SKU. Số thứ tự tên ảnh không phải thứ tự SKU.</p>
+                          {!groupManifest && <button type="button" onClick={() => setPanel('sku')}>Đến bảng SKU để gắn ảnh phân loại</button>}
+                        </section>
                       </div>
-                    </div>
+                    </fieldset>
                   )}
                   {panel === 'word' && (
                     <div className="folder-word-panel">
@@ -1396,7 +1749,7 @@ export function FolderIntake({
                       )}
                     </div>
                   )}
-                  {panel === 'sku' && (
+                  {panel === 'sku' && !selectedPending && (
                     <div className="folder-sku-panel">
                       <p>
                         SKU cần khớp chính xác bảng giá chung. Ảnh và tên phân loại được giữ theo bộ
@@ -1441,10 +1794,18 @@ export function FolderIntake({
                       )}
                     </div>
                   )}
-                  {groupFiles.some((item) => item.record?.status !== 'ready') && (
+                  {groupFiles.some(
+                    (item) =>
+                      item.record?.status !== 'ready' && !item.manifest && !item.pendingMapping,
+                  ) && (
                     <div className="folder-exceptions">
                       {groupFiles
-                        .filter((item) => item.record?.status !== 'ready')
+                        .filter(
+                          (item) =>
+                            item.record?.status !== 'ready' &&
+                            !item.manifest &&
+                            !item.pendingMapping,
+                        )
                         .map((item) => (
                           <div key={item.relativePath}>
                             <p>
@@ -1462,41 +1823,45 @@ export function FolderIntake({
                         ))}
                     </div>
                   )}
-                  <div className="folder-candidate-action">
-                    {selectedAssembly && (selectedAssembly.seed || selectedExisting) ? (
-                      <button
-                        className="primary"
-                        disabled={locked || assembling || unsaved}
-                        onClick={() => continueAssembly(selectedAssembly)}
-                      >
-                        {products.some(
-                          (product) => product.productKey === selectedAssembly.productKey,
-                        )
-                          ? 'Mở bộ đã lưu'
-                          : 'Xem & hoàn thiện'}{' '}
-                        <ArrowRight size={16} />
-                      </button>
-                    ) : (
-                      <>
-                        <p className="caption">
-                          {priceReady
-                            ? wordNeedsSelection
-                              ? 'Word chưa xác định rõ tiêu đề và mô tả. Tệp gốc và ảnh đã chọn được giữ lại; bạn cần chọn nội dung đúng từ Word ở màn hoàn thiện.'
-                              : 'Phần đã đọc và ảnh đã chọn sẽ được giữ lại khi bổ sung danh sách phân loại.'
-                            : 'Chọn bảng giá chung, sheet và bộ giá để tiếp tục đối chiếu SKU.'}
-                        </p>
+                  {!pendingMappings[group.key] && (
+                    <div className="folder-candidate-action">
+                      {selectedAssembly && (selectedAssembly.seed || selectedExisting) ? (
                         <button
                           className="primary"
-                          disabled={
-                            locked || assembling || unsaved || !selectedAssembly || !priceReady
-                          }
-                          onClick={manual}
+                          disabled={locked || assembling || unsaved}
+                          onClick={() => continueAssembly(selectedAssembly)}
                         >
-                          Bổ sung SKU/phân loại <ArrowRight size={16} />
+                          {selectedExisting ? 'Mở bộ đã lưu' : 'Xem & hoàn thiện'}{' '}
+                          <ArrowRight size={16} />
                         </button>
-                      </>
-                    )}
-                  </div>
+                      ) : (
+                        <>
+                          <p className="caption">
+                            {priceReady
+                              ? wordNeedsSelection
+                                ? 'Word chưa xác định rõ tiêu đề và mô tả. Tệp gốc và ảnh đã chọn được giữ lại; bạn cần chọn nội dung đúng từ Word ở màn hoàn thiện.'
+                                : 'Phần đã đọc và ảnh đã chọn sẽ được giữ lại khi bổ sung danh sách phân loại.'
+                              : 'Chọn bảng giá chung, sheet và bộ giá để tiếp tục đối chiếu SKU.'}
+                          </p>
+                          <button
+                            className="primary"
+                            disabled={
+                              locked ||
+                              assembling ||
+                              unsaved ||
+                              !selectedAssembly ||
+                              !priceReady ||
+                              !!manifests[group.key] ||
+                              group.files.some((f) => f.name === 'listing-source.json')
+                            }
+                            onClick={manual}
+                          >
+                            Bổ sung SKU/phân loại <ArrowRight size={16} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </section>

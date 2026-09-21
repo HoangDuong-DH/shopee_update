@@ -170,7 +170,7 @@ it('persists a full batch, reloads original aliases and partial failures, withou
   expect(await repo.listImports()).toEqual(originals);
   expect(await repo.listProducts()).toEqual(products);
   const viaHttp = await call({ method: 'GET', url: '/v1/input-batches/' + id });
-  expect(viaHttp.json()).toEqual(restored);
+  expect(viaHttp.json()).toEqual({...restored,archived:false,archivedAt:null});
   await expect(pool.query('DELETE FROM source_files WHERE id=$1', [word.id])).rejects.toThrow(
     /foreign key/,
   );

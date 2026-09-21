@@ -1,6 +1,12 @@
 import type { CatalogRow, SourceRef, WordImport } from '@shopee/domain';
 import type { ImportRecord } from './api.js';
 import type { EditorSeed } from './Editor.js';
+import type { FolderManifest, ListingDraft } from '@shopee/domain';
+import { resolveFolderManifest, compareManifestSavedDraft } from './folder-manifest.js';
+import { folderSourceIdentity } from '../../../packages/domain/src/folder-source-identity.js';
+import type { PendingListingMapping } from '../../../packages/domain/src/pending-listing-mapping.js';
+import { rankImagePriceCandidates } from '../../../packages/domain/src/source/image-price-candidates.js';
+import { classifyFolderImage } from './folder-image-names.js';
 
 export type FolderMode = 'single_listing' | 'parent_with_listing_folders';
 export type FolderFile = { name: string; relativePath: string; size: number; type?: string };
@@ -10,6 +16,8 @@ export type UploadedFolderFile = {
   sha256?: string;
   record: ImportRecord | null;
   error?: string;
+  manifest?: FolderManifest;
+  pendingMapping?: PendingListingMapping;
 };
 export type FolderGroup = { key: string; name: string; files: FolderFile[] };
 export type FolderIssue = {
@@ -80,13 +88,23 @@ export type FolderAssembly = {
     variants: FolderVariantCandidate[];
   };
   provenance: SourceRef[];
+  manifest?: FolderManifest;
+  existingProductKey?: string;
 };
 export type FolderAssemblyInput = {
   group: FolderGroup;
   files: UploadedFolderFile[];
-  priceSource: { importId: string; sheet: string; priceProfile: string | null; rows: CatalogRow[] };
+  priceSource: {
+    importId: string;
+    sheet: string;
+    priceProfile: string | null;
+    rows: CatalogRow[];
+    sha256?: string;
+  };
   rules: FolderSourceRules;
   productKey?: string;
+  manifest?: FolderManifest;
+  savedProducts?: ListingDraft[];
 };
 
 function pathParts(path: string): string[] | undefined {
@@ -327,8 +345,11 @@ function extractWord(
 }
 
 export async function assembleFolderListing(input: FolderAssemblyInput): Promise<FolderAssembly> {
-  const { group, rules, priceSource } = input;
+  const { group, priceSource } = input;
+  const prepared = input.manifest ? resolveFolderManifest(input) : undefined;
+  const rules = prepared?.rules ?? input.rules;
   const issues: FolderIssue[] = [];
+  issues.push(...(prepared?.issues ?? []));
   if (!priceSource.importId || !priceSource.sheet)
     issues.push(
       issue('PRICE_SCOPE_REQUIRED', 'Chọn đúng bảng giá và trang tính chung cho lô này.', 'price'),
@@ -354,6 +375,22 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
   const images: FolderImage[] = [];
   const wordFiles: { relativePath: string; record: ImportRecord }[] = [];
   for (const file of group.files) {
+    if (
+      file.name === 'listing-mapping.pending.json' &&
+      input.files.some((f) => f.relativePath === file.relativePath && f.pendingMapping)
+    )
+      continue;
+    if (file.name === 'listing-source.json') {
+      if (!prepared?.document || file.relativePath !== group.key + '/listing-source.json')
+        issues.push(
+          issue(
+            'FOLDER_MANIFEST_NOT_READY',
+            'Hồ sơ đi kèm chưa đọc được đúng. Giữ tệp gốc và kiểm tra trước khi tạo bản nháp.',
+            'manifest',
+          ),
+        );
+      continue;
+    }
     const received = uploaded.get(file.relativePath);
     const record = received?.record;
     if (!record || record.status !== 'ready') {
@@ -405,7 +442,10 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
       ])
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
   });
-  const productKey = input.productKey ?? 'folder-' + sourceFingerprint;
+  const productKey =
+    prepared?.document?.product.sourceRevision === 0
+      ? prepared.document.product.productKey
+      : (input.productKey ?? 'folder-' + sourceFingerprint);
   const candidates: FolderAssembly['candidates'] = {
     images,
     wordFiles,
@@ -531,7 +571,7 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
     issues.push(
       issue(
         'GALLERY_NOT_SELECTED',
-        'Chọn các ảnh sản phẩm và giữ đúng thứ tự đã chuẩn bị.',
+        'Chọn bộ ảnh đầu trang và giữ đúng thứ tự đã chuẩn bị.',
         'gallery',
       ),
     );
@@ -561,6 +601,52 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
             image.relativePath,
           ),
         );
+      else if (['unknown', 'variant'].includes(classifyFolderImage(image.relativePath).role)) {
+        const ranked = rankImagePriceCandidates(image.name, scopedRows, {
+          trustedContext: { listingTitle: candidates.title ?? group.name },
+        });
+        const seen = new Set<string>();
+        for (const candidate of ranked.candidates) {
+          if (seen.has(candidate.row.sku.value)) continue;
+          seen.add(candidate.row.sku.value);
+          candidates.variants.push({
+            sku: candidate.row.sku.value,
+            imagePath: image.relativePath,
+            sourceRows: ranked.candidates
+              .filter((other) => other.row.sku.value === candidate.row.sku.value)
+              .map((other) => other.row),
+          });
+        }
+        if (ranked.candidates.length)
+          issues.push(
+            issue(
+              'IMAGE_NAME_RANKED_CANDIDATES',
+              'Ứng viên từ tên ảnh đã xếp theo chuỗi ký tự liên tiếp khớp dài nhất, sau khi khớp mùi và quy cách. Chưa tự chọn SKU hoặc giá; cần xác nhận danh sách phân loại.',
+              'variants',
+              image.relativePath,
+              'warn',
+            ),
+          );
+        if (ranked.issues.includes('NAME_MATCH_TIE'))
+          issues.push(
+            issue(
+              'IMAGE_NAME_MATCH_TIE',
+              'Có nhiều dòng nguồn đồng hạng; cần xác định đúng SKU và dòng giá.',
+              'variants',
+              image.relativePath,
+            ),
+          );
+        else if (!ranked.candidates.length && /\d+\s*(?:ml|lit|lít|kg|g)\b/i.test(stem))
+          issues.push(
+            issue(
+              'IMAGE_NAME_IDENTITY_UNRESOLVED',
+              'Tên ảnh chưa khớp duy nhất đủ thương hiệu, dòng sản phẩm, mùi và dung tích/quy cách trong bảng giá; chưa dùng tên gần giống để chọn SKU.',
+              'variants',
+              image.relativePath,
+              'warn',
+            ),
+          );
+      }
     }
     issues.push(
       issue(
@@ -637,7 +723,9 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
         issues.push(
           issue('ORIGINAL_PRICE_INVALID', `GIÁ GỐC của SKU “${variant.sku}” chưa hợp lệ.`, 'price'),
         );
-      for (const sourceIssue of row.issues)
+      for (const sourceIssue of row.issues) {
+        // The selected profile and optional row key have resolved this SKU to exactly one row.
+        if (sourceIssue.code === 'DUPLICATE_SKU') continue;
         issues.push(
           issue(
             sourceIssue.code,
@@ -647,6 +735,7 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
             sourceIssue.severity,
           ),
         );
+      }
       provenance.push(...row.sku.sources, ...(row.originalPrice?.sources ?? []));
       const image = variant.imagePath
         ? takeImages([variant.imagePath], 'variantImage')[0]
@@ -676,7 +765,56 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
       descriptionImageIds: candidates.descriptionImages.map((image) => image.importId),
       tierNames: [...membership.tierNames],
       variants,
+      ...(prepared?.document?.sourceListingId
+        ? { sourceListingId: prepared.document.sourceListingId.value }
+        : {}),
     };
+  let existingProductKey: string | undefined;
+  if (prepared?.document?.product.sourceRevision === 0) {
+    const m = prepared.document,
+      saved = input.savedProducts?.find((p) => p.productKey === productKey);
+    if (saved) {
+      const fingerprint = await hash(folderSourceIdentity(m, input.priceSource.priceProfile));
+      const differences =
+        saved.folderSource?.productKey !== productKey ||
+        saved.folderSource.fingerprint !== fingerprint
+          ? ['Mã bộ này đã có bản nguồn khác. Mở bản đã lưu để đối chiếu; chưa tạo bản nháp trùng.']
+          : seed
+            ? compareManifestSavedDraft(
+                { ...m, product: { ...m.product, sourceRevision: saved.revision } },
+                seed,
+                input,
+                saved,
+              )
+            : [];
+      issues.push(
+        ...differences.map((message) => issue('FOLDER_SOURCE_CHANGED', message, 'manifest')),
+      );
+      if (seed && !issues.some((i) => i.severity === 'block')) existingProductKey = productKey;
+      seed = undefined;
+    }
+  }
+  if (prepared?.document && prepared.document.product.sourceRevision > 0) {
+    const m = prepared.document;
+    const differences = seed
+      ? compareManifestSavedDraft(
+          m,
+          seed,
+          input,
+          input.savedProducts?.find((p) => p.productKey === m.product.productKey),
+        )
+      : [];
+    if (differences.length)
+      issues.push(
+        ...differences.map((message) =>
+          issue('FOLDER_MANIFEST_SAVED_SOURCE_MISMATCH', message, 'manifest'),
+        ),
+      );
+    if (seed && !issues.some((i) => i.severity === 'block'))
+      existingProductKey = m.product.productKey;
+    // A saved-source manifest may only reopen its verified existing source; it can never create a replacement.
+    seed = undefined;
+  }
   return {
     key: group.key,
     productKey,
@@ -686,5 +824,7 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
     issues,
     candidates,
     provenance,
+    ...(prepared?.document ? { manifest: prepared.document } : {}),
+    ...(existingProductKey ? { existingProductKey } : {}),
   };
 }

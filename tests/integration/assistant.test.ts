@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { Pool } from 'pg';
 import { beforeAll, afterAll, expect, it, vi } from 'vitest';
 import { AssistantService } from '../../apps/api/src/assistant-service.js';
@@ -7,6 +8,7 @@ import { BlobStore, Repository, migrate } from '../../packages/persistence/src/i
 import { makePlan } from '../../packages/domain/src/plans.js';
 import { fixtureDraft, fixtureScope } from '../helpers/fixtures.js';
 import { createApp } from '../../apps/api/src/app.js';
+import { Deadline } from '../../packages/agent-runtime/src/budget.js';
 
 const schema = 'test_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -123,65 +125,148 @@ it('rejects a mismatched fingerprint before using source material', async () => 
       .statusCode,
   ).toBe(409);
 });
-it('the review deadline also bounds its final validation and late completion cannot be published', async () => {
-  const original = repo.getPlan.bind(repo);
-  let reads = 0;
-  const stalled = vi
-    .spyOn(repo, 'getPlan')
-    .mockImplementation((...args) => (++reads === 5 ? new Promise(() => {}) : original(...args)));
-  try {
+it.each([0, 600])(
+  'the review deadline bounds final validation and rejects late completion after %i ms of setup delay',
+  async (setupDelay) => {
+    const original = repo.getPlan.bind(repo);
+    const realSetTimeout = globalThis.setTimeout;
+    let enterFinalValidation!: () => void;
+    const finalValidationEntered = new Promise<void>((resolve) => {
+      enterFinalValidation = resolve;
+    });
+    let releaseFinalValidation!: () => void;
+    const finalValidationReleased = new Promise<void>((resolve) => {
+      releaseFinalValidation = resolve;
+    });
+    let lateRead: ReturnType<typeof repo.getPlan> | undefined;
+    let reads = 0;
+    // PostgreSQL setup is real I/O. Hold only the test's monotonic clock/timers
+    // until the final-validation boundary; unrelated setup latency must not make
+    // this test expire at an earlier read and miss the behavior under test.
+    const monotonicClock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const stalled = vi.spyOn(repo, 'getPlan').mockImplementation(async (...args) => {
+      const read = ++reads;
+      if (read === 5) {
+        lateRead = finalValidationReleased.then(() => original(...args));
+        enterFinalValidation();
+        return lateRead;
+      }
+      const result = await original(...args);
+      if (read === 4 && setupDelay)
+        await new Promise((resolve) => realSetTimeout(resolve, setupDelay));
+      return result;
+    });
     const service = new AssistantService(repo, knowledge, { timeoutMs: 500 });
-    const outcome = await Promise.race([
-      service.review({ ...input(), query: '' }).then(
-        () => 'unexpected completion',
-        (e) => (e as Error).message,
-      ),
-      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 2000)),
-    ]);
-    expect(outcome).toBe('DEADLINE_EXCEEDED');
-    expect(reads).toBe(5);
-    await expect
-      .poll(async () => (await service.list()).some((r) => r.state === 'interrupted'), {
-        timeout: 1500,
-      })
-      .toBe(true);
-  } finally {
-    stalled.mockRestore();
-  }
-});
-it('a real database row lock cannot turn an expired review into completed after release', async () => {
-  const request = { ...input(), query: '' };
-  const holder = await pool.connect();
-  const original = repo.getPlan.bind(repo);
-  let reads = 0;
-  let locked = false;
-  const intercept = vi.spyOn(repo, 'getPlan').mockImplementation(async (...args) => {
-    if (++reads === 5) {
-      await holder.query('BEGIN');
-      await holder.query('SELECT id FROM assistant_reviews WHERE request_id=$1 FOR UPDATE', [
-        request.requestId,
-      ]);
-      locked = true;
+    const complete = vi.spyOn(
+      service as unknown as {
+        complete(id: string, result: unknown, deadline: Deadline): Promise<void>;
+      },
+      'complete',
+    );
+    try {
+      const request = { ...input(), query: '' };
+      let settled = false;
+      const outcome = service
+        .review(request)
+        .then(
+          () => 'unexpected completion',
+          (e) => (e as Error).message,
+        )
+        .then((value) => {
+          settled = true;
+          return value;
+        });
+      await finalValidationEntered;
+      expect(reads).toBe(5);
+      const reviewId = (
+        await pool.query('SELECT id FROM assistant_reviews WHERE request_id=$1', [
+          request.requestId,
+        ])
+      ).rows[0].id as string;
+      monotonicClock.mockReturnValue(499);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(settled).toBe(false);
+      monotonicClock.mockReturnValue(500);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await outcome).toBe('DEADLINE_EXCEEDED');
+      // Actually finish the previously stalled read after expiry. No terminal
+      // write may start, even though the read eventually returns a valid plan.
+      releaseFinalValidation();
+      expect((await lateRead)?.id).toBe(plan.id);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(complete).not.toHaveBeenCalled();
+      expect(
+        (
+          await pool.query('SELECT state,result,finished_at FROM assistant_reviews WHERE id=$1', [
+            reviewId,
+          ])
+        ).rows[0],
+      ).toEqual({ state: 'running', result: null, finished_at: null });
+      vi.useRealTimers();
+      monotonicClock.mockRestore();
+      await expect
+        .poll(async () => (await service.get(reviewId)).state, {
+          timeout: 1500,
+        })
+        .toBe('interrupted');
+    } finally {
+      releaseFinalValidation();
+      complete.mockRestore();
+      stalled.mockRestore();
+      vi.useRealTimers();
+      monotonicClock.mockRestore();
     }
-    return original(...args);
+  },
+);
+it('a real database row lock cannot turn an expired review into completed after release', async () => {
+  const reviewId = randomUUID();
+  await pool.query(
+    "INSERT INTO assistant_reviews(id,request_id,request_hash,plan_id,plan_revision,scope,query,state,deadline_at) VALUES($1,$2,$3,$4,$5,$6,'','running',clock_timestamp()+interval '30 seconds')",
+    [reviewId, randomUUID(), 'a'.repeat(64), plan.id, plan.revision, plan.scope],
+  );
+  const holder = await pool.connect();
+  const completionPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    options: `-c search_path=${schema},public`,
+    max: 1,
   });
+  let holding = false;
   try {
-    const service = new AssistantService(repo, knowledge, { timeoutMs: 2000 });
-    const outcome = await service.review(request).catch((e) => (e as Error).message);
-    expect(outcome).toBe('DEADLINE_EXCEEDED');
-    expect(locked).toBe(true);
+    // Complete setup before starting the deadline: a slow harness or fifth getPlan
+    // must not prevent this test from ever acquiring its intended PostgreSQL lock.
+    await completionPool.query('SELECT 1');
+    await holder.query('BEGIN');
+    holding = true;
+    const locked = await holder.query('SELECT id FROM assistant_reviews WHERE id=$1 FOR UPDATE', [
+      reviewId,
+    ]);
+    expect(locked.rowCount).toBe(1);
+    const service = new AssistantService(new Repository(completionPool), knowledge);
+    // Focused test boundary to the real transaction implementation; HTTP review
+    // coverage remains in the other tests. The generous persisted row deadline
+    // isolates the shorter execution deadline from an incidental SQL expiry.
+    const completion = service as unknown as {
+      complete(id: string, result: unknown, deadline: Deadline): Promise<void>;
+    };
+    await expect(
+      completion.complete(reviewId, { marker: 'must-not-be-published' }, new Deadline(100)),
+    ).rejects.toThrow('DEADLINE_EXCEEDED');
     await holder.query('COMMIT');
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    holding = false;
+    // With max:1 this read is queued after the completion transaction releases
+    // its connection, so a late SQL update cannot race the assertion below.
     const row = (
-      await pool.query('SELECT state FROM assistant_reviews WHERE request_id=$1', [
-        request.requestId,
-      ])
+      await completionPool.query(
+        'SELECT state,result,finished_at FROM assistant_reviews WHERE id=$1',
+        [reviewId],
+      )
     ).rows[0];
-    expect(row.state).not.toBe('completed');
+    expect(row).toEqual({ state: 'running', result: null, finished_at: null });
   } finally {
-    await holder.query('ROLLBACK');
+    if (holding) await holder.query('ROLLBACK');
     holder.release();
-    intercept.mockRestore();
+    await completionPool.end();
   }
 });
 it('connection or capability changes make the old plan need a new review', async () => {

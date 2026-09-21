@@ -1,3 +1,4 @@
+import { openWorkspaceTool, openInputLibrary } from './workspace-navigation.js';
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -252,10 +253,7 @@ const twoFolders: FolderFileFixture[] = [
 
 async function openFolders(page: Page, directory: string) {
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Bảng giá chung', exact: true })
@@ -298,6 +296,151 @@ async function savedBatch(page: Page, batches: Map<string, InputBatchRecord>) {
   return structuredClone([...batches.values()][0]);
 }
 
+const namedCover =
+  'Nuoc-Lau-San-Huong-Que-VINA-TUOI-San-Nha-Thom-Am-Sau-Lua-Chon-Chai-1-Lit -anh-bia.png';
+const namedContent = [
+  'Nuoc-Lau-San-Huong-Que-VINA-TUOI-San-Nha-Thom-Am-g1.png',
+  'Nuoc-Lau-San-Huong-Que-VINA-TUOI-San-Nha-Thom-Am-g2.png',
+  'Nuoc-Lau-San-Huong-Que-VINA-TUOI-San-Nha-Thom-Am-g10.png',
+];
+const namedImageFolder: FolderFileFixture[] = [
+  twoFolders[0],
+  { relativePath: 'Listing A/' + namedCover },
+  ...[namedContent[2], namedContent[1], namedContent[0], '2.png', 'draft-g3.png'].map((name) => ({
+    relativePath: 'Listing A/' + name,
+  })),
+];
+
+test('fixture: filename hints fill only after a click and keep numbered or draft images out of content', async ({
+  page,
+}, info) => {
+  const fixture = await folderFixture(page, info, namedImageFolder);
+  await openFolders(page, fixture.directory);
+  await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
+  await savedBatch(page, fixture.batches);
+  const candidate = page.getByTestId('folder-candidate');
+  const hints = candidate.getByRole('region', {
+    name: 'Nhận biết vai trò theo tên ảnh',
+    exact: true,
+  });
+  const summary = candidate.locator('.folder-assigned-summary');
+  await expect(summary).toContainText('Ảnh bìa: Chưa chọn');
+  await expect(summary).toContainText('Bộ ảnh đầu trang · 0 ảnh');
+  await expect(summary).toContainText('Ảnh mô tả · 0 ảnh');
+
+  await hints.getByRole('button', { name: 'Ảnh đánh số · chưa rõ vai trò 1', exact: true }).click();
+  await expect(candidate.getByRole('checkbox', { name: /^Chọn ảnh/ })).toHaveCount(1);
+  await expect(
+    candidate.getByRole('checkbox', { name: 'Chọn ảnh 2.png', exact: true }),
+  ).toBeVisible();
+  await hints.getByRole('button', { name: 'Gợi ý ảnh nội dung 3', exact: true }).click();
+  await expect(candidate.locator('.folder-image-name')).toHaveText(namedContent);
+  await hints.getByRole('button', { name: 'Tất cả 6', exact: true }).click();
+  await expect(
+    candidate.getByRole('checkbox', { name: 'Chọn ảnh draft-g3.png', exact: true }),
+  ).toBeVisible();
+  await expect(hints.getByRole('combobox', { name: 'Ảnh g dùng ở', exact: true })).toHaveValue(
+    'both',
+  );
+  await hints.getByRole('button', { name: 'Điền vị trí trống theo tên', exact: true }).click();
+
+  await expect(summary).toContainText('Ảnh bìa: ' + namedCover);
+  await expect(summary).toContainText('Bộ ảnh đầu trang · 3 ảnh');
+  await expect(summary).toContainText('Ảnh mô tả · 3 ảnh');
+  await expect(
+    summary.locator('details').filter({ hasText: 'Bộ ảnh đầu trang' }).locator('li > span'),
+  ).toHaveText(namedContent);
+  await expect(
+    summary.locator('details').filter({ hasText: 'Ảnh mô tả' }).locator('li > span'),
+  ).toHaveText(namedContent);
+  await expect(
+    hints.getByRole('button', { name: 'Điền vị trí trống theo tên', exact: true }),
+  ).toBeDisabled();
+  await expect
+    .poll(
+      () => Object.values([...fixture.batches.values()][0].state.visual)[0]?.galleryPaths.length,
+    )
+    .toBe(3);
+  const saved = await savedBatch(page, fixture.batches);
+  const selected = Object.values(saved.state.visual)[0];
+  expect(path.basename(selected.coverPath!)).toBe(namedCover);
+  expect(selected.galleryPaths.map((file) => path.basename(file))).toEqual(namedContent);
+  expect(selected.descriptionPaths).toEqual(selected.galleryPaths);
+  expect(fixture.writes).toHaveLength(namedImageFolder.length);
+  expect(fixture.unexpectedWrites).toEqual([]);
+});
+
+test('fixture: filename fill preserves manual roles and cleared choices stay cleared after reloading the batch', async ({
+  page,
+}, info) => {
+  const definitions = [
+    ...namedImageFolder,
+    { relativePath: 'Listing A/manual-photo.png' },
+    { relativePath: 'Listing A/manual-gallery.png' },
+  ];
+  const fixture = await folderFixture(page, info, definitions);
+  await openFolders(page, fixture.directory);
+  await page.getByRole('button', { name: 'Đọc các thư mục', exact: true }).click();
+  const candidate = page.getByTestId('folder-candidate');
+  await candidate.getByRole('checkbox', { name: 'Chọn ảnh manual-photo.png', exact: true }).check();
+  await candidate.getByRole('button', { name: 'Dùng làm ảnh bìa', exact: true }).click();
+  await candidate
+    .getByRole('checkbox', { name: 'Chọn ảnh manual-gallery.png', exact: true })
+    .check();
+  await candidate.getByRole('button', { name: 'Thêm vào bộ ảnh đầu trang', exact: true }).click();
+  await candidate.getByRole('button', { name: 'Điền vị trí trống theo tên', exact: true }).click();
+  const summary = candidate.locator('.folder-assigned-summary');
+  await expect(summary).toContainText('Ảnh bìa: manual-photo.png');
+  await expect(summary).toContainText('Bộ ảnh đầu trang · 1 ảnh');
+  await expect(
+    summary.locator('details').filter({ hasText: 'Bộ ảnh đầu trang' }).locator('li > span'),
+  ).toHaveText(['manual-gallery.png']);
+  await expect(
+    summary.locator('details').filter({ hasText: 'Ảnh mô tả' }).locator('li > span'),
+  ).toHaveText(namedContent);
+
+  await candidate.getByRole('button', { name: 'Bỏ ảnh bìa đã chọn', exact: true }).click();
+  await candidate
+    .getByRole('button', { name: 'Bỏ manual-gallery.png khỏi bộ ảnh đầu trang', exact: true })
+    .click();
+  await expect
+    .poll(() => {
+      const selected = Object.values([...fixture.batches.values()][0]?.state.visual ?? {})[0];
+      return selected
+        ? [
+            selected.coverPath ?? null,
+            selected.galleryPaths.length,
+            selected.descriptionPaths.length,
+          ]
+        : null;
+    })
+    .toEqual([null, 0, 3]);
+  const saved = await savedBatch(page, fixture.batches);
+  const uploadsBeforeReload = fixture.writes.length;
+
+  await page.reload();
+  await openInputLibrary(page);
+  await page
+    .getByTestId('input-batch-row')
+    .getByRole('button', { name: 'Tiếp tục xử lý', exact: true })
+    .click();
+  await page
+    .getByTestId('folder-row')
+    .filter({ hasText: 'Listing A' })
+    .getByRole('button', { name: 'Xem nguồn', exact: true })
+    .click();
+  await expect(summary).toContainText('Ảnh bìa: Chưa chọn');
+  await expect(summary).toContainText('Bộ ảnh đầu trang · 0 ảnh');
+  await expect(summary).toContainText('Ảnh mô tả · 3 ảnh');
+  await expect(
+    candidate.getByRole('button', { name: 'Điền vị trí trống theo tên', exact: true }),
+  ).toBeEnabled();
+  expect([...fixture.batches.values()][0].state.visual).toEqual(saved.state.visual);
+  expect(fixture.writes).toHaveLength(uploadsBeforeReload);
+  expect(fixture.writes).toHaveLength(definitions.length);
+  expect(fixture.unexpectedWrites).toEqual([]);
+});
+
 test('fixture: a saved input batch restores both folders, Word, price and image order after reload without uploading again', async ({
   page,
 }, info) => {
@@ -329,10 +472,7 @@ test('fixture: a saved input batch restores both folders, Word, price and image 
   expect(fixture.writes).toHaveLength(7);
 
   await page.reload();
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Kho đầu vào', exact: true })
-    .click();
+  await openInputLibrary(page);
   await expect(page.getByRole('heading', { name: 'Kho đầu vào', exact: true })).toBeVisible();
   await expect(page.getByTestId('input-batch-row')).toHaveCount(1);
   await page
@@ -347,7 +487,7 @@ test('fixture: a saved input batch restores both folders, Word, price and image 
     .getByRole('button', { name: 'Xem nguồn', exact: true })
     .click();
   await expect(candidate).toContainText('Ảnh bìa: 1.png');
-  await expect(candidate).toContainText('Ảnh sản phẩm · 2 ảnh');
+  await expect(candidate).toContainText('Bộ ảnh đầu trang · 2 ảnh');
   await expect(candidate).toContainText('Ảnh mô tả · 2 ảnh');
   await page.screenshot({
     path: '.local/e2e-artifacts/input-batch-restored-desktop.png',
@@ -436,7 +576,7 @@ test('fixture: a conflicting batch revision preserves current choices and never 
   // Another local choice must not reset a stale revision or overwrite the remote record.
   await candidate.getByRole('checkbox', { name: 'Chọn ảnh 2.png', exact: true }).check();
   await candidate.getByRole('button', { name: 'Thêm vào cả hai', exact: true }).click();
-  await expect(candidate).toContainText('Ảnh sản phẩm · 1 ảnh');
+  await expect(candidate).toContainText('Bộ ảnh đầu trang · 1 ảnh');
   await expect(page.getByRole('alert')).toContainText('Bộ đầu vào đã có thay đổi ở nơi khác');
   expect(fixture.batches.get(initial.id)).toEqual(remote);
   expect(fixture.batchWrites).toHaveLength(failedRequestCount);
@@ -489,7 +629,7 @@ test('fixture: reads two separate folders with one common price source and leave
   const candidate = page.getByTestId('folder-candidate');
   await expect(candidate.getByRole('checkbox', { name: /^Chọn ảnh/ })).toHaveCount(3);
   await expect(candidate).toContainText('Ảnh bìa: Chưa chọn');
-  await expect(candidate).toContainText('Ảnh sản phẩm · 0 ảnh');
+  await expect(candidate).toContainText('Bộ ảnh đầu trang · 0 ảnh');
   await expect(candidate).toContainText('Ảnh mô tả · 0 ảnh');
   await expect(page.getByRole('button', { name: 'Xem & hoàn thiện', exact: true })).toHaveCount(0);
   await candidate.getByRole('tab', { name: 'Word & nội dung', exact: true }).click();
@@ -542,7 +682,7 @@ test('fixture: visual roles and exact Word content survive completing only missi
   await candidate.getByRole('checkbox', { name: 'Chọn ảnh 2.png', exact: true }).check();
   await candidate.getByRole('button', { name: 'Thêm vào cả hai', exact: true }).click();
   await expect(candidate).toContainText('Ảnh bìa: 1.png');
-  await expect(candidate).toContainText('Ảnh sản phẩm · 2 ảnh');
+  await expect(candidate).toContainText('Bộ ảnh đầu trang · 2 ảnh');
   await expect(candidate).toContainText('Ảnh mô tả · 2 ảnh');
   await candidate.getByRole('tab', { name: 'Word & nội dung', exact: true }).click();
   await candidate.getByText('Cách đọc Word trong bộ nguồn', { exact: true }).click();
@@ -646,7 +786,7 @@ test('fixture: holds navigation while folder uploads are pending and keeps stage
     await openFolders(page, fixture.directory);
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .getByRole('button', { name: 'Kho listing', exact: true })
       .click();
     const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
     await expect(dialog).toBeVisible();
@@ -659,7 +799,7 @@ test('fixture: holds navigation while folder uploads are pending and keeps stage
     await requestStarted;
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .getByRole('button', { name: 'Kho listing', exact: true })
       .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Nhập listing theo thư mục', exact: true }),

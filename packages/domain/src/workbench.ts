@@ -34,6 +34,8 @@ export type WorkOrderView = WorkOrder & {
   state: 'needs_attention' | 'ready_to_check';
   /** Active target recovery takes priority, even when it belongs to an older source revision. */
   sandboxRun: SandboxRun | null;
+  /** Current-state evidence; it does not change the original run's historical QC result. */
+  sandboxReconciliation?: { id: string; verifiedAt: string };
   sandboxRunMatchesConfig: boolean;
 };
 export type Workbench = {

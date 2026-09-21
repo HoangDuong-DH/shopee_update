@@ -7,10 +7,15 @@ import {
   type InputBatchSummary,
   type InputLibrary,
   type InputLibraryImport,
+  type ListingDraft,
+  type Fact,
   type WorkbookImport,
 } from '@shopee/domain';
+import { folderManifestSchema } from '../../domain/src/folder-manifest.js';
+import { compileDescription } from '../../domain/src/source/normalize.js';
 import type { Pool, PoolClient } from 'pg';
 import { transaction } from './db.js';
+import { localArchiveList, lockLocalSourceSelection, assertLocalResourcesActive, type LocalLifecycle } from './local-archives.js';
 
 const iso = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -102,6 +107,162 @@ function validateShape(state: InputBatchState): Map<string, InputBatchFile[]> {
   return groups;
 }
 
+// Display-only reopening check. Uses already parsed records and stored hashes, never source bytes.
+// Merely naming an existing product in a portable manifest must not mark an intake complete.
+function savedManifestMatches(
+  state: InputBatchState,
+  group: string,
+  saved: ListingDraft | undefined,
+  sources: ReadonlyMap<string, InputLibraryImport>,
+): boolean {
+  const stored = state.manifests?.[group];
+  const parsed = folderManifestSchema.safeParse(stored?.document);
+  if (!parsed.success || !saved || !stored) return false;
+  const m = parsed.data,
+    selection = state.priceSelection;
+  const sidecar = state.files.filter((f) => f.relativePath === group + '/listing-source.json');
+  if (
+    m.product.sourceRevision <= 0 ||
+    saved.productKey !== m.product.productKey ||
+    saved.revision !== m.product.sourceRevision ||
+    sidecar.length !== 1 ||
+    stored.relativePath !== sidecar[0]!.relativePath ||
+    stored.sha256 !== sidecar[0]!.sha256 ||
+    sidecar[0]!.importId ||
+    !selection ||
+    (m.sourceListingId?.value ?? null) !== (saved.sourceListingId?.value ?? null)
+  )
+    return false;
+  const price = sources.get(selection.importId),
+    workbook = price?.body as WorkbookImport | undefined;
+  if (
+    price?.status !== 'ready' ||
+    price.kind !== 'xlsx' ||
+    price.sha256 !== m.priceSource.sha256 ||
+    selection.sheet !== m.priceSource.sheet ||
+    (m.priceSource.selectionMode === 'operator_choice'
+      ? !selection.priceProfile?.trim()
+      : selection.priceProfile !== m.priceSource.priceProfile) ||
+    !Array.isArray(workbook?.rows)
+  )
+    return false;
+  function file(ref: { path: string; sha256: string }, kind: 'docx' | 'image') {
+    const matches = state.files.filter((f) => f.relativePath === group + '/' + ref.path);
+    if (matches.length !== 1 || !matches[0]!.importId || matches[0]!.sha256 !== ref.sha256)
+      return undefined;
+    const source = sources.get(matches[0]!.importId!);
+    return source?.kind === kind &&
+      source.status === 'ready' &&
+      source.sha256 === ref.sha256 &&
+      source.bytes === matches[0]!.size
+      ? source
+      : undefined;
+  }
+  const word = file(m.word, 'docx');
+  const paragraphs = (word?.body as { paragraphs?: unknown } | undefined)?.paragraphs;
+  if (!Array.isArray(paragraphs) || paragraphs.some((p) => typeof p !== 'string')) return false;
+  const text = (range: { start: number; end: number } | undefined) =>
+    !range
+      ? ''
+      : range.end > paragraphs.length
+        ? undefined
+        : paragraphs.slice(range.start - 1, range.end).join(m.word.paragraphSeparator);
+  const title = text(m.word.title),
+    headline = text(m.word.headline),
+    body = text(m.word.body);
+  if (
+    title === undefined ||
+    headline === undefined ||
+    body === undefined ||
+    saved.title.value !== title
+  )
+    return false;
+  const refs = [
+    ...(m.media.cover ? [m.media.cover] : []),
+    ...m.media.gallery,
+    ...m.media.description,
+    ...m.variants.flatMap((v) => (v.image ? [v.image] : [])),
+  ];
+  if (refs.some((ref) => !file(ref, 'image'))) return false;
+  const assetHash = (key: string | undefined) => {
+    if (!key) return null;
+    const assets = saved!.assets.filter((asset) => asset.key === key);
+    return assets.length === 1 && assets[0]!.sha256 ? assets[0]!.sha256 : undefined;
+  };
+  const usedAssetKeys = [
+    ...(saved.coverKey ? [saved.coverKey] : []),
+    ...saved.galleryKeys,
+    ...saved.description.flatMap((block) => (block.type === 'image' ? [block.assetKey] : [])),
+    ...saved.variants.flatMap((variant) => (variant.imageKey ? [variant.imageKey] : [])),
+  ];
+  if (usedAssetKeys.some((key) => assetHash(key) === undefined)) return false;
+  const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
+  const samePriceFact = (actual: Fact<string>, expected: Fact<string> | undefined) => {
+    if (
+      !expected ||
+      !actual.confirmed ||
+      !expected.confirmed ||
+      actual.value !== expected.value ||
+      actual.sources.length !== 1 ||
+      expected.sources.length !== 1
+    )
+      return false;
+    const a = actual.sources[0]!,
+      b = expected.sources[0]!;
+    return (
+      a.kind === 'product_file' &&
+      b.kind === 'product_file' &&
+      a.fileSha256 === price.sha256 &&
+      b.fileSha256 === price.sha256 &&
+      a.locator === b.locator &&
+      b.locator.startsWith(selection.sheet + '!') &&
+      /^[A-Z]+[1-9]\d*$/.test(b.locator.slice(selection.sheet.length + 1))
+    );
+  };
+  const description = compileDescription(
+    headline,
+    body,
+    m.media.description.map((ref) => ref.sha256),
+  );
+  const savedDescription = saved.description.map((block) =>
+    block.type === 'text'
+      ? { type: 'text', text: block.text }
+      : { type: 'image', assetKey: assetHash(block.assetKey) },
+  );
+  if (
+    !same(savedDescription, description) ||
+    assetHash(saved.coverKey) !== (m.media.cover?.sha256 ?? null) ||
+    !same(
+      saved.galleryKeys.map(assetHash),
+      m.media.gallery.map((ref) => ref.sha256),
+    ) ||
+    !same(saved.tierNames, m.tierNames) ||
+    saved.variants.length !== m.variants.length
+  )
+    return false;
+  return m.variants.every((variant, index) => {
+    const rows = workbook.rows.filter(
+      (row) =>
+        row.sku.value === variant.sku &&
+        row.sheet === selection.sheet &&
+        (row.priceProfile ?? null) === selection.priceProfile &&
+        (!variant.rowKey || row.key === variant.rowKey),
+    );
+    const actual = saved.variants[index];
+    return (
+      rows.length === 1 &&
+      !!actual &&
+      samePriceFact(actual.sku, rows[0]!.sku) &&
+      samePriceFact(actual.originalPrice, rows[0]!.originalPrice) &&
+      actual.key === rows[0]!.key &&
+      actual.sku.value === variant.sku &&
+      actual.originalPrice.value === rows[0]!.originalPrice!.value &&
+      same(actual.optionLabels, variant.optionLabels) &&
+      assetHash(actual.imageKey) === (variant.image?.sha256 ?? null)
+    );
+  });
+}
+
 export class InputLibraryRepository {
   constructor(readonly pool: Pool) {}
 
@@ -161,6 +322,13 @@ export class InputLibraryRepository {
     validateShape(state);
     const canonical = canonicalJson(state);
     return transaction(this.pool, async (client) => {
+      await lockLocalSourceSelection(client);
+      await assertLocalResourcesActive(client, [
+        {kind:'input_batch',resourceId:id},
+        ...Object.values(state.productKeys).map(resourceId=>({kind:'product' as const,resourceId})),
+        ...state.files.flatMap(file=>file.importId ? [{kind:'pricebook' as const,resourceId:file.importId}] : []),
+        ...(state.priceSelection ? [{kind:'pricebook' as const,resourceId:state.priceSelection.importId}] : []),
+      ]);
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
         'input-batch:' + id,
       ]);
@@ -177,6 +345,31 @@ export class InputLibraryRepository {
         return batchRecord(replay.rows[0]);
       if ((current.rows[0]?.latest_revision ?? 0) !== expectedRevision)
         throw new Error('INPUT_BATCH_REVISION_CONFLICT');
+      if (expectedRevision > 0) {
+        const previous = (
+          await client.query(
+            'SELECT state FROM input_batch_revisions WHERE batch_id=$1 AND revision=$2',
+            [id, expectedRevision],
+          )
+        ).rows[0]?.state as InputBatchState | undefined;
+        for (const [group, mapping] of Object.entries(previous?.pendingMappings ?? {})) {
+          const next = state.pendingMappings?.[group];
+          if (
+            !next ||
+            canonicalJson({
+              relativePath: mapping.relativePath,
+              sha256: mapping.sha256,
+              document: mapping.document,
+            }) !==
+              canonicalJson({
+                relativePath: next.relativePath,
+                sha256: next.sha256,
+                document: next.document,
+              })
+          )
+            throw new Error('INPUT_BATCH_PENDING_SOURCE_CHANGED');
+        }
+      }
       await this.validateReferences(client, state);
       const keys = Object.entries(state.productKeys).sort(([, left], [, right]) =>
         left.localeCompare(right),
@@ -278,16 +471,63 @@ export class InputLibraryRepository {
     return { ...record, imports };
   }
 
-  async list(): Promise<InputBatchSummary[]> {
+  async list(lifecycle: LocalLifecycle = 'active'): Promise<InputBatchSummary[]> {
     const result = await this.pool.query(
-      `SELECT b.id,r.revision,r.state->>'name' AS name,r.created_at AS updated_at,
+      `SELECT b.id,r.revision,r.state,r.state->>'name' AS name,r.created_at AS updated_at,a.archived_at,
        jsonb_array_length(r.state->'files') AS file_count,
        (SELECT count(*)::int FROM jsonb_object_keys(r.state->'productKeys')) AS folder_count,
        r.state->'priceSelection' AS price_selection,
        (SELECT count(*)::int FROM jsonb_each_text(r.state->'productKeys') k
-        JOIN products p ON p.product_key=k.value) AS completed_count
+        JOIN products p ON p.product_key=COALESCE(
+          CASE WHEN COALESCE(r.state->'manifests'->k.key,r.state->'pendingMappings'->k.key)->'document'->'product'->>'sourceRevision'='0'
+            THEN (SELECT c.product_key FROM folder_source_claims c
+              WHERE c.product_key=COALESCE(r.state->'manifests'->k.key,r.state->'pendingMappings'->k.key)->'document'->'product'->>'productKey') END,
+          k.value)
+        WHERE COALESCE(r.state->'manifests'->k.key->'document'->'product'->>'sourceRevision','0')='0') AS completed_count
        FROM input_batches b JOIN input_batch_revisions r
-       ON r.batch_id=b.id AND r.revision=b.latest_revision ORDER BY b.updated_at DESC,b.id`,
+       ON r.batch_id=b.id AND r.revision=b.latest_revision
+       LEFT JOIN local_resource_archives a ON a.kind='input_batch' AND a.resource_id=b.id::text
+       WHERE $1='all' OR (a.archived_at IS NOT NULL)=($1='archived') ORDER BY b.updated_at DESC,b.id`,
+      [lifecycle],
+    );
+    const candidates = result.rows.flatMap((row) =>
+      Object.entries((row.state as InputBatchState).manifests ?? {})
+        .filter(([, manifest]) => manifest.document.product.sourceRevision > 0)
+        .map(([group, manifest]) => ({
+          state: row.state as InputBatchState,
+          group,
+          productKey: manifest.document.product.productKey,
+        })),
+    );
+    const ids = [
+      ...new Set(
+        candidates.flatMap(({ state }) => [
+          ...state.files.flatMap((file) => (file.importId ? [file.importId] : [])),
+          ...(state.priceSelection ? [state.priceSelection.importId] : []),
+        ]),
+      ),
+    ];
+    const keys = [...new Set(candidates.map((c) => c.productKey))];
+    const [sourceRows, productRows] = candidates.length
+      ? await Promise.all([
+          this.pool.query(
+            `SELECT id,sha256,filename,kind,bytes,status,message,created_at,
+        CASE WHEN kind IN ('docx','xlsx') THEN body ELSE NULL END AS body
+        FROM source_files WHERE id=ANY($1::uuid[])`,
+            [ids],
+          ),
+          this.pool.query(
+            `SELECT p.product_key,r.body FROM products p JOIN product_revisions r
+        ON r.product_key=p.product_key AND r.revision=p.latest_revision WHERE p.product_key=ANY($1::text[])`,
+            [keys],
+          ),
+        ])
+      : [{ rows: [] }, { rows: [] }];
+    const sources = new Map<string, InputLibraryImport>(
+      sourceRows.rows.map((row) => [row.id, sourceRecord(row)]),
+    );
+    const products = new Map<string, ListingDraft>(
+      productRows.rows.map((row) => [row.product_key, row.body]),
     );
     return result.rows.map((row) => ({
       id: row.id,
@@ -296,14 +536,27 @@ export class InputLibraryRepository {
       updatedAt: iso(row.updated_at),
       folderCount: row.folder_count,
       fileCount: row.file_count,
-      completedCount: row.completed_count,
+      completedCount:
+        row.completed_count +
+        Object.entries((row.state as InputBatchState).manifests ?? {}).filter(
+          ([group, manifest]) =>
+            manifest.document.product.sourceRevision > 0 &&
+            savedManifestMatches(
+              row.state,
+              group,
+              products.get(manifest.document.product.productKey),
+              sources,
+            ),
+        ).length,
       priceSelection: row.price_selection,
+      archived:!!row.archived_at,
+      archivedAt:row.archived_at ? iso(row.archived_at) : null,
     }));
   }
 
-  async library(): Promise<InputLibrary> {
+  async library(lifecycle: LocalLifecycle = 'active'): Promise<InputLibrary> {
     const [batches, workbooks, unassigned] = await Promise.all([
-      this.list(),
+      this.list(lifecycle),
       this.pool.query(`SELECT id,filename,status,created_at,bytes,
         COALESCE(jsonb_array_length(body->'rows'),0) AS row_count,
         COALESCE(jsonb_array_length(body->'sheets'),0) AS sheet_count,
@@ -332,7 +585,7 @@ export class InputLibraryRepository {
     ]);
     return {
       batches,
-      priceBooks: workbooks.rows.map((row) => {
+      priceBooks: await localArchiveList(this.pool, 'pricebook', workbooks.rows.map((row) => {
         return {
           id: row.id,
           filename: row.filename,
@@ -343,8 +596,8 @@ export class InputLibraryRepository {
           sheetCount: row.sheet_count,
           issueCount: row.issue_count,
         };
-      }),
-      unassigned: unassigned.rows.map(sourceRecord),
+      }), row => row.id, lifecycle),
+      unassigned: lifecycle === 'archived' ? [] : unassigned.rows.map(sourceRecord),
     };
   }
 }

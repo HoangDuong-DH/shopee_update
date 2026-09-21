@@ -10,6 +10,7 @@ import type {
 } from '@shopee/domain';
 import { api, date, media, post } from './api.js';
 import { SandboxReview } from './SandboxReview.js';
+import { SavedPatchList } from './ImportUpdates.js';
 import './workbench.css';
 
 const issueLabels: Record<WorkIssueKind, string> = {
@@ -67,6 +68,7 @@ const emptyConfig = (
 });
 
 export function Workbench({
+  onUpdates,
   onReceive,
   onFolders,
   onSource,
@@ -74,6 +76,7 @@ export function Workbench({
   onDirty,
   onBusy,
 }: {
+  onUpdates: (workOrderId?: string, receiptId?: string) => void;
   onReceive: () => void;
   onFolders: () => void;
   onSource: (source: ListingDraft) => void;
@@ -168,6 +171,7 @@ export function Workbench({
   if (selected)
     return (
       <WorkOrderDetail
+        onUpdates={onUpdates}
         key={selected.id}
         order={selected}
         data={data!}
@@ -201,10 +205,16 @@ export function Workbench({
             khi gửi.
           </p>
         </div>
-        <button className="primary" onClick={onFolders} disabled={busy}>
-          <FileInput size={18} />
-          Nhận thư mục listing
-        </button>
+        <div className="workbench-actions">
+          <button className="primary" onClick={() => onUpdates()} disabled={busy}>
+            <FileInput size={18} />
+            Nhập bộ cập nhật
+          </button>
+          <button onClick={onFolders} disabled={busy}>
+            <FileInput size={18} />
+            Nhận thư mục listing
+          </button>
+        </div>
       </div>
       {error && (
         <div role="alert" className="banner error">
@@ -381,6 +391,11 @@ export function Workbench({
                     <strong className="workbench-ready">Đã đọc lại và đối chiếu</strong>
                     <small>Sandbox · Kiểm duyệt Shopee chưa kiểm tra</small>
                   </>
+                ) : order.sandboxReconciliation ? (
+                  <>
+                    <strong>Đã đối chiếu trạng thái hiện tại</strong>
+                    <small>Lịch sử lần gửi được giữ nguyên · Thử phép mới tại Thử sandbox</small>
+                  </>
                 ) : order.sandboxRun &&
                   ['unknown', 'in_flight'].includes(order.sandboxRun.state) ? (
                   <>
@@ -452,11 +467,13 @@ export function Workbench({
           Shop thật giữ chế độ chỉ đọc. Khả năng thực thi được kiểm tra riêng cho từng việc.
         </span>
       </div>
+      <SavedPatchList onOpen={(id) => onUpdates(undefined, id)} />
     </div>
   );
 }
 
 function WorkOrderDetail({
+  onUpdates,
   order,
   data,
   onSaved,
@@ -466,6 +483,7 @@ function WorkOrderDetail({
   onDirty,
   onBusy,
 }: {
+  onUpdates: (workOrderId?: string, receiptId?: string) => void;
   order: WorkOrderView;
   data: WorkbenchData;
   onSaved: (order: WorkOrderView) => void;
@@ -511,6 +529,11 @@ function WorkOrderDetail({
   }
   return (
     <div className="workbench-detail">
+      <button className="primary" disabled={busy || changed} onClick={() => onUpdates(order.id)}>
+        <FileInput size={17} />
+        Nhập bộ cập nhật
+      </button>
+      <SavedPatchList workOrderId={order.id} onOpen={(id) => onUpdates(order.id, id)} />
       <button
         className="back-link"
         disabled={busy}
@@ -545,157 +568,166 @@ function WorkOrderDetail({
       )}
       <div className="workbench-detail-grid">
         <section className="workbench-settings" aria-label="Thiết lập công việc">
-          <h2>Đúng shop, đúng link, đúng phần cần đổi</h2>
+          <h2>Thông tin công việc</h2>
+          <p>
+            Để thay giá, tồn, Word hoặc ảnh, dùng “Nhập bộ cập nhật”. Chỉ mở thiết lập nâng cao khi
+            cần đổi liên kết công việc.
+          </p>
           {recoveryRequired && (
             <p className="context-note">
               Link này có lần ghi chưa xác định kết quả. Đọc lại và đối chiếu ở phía dưới trước khi
               đổi cấu hình công việc.
             </p>
           )}
-          <fieldset disabled={busy || recoveryRequired}>
-            <div className="workbench-form-grid">
-              <label>
-                Shop đích
-                <select
-                  value={config.connectionId ?? ''}
-                  aria-label="Shop đích"
-                  onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      connectionId: event.target.value || null,
-                      itemId: null,
-                      stocks: {},
-                    })
-                  }
-                >
-                  <option value="">Chọn shop</option>
-                  {data.shops.map((shop) => (
-                    <option key={shop.id} value={shop.id}>
-                      {shop.name} ·{' '}
-                      {shop.scope.environment === 'sandbox' ? 'SANDBOX' : 'SHOP THẬT / CHỈ ĐỌC'} ·{' '}
-                      {shop.scope.shopId}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Công việc
-                <select
-                  aria-label="Loại công việc"
-                  value={config.operation}
-                  onChange={(event) =>
-                    setConfig({
-                      ...config,
-                      operation: event.target.value as 'create' | 'update',
-                      itemId: null,
-                    })
-                  }
-                >
-                  <option value="update">Cập nhật link đã có</option>
-                  <option value="create">Đăng link mới</option>
-                </select>
-              </label>
-            </div>
-            {config.operation === 'update' && (
-              <label>
-                Mã sản phẩm trên Shopee
-                <input
-                  aria-label="Mã sản phẩm trên Shopee"
-                  inputMode="numeric"
-                  value={config.itemId ?? ''}
-                  onChange={(event) => setConfig({ ...config, itemId: event.target.value || null })}
-                  placeholder="Nhập đúng mã của link cần cập nhật"
-                />
-                <small>Không tự tìm link dựa trên tên hoặc SKU.</small>
-              </label>
-            )}
-            {order.latestSourceRevision !== order.config.sourceRevision && (
-              <div className="banner">
-                <p>
-                  Bộ nguồn đã có bản {order.latestSourceRevision}. Công việc vẫn đang dùng bản{' '}
-                  {order.config.sourceRevision}.
-                </p>
-                <button
-                  onClick={() =>
-                    setConfig({ ...config, sourceRevision: order.latestSourceRevision })
-                  }
-                >
-                  Chọn bản nguồn {order.latestSourceRevision}
-                </button>
-              </div>
-            )}
-            <fieldset className="workbench-field-mask">
-              <legend>Những phần được phép thay đổi</legend>
-              <p className="caption">
-                Chọn đúng yêu cầu. Khả năng gửi thực tế được kiểm tra bên dưới.
-              </p>
-              {fields.map((field) => (
-                <label key={field}>
-                  <input
-                    type="checkbox"
-                    checked={config.fieldMask.includes(field)}
+          <details className="patch-advanced">
+            <summary>Thiết lập nâng cao / cách nhập thủ công</summary>
+            <fieldset disabled={busy || recoveryRequired}>
+              <div className="workbench-form-grid">
+                <label>
+                  Shop đích
+                  <select
+                    value={config.connectionId ?? ''}
+                    aria-label="Shop đích"
                     onChange={(event) =>
                       setConfig({
                         ...config,
-                        fieldMask: event.target.checked
-                          ? [...config.fieldMask, field]
-                          : config.fieldMask.filter((value) => value !== field),
+                        connectionId: event.target.value || null,
+                        itemId: null,
+                        stocks: {},
                       })
                     }
-                  />
-                  {fieldLabels[field]}
+                  >
+                    <option value="">Chọn shop</option>
+                    {data.shops.map((shop) => (
+                      <option key={shop.id} value={shop.id}>
+                        {shop.name} ·{' '}
+                        {shop.scope.environment === 'sandbox' ? 'SANDBOX' : 'SHOP THẬT / CHỈ ĐỌC'} ·{' '}
+                        {shop.scope.shopId}
+                      </option>
+                    ))}
+                  </select>
                 </label>
-              ))}
-            </fieldset>
-            {config.fieldMask.includes('stock') && (
-              <fieldset className="workbench-stocks">
-                <legend>Tồn đăng bán do shop quyết định</legend>
+                <label>
+                  Công việc
+                  <select
+                    aria-label="Loại công việc"
+                    value={config.operation}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operation: event.target.value as 'create' | 'update',
+                        itemId: null,
+                      })
+                    }
+                  >
+                    <option value="update">Cập nhật link đã có</option>
+                    <option value="create">Đăng link mới</option>
+                  </select>
+                </label>
+              </div>
+              {config.operation === 'update' && (
+                <label>
+                  Mã sản phẩm trên Shopee
+                  <input
+                    aria-label="Mã sản phẩm trên Shopee"
+                    inputMode="numeric"
+                    value={config.itemId ?? ''}
+                    onChange={(event) =>
+                      setConfig({ ...config, itemId: event.target.value || null })
+                    }
+                    placeholder="Nhập đúng mã của link cần cập nhật"
+                  />
+                  <small>Không tự tìm link dựa trên tên hoặc SKU.</small>
+                </label>
+              )}
+              {order.latestSourceRevision !== order.config.sourceRevision && (
+                <div className="banner">
+                  <p>
+                    Bộ nguồn đã có bản {order.latestSourceRevision}. Công việc vẫn đang dùng bản{' '}
+                    {order.config.sourceRevision}.
+                  </p>
+                  <button
+                    onClick={() =>
+                      setConfig({ ...config, sourceRevision: order.latestSourceRevision })
+                    }
+                  >
+                    Chọn bản nguồn {order.latestSourceRevision}
+                  </button>
+                </div>
+              )}
+              <fieldset className="workbench-field-mask">
+                <legend>Những phần được phép thay đổi</legend>
                 <p className="caption">
-                  Để trống nếu chưa xác nhận. Nhập 0 chỉ khi chủ động ngừng bán SKU đó.
+                  Chọn đúng yêu cầu. Khả năng gửi thực tế được kiểm tra bên dưới.
                 </p>
-                {order.source.variants.map((variant) => (
-                  <label key={variant.key}>
-                    <span>
-                      {variant.optionLabels.join(' / ') || variant.sku.value}
-                      <small>{variant.sku.value}</small>
-                    </span>
+                {fields.map((field) => (
+                  <label key={field}>
                     <input
-                      aria-label={`Tồn đăng bán ${variant.sku.value}`}
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={config.stocks[variant.sku.value] ?? ''}
-                      onChange={(event) => {
-                        const stocks = { ...config.stocks };
-                        if (event.target.value === '') delete stocks[variant.sku.value];
-                        else stocks[variant.sku.value] = Number(event.target.value);
-                        setConfig({ ...config, stocks });
-                      }}
+                      type="checkbox"
+                      checked={config.fieldMask.includes(field)}
+                      onChange={(event) =>
+                        setConfig({
+                          ...config,
+                          fieldMask: event.target.checked
+                            ? [...config.fieldMask, field]
+                            : config.fieldMask.filter((value) => value !== field),
+                        })
+                      }
                     />
+                    {fieldLabels[field]}
                   </label>
                 ))}
               </fieldset>
-            )}
-          </fieldset>
-          <div className="workbench-save">
-            <button
-              className="primary"
-              disabled={busy || recoveryRequired || !changed}
-              onClick={() => void save()}
-            >
-              {busy ? 'Đang lưu…' : 'Lưu lựa chọn công việc'}
-            </button>
-            <span>
-              {changed ? (
-                'Có lựa chọn chưa lưu'
-              ) : (
-                <>
-                  <Check size={15} />
-                  Đã lưu trong ứng dụng
-                </>
+              {config.fieldMask.includes('stock') && (
+                <fieldset className="workbench-stocks">
+                  <legend>Tồn đăng bán do shop quyết định</legend>
+                  <p className="caption">
+                    Để trống nếu chưa xác nhận. Nhập 0 chỉ khi chủ động ngừng bán SKU đó.
+                  </p>
+                  {order.source.variants.map((variant) => (
+                    <label key={variant.key}>
+                      <span>
+                        {variant.optionLabels.join(' / ') || variant.sku.value}
+                        <small>{variant.sku.value}</small>
+                      </span>
+                      <input
+                        aria-label={`Tồn đăng bán ${variant.sku.value}`}
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={config.stocks[variant.sku.value] ?? ''}
+                        onChange={(event) => {
+                          const stocks = { ...config.stocks };
+                          if (event.target.value === '') delete stocks[variant.sku.value];
+                          else stocks[variant.sku.value] = Number(event.target.value);
+                          setConfig({ ...config, stocks });
+                        }}
+                      />
+                    </label>
+                  ))}
+                </fieldset>
               )}
-            </span>
-          </div>
+            </fieldset>
+            <div className="workbench-save">
+              <button
+                className="primary"
+                disabled={busy || recoveryRequired || !changed}
+                onClick={() => void save()}
+              >
+                {busy ? 'Đang lưu…' : 'Lưu lựa chọn công việc'}
+              </button>
+              <span>
+                {changed ? (
+                  'Có lựa chọn chưa lưu'
+                ) : (
+                  <>
+                    <Check size={15} />
+                    Đã lưu trong ứng dụng
+                  </>
+                )}
+              </span>
+            </div>
+          </details>
         </section>
         <aside className="workbench-exceptions" aria-label="Những việc cần xử lý">
           <h2>Việc cần xử lý</h2>

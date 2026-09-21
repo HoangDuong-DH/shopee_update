@@ -1,5 +1,7 @@
 import { api, type ImportRecord } from './api.js';
 import type { UploadedFolderFile } from './folder-source.js';
+import { folderManifestSchema } from '../../../packages/domain/src/folder-manifest.js';
+import { readPendingListingMapping } from './pending-listing-mapping.js';
 
 export type FolderReadProgress = { completed: number; total: number; filename?: string };
 type ReaderOptions = {
@@ -87,6 +89,33 @@ export function createFolderReader(options: ReaderOptions = {}) {
           sha = Array.from(new Uint8Array(digest), (value) =>
             value.toString(16).padStart(2, '0'),
           ).join('');
+          if (file.name === 'listing-mapping.pending.json') {
+            if (file.size > 5_000_000) throw new Error('Hồ sơ phân loại vượt 5 MB.');
+            const pendingMapping = readPendingListingMapping(
+              new TextDecoder('utf-8', { fatal: true })
+                .decode(await file.arrayBuffer())
+                .replace(/^\uFEFF/, ''),
+              { relativePath, sha256: sha },
+            );
+            output[index] = { relativePath, sha256: sha, record: null, pendingMapping };
+            continue;
+          }
+          if (file.name === 'listing-source.json') {
+            if (file.size > 2 * 1024 * 1024) throw new Error('Hồ sơ phân loại vượt 2 MB.');
+            const manifest = folderManifestSchema.safeParse(
+              JSON.parse(
+                new TextDecoder('utf-8', { fatal: true })
+                  .decode(await file.arrayBuffer())
+                  .replace(/^\uFEFF/, ''),
+              ),
+            );
+            if (!manifest.success)
+              throw new Error(
+                'Hồ sơ listing-source.json chưa hợp lệ. Giữ tệp gốc và kiểm tra cấu trúc phân loại, đường dẫn ảnh.',
+              );
+            output[index] = { relativePath, sha256: sha, record: null, manifest: manifest.data };
+            continue;
+          }
           if (!/\.(docx|xlsx|png|jpe?g|webp)$/i.test(file.name))
             throw new Error('Loại tệp này chưa hỗ trợ. Giữ trong thư mục gốc để đối chiếu.');
           const record = await receive(file, sha);

@@ -4,3 +4,8 @@ export * from './blob-store.js';
 export * from './input-library.js';
 export * from './work-orders.js';
 export * from './sandbox-create-trials.js';
+export * from './import-patches.js';
+export * from './connection-names.js';
+export * from './source-catalogs.js';
+export * from './source-catalog-evidence.js';
+export * from './local-archives.js';

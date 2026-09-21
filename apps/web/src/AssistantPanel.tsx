@@ -3,6 +3,7 @@ import type { ChangePlan, Issue, Scope } from '@shopee/domain';
 import type { KnowledgeHit, KnowledgeSource, TraceEvent } from '@shopee/agent-runtime';
 import { api, date, post } from './api.js';
 import { Issues } from './Preview.js';
+import { SellerKnowledgePanel } from './SellerKnowledgePanel.js';
 
 type Review = {
   id: string;
@@ -156,6 +157,7 @@ export function AssistantPanel({ plans }: { plans: ChangePlan[] }) {
         </div>
         <span className="tag neutral">Kiểm tra bằng chương trình</span>
       </div>
+      <SellerKnowledgePanel />
       <div className="note">
         <strong>Giữ nguyên listing bạn đã chuẩn bị</strong>
         <p>

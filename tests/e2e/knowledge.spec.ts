@@ -1,10 +1,11 @@
+import { openWorkspaceTool } from './workspace-navigation.js';
 import { test, expect } from '@playwright/test';
 // Local KB acceptance: search/read only; creates no product, review, or Shopee write.
 test('searches the actual KB and opens a full source without treating it as a current shop rule', async ({
   page,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tra cứu & kiểm tra', exact: true }).click();
+  await openWorkspaceTool(page, 'Tra cứu & kiểm tra');
   await page.getByLabel('Từ khóa tài liệu').fill('get_attribute_tree');
   await page.getByRole('button', { name: 'Tìm tài liệu', exact: true }).click();
   await expect(page.getByTestId('knowledge-hit').first()).toBeVisible();

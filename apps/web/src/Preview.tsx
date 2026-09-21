@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ChangePlan, ListingDraft, ShopConnection } from '@shopee/domain';
+import { sourceListingIntent } from '../../../packages/domain/src/source-catalog.js';
 import { media, money, post } from './api.js';
 export function Issues({ issues }: { issues: ListingDraft['issues'] }) {
   return (
@@ -20,13 +21,18 @@ export function Preview({
   onEdit,
   onPlan,
   onBusy,
+  onProduction,
+  onUpdates,
 }: {
   draft: ListingDraft;
   shops: ShopConnection[];
   onEdit: (section?: 'content' | 'images' | 'structure') => void;
   onPlan: (p: ChangePlan) => void;
   onBusy?: (busy: boolean) => void;
+  onProduction?: () => void;
+  onUpdates?: () => void;
 }) {
+  const sourceIntent = sourceListingIntent(draft.sourceListingId?.value);
   const [active, setActive] = useState(draft.coverKey),
     [shop, setShop] = useState(''),
     [busy, setBusy] = useState(false),
@@ -128,12 +134,23 @@ export function Preview({
           </div>
         )}
         <div className="application-limit">
-          <strong>Chưa hỗ trợ trong ứng dụng</strong>
+          {sourceIntent.kind === 'update' ? <>
+            <strong>Cập nhật link đã có: {sourceIntent.itemId}</strong>
+            <p>Bộ nguồn có ID listing. Chọn đúng shop và các phần muốn thay trong Cập nhật listing;
+              hệ thống không dùng bộ này để tạo link mới. Việc lưu bộ cập nhật chưa gửi lên Shopee.</p>
+            {onUpdates && <button disabled={busy} onClick={onUpdates}>Mở Cập nhật listing</button>}
+          </> : sourceIntent.kind === 'invalid' ? <>
+            <strong>ID listing trong nguồn chưa hợp lệ</strong>
+            <p>Kiểm tra lại ID của link cần cập nhật. Hệ thống không tự chuyển thành đăng mới.</p>
+          </> : <>
+          <strong>Tiếp tục đăng qua API</strong>
           <p>
-            Chọn và kiểm tra ngành/thuộc tính theo shop, nhập tồn đăng bán và vận chuyển, gửi lên
-            Shopee và đọc lại kết quả đang được hoàn thiện. Hiện tại bạn có thể lưu, đối chiếu và
-            sửa nội dung hoặc ảnh của bộ nguồn.
+            Màn hình này dùng để xem và sửa bộ nguồn. Vào Đăng hàng để xem đợt đang làm,
+            kiểm tra ngành, giá, tồn và vận chuyển, rồi tự bấm gửi qua API.
+            Nếu bộ đã nằm trong một đợt, tiếp tục đợt đó để tránh đăng trùng.
           </p>
+          {onProduction && <button disabled={busy} onClick={onProduction}>Mở đợt đăng qua API</button>}
+          </>}
         </div>
       </section>
       <div className="preview-layout">
@@ -207,10 +224,10 @@ export function Preview({
             </table>
           </div>
           <div className="target">
-            <h3>Kiểm tra theo shop</h3>
+            <h3>Lưu bản kiểm tra nội bộ (luồng cũ)</h3>
             <p className="caption">
-              Chọn rõ shop để lưu một bản kiểm tra nội bộ cho luồng đăng mới. Cập nhật link đang có
-              cần đối chiếu mã sản phẩm trên Shopee; bước đó chưa mở.
+              Chỉ lưu một bản kiểm tra gắn với shop. Nút này không đăng sản phẩm và không đưa
+              sản phẩm vào đợt đăng API. Dùng mục Đăng hàng để thực hiện đăng.
             </p>
             <label>
               Shop đích
@@ -270,7 +287,7 @@ export function Preview({
           </div>
           <div>
             <dt>Đăng / cập nhật / QC</dt>
-            <dd>Chưa có bộ thực thi và đối chiếu kết quả Shopee trong ứng dụng.</dd>
+            <dd>Xem biên nhận và kết quả đọc lại trong đợt Đăng hàng. Bản xem nguồn này chưa phải kết quả trên Shopee.</dd>
           </div>
         </dl>
       </details>

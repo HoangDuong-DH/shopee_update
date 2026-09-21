@@ -137,6 +137,7 @@ async function fixture(page: Page, initial = [order()]) {
       path = new URL(request.url()).pathname;
     const write = request.method() === 'POST';
     const body = write ? request.postDataJSON() : null;
+    if (path === '/v1/import-patches' && !write) return route.fulfill({ json: [] });
     if (write) writes.push({ path, body });
     if (path === '/v1/workbench' && !write)
       return route.fulfill({
@@ -321,6 +322,10 @@ test('fixture: workbench starts with concrete exceptions and stays usable on mob
   ];
   const state = await fixture(page, [order(baseConfig, issues)]);
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await expect(
     page.getByRole('heading', { name: 'Công việc đăng hàng', exact: true }),
   ).toBeVisible();
@@ -339,6 +344,7 @@ test('fixture: workbench starts with concrete exceptions and stays usable on mob
     fullPage: true,
   });
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Cần xác định cách ghép', exact: true }),
   ).toBeVisible();
@@ -353,6 +359,10 @@ test('fixture: select prepared sources and explicit shop creates separate work o
 }) => {
   const state = await fixture(page, []);
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Chọn bộ đã có', exact: true }).first().click();
   const form = page.getByRole('region', { name: 'Tạo công việc từ bộ đã có' });
   await expect(form.getByRole('button', { name: /Lưu .*công việc/ })).toBeDisabled();
@@ -379,7 +389,12 @@ test('fixture: blank stock remains undecided and explicit zero survives a failed
 }) => {
   const state = await fixture(page);
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('checkbox', { name: 'Tồn đăng bán', exact: true }).check();
   const stock = page.getByLabel('Tồn đăng bán TEST-SKU-0', { exact: true });
   await expect(stock).toHaveValue('');
@@ -401,7 +416,12 @@ test('fixture: sandbox flow selects fields, previews exact changes, and reconcil
   const state = await fixture(page);
   state.unknownExecution();
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
   await expect(page.getByText('Tiêu đề cũ trên sandbox', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Xem trước những phần sẽ đổi', exact: true }).click();
@@ -421,7 +441,12 @@ test('fixture: sandbox flow selects fields, previews exact changes, and reconcil
   await expect(page.getByLabel('Mã sản phẩm trên Shopee', { exact: true })).toBeDisabled();
   await page.evaluate(() => localStorage.clear());
   await page.reload();
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Chưa xác định kết quả ghi', exact: true }),
   ).toBeVisible();
@@ -457,7 +482,12 @@ test('fixture: sandbox flow selects fields, previews exact changes, and reconcil
 test('fixture: production task cannot enter sandbox execution', async ({ page }) => {
   const state = await fixture(page, [order({ ...baseConfig, connectionId: production.id })]);
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(
     page.getByText('Shop thật hiện chỉ đọc; chưa mở gửi thay đổi trong luồng này.', {
       exact: true,
@@ -474,7 +504,12 @@ test('fixture: changing shop clears item binding and manually declared stock', a
     order({ ...baseConfig, fieldMask: ['stock'], stocks: { 'TEST-SKU-0': 87 } }),
   ]);
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(page.getByLabel('Tồn đăng bán TEST-SKU-0', { exact: true })).toHaveValue('87');
   await page.getByLabel('Shop đích', { exact: true }).selectOption(production.id);
   await expect(page.getByLabel('Tồn đăng bán TEST-SKU-0', { exact: true })).toHaveValue('');
@@ -488,7 +523,12 @@ test('fixture: lost execution response locks changes until reading the server re
   const state = await fixture(page);
   state.loseExecuteReply();
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
   await page.getByRole('button', { name: 'Xem trước những phần sẽ đổi', exact: true }).click();
   await page
@@ -522,7 +562,12 @@ test('fixture: a terminal drift allows a new read and a new immutable preparatio
   const state = await fixture(page);
   state.driftExecution();
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
   await page.getByRole('button', { name: 'Xem trước những phần sẽ đổi', exact: true }).click();
   await page
@@ -556,7 +601,12 @@ test('fixture: definitive baseline rejection discards stale preparation before a
   const state = await fixture(page);
   state.failPrepareOnce();
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
+  await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
   await page.getByRole('button', { name: 'Xem trước những phần sẽ đổi', exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
@@ -646,6 +696,10 @@ test('fixture: opens exported handoff, compares source version, then applies exa
     return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
   });
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Nhập / xuất hồ sơ', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Bộ listing đã lưu', exact: true })
@@ -692,6 +746,10 @@ test('fixture: importing a handoff does not apply changes before reviewing and h
     return route.fulfill({ status: 409, json: { code: 'HANDOFF_SOURCE_MISMATCH' } });
   });
   await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Điều hướng chính' })
+    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Nhập / xuất hồ sơ', exact: true }).click();
   await page.locator('.handoff-receive input[type="file"]').setInputFiles({
     name: 'listing-fixture.json',

@@ -9,6 +9,8 @@ test-results/
 .local/
 .worktrees/
 .cache/
+.claude/
+output/
 *.log
 *.tsbuildinfo
 # Local knowledge snapshots and private operational/source evidence stay on this machine.

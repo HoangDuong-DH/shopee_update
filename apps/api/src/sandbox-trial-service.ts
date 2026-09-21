@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { Repository, BlobStore, SandboxCreateTrialStore } from '@shopee/persistence';
+import {
+  Repository,
+  BlobStore,
+  SandboxCreateTrialStore,
+  transaction,
+  lockSandboxMutationLane,
+  sandboxMutationLaneBusy,
+} from '@shopee/persistence';
 import {
   SandboxCreateClient,
   SandboxProductClient,
@@ -190,10 +197,25 @@ export class SandboxTrialService {
     const input = trialPreparationInput.parse(raw);
     await this.context(input);
     const preparationId = randomUUID();
-    const added = await this.repo.pool.query(
-      `INSERT INTO sandbox_trial_preparations(id,trial_key,connection_id,connection_revision,input,state) VALUES($1,$2,$3,$4,$5,'preparing') ON CONFLICT(trial_key) DO NOTHING RETURNING id`,
-      [preparationId, input.trialKey, input.connectionId, input.connectionRevision, input],
-    );
+    const added = await transaction(this.repo.pool, async (c) => {
+      const ownerKey = 'sandbox:1232297:227418363';
+      await lockSandboxMutationLane(c, ownerKey);
+      // Replaying an existing preparation may read its receipt even while its
+      // unresolved upload reserves the lane. It never uploads again.
+      if (
+        (
+          await c.query('SELECT 1 FROM sandbox_trial_preparations WHERE trial_key=$1', [
+            input.trialKey,
+          ])
+        ).rowCount
+      )
+        return { rowCount: 0 };
+      if (await sandboxMutationLaneBusy(c, ownerKey)) throw new Error('SANDBOX_TRIAL_SHOP_BUSY');
+      return c.query(
+        `INSERT INTO sandbox_trial_preparations(id,trial_key,connection_id,connection_revision,input,state) VALUES($1,$2,$3,$4,$5,'preparing') ON CONFLICT(trial_key) DO NOTHING RETURNING id`,
+        [preparationId, input.trialKey, input.connectionId, input.connectionRevision, input],
+      );
+    });
     if (!added.rowCount) {
       const old = (
         await this.repo.pool.query(

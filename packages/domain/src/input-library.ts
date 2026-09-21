@@ -1,3 +1,5 @@
+import type { StoredFolderManifest } from './folder-manifest.js';
+import type { PendingListingMapping } from './pending-listing-mapping.js';
 export type InputPriceSelection = {
   importId: string;
   sheet: string;
@@ -31,6 +33,8 @@ export type InputBatchState = {
     paragraphSeparator: '\n' | '\n\n';
   } | null;
   productKeys: Record<string, string>;
+  manifests?: Record<string, StoredFolderManifest>;
+  pendingMappings?: Record<string, PendingListingMapping>;
 };
 
 export type InputBatchRecord = {

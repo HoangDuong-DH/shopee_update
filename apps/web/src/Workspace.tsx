@@ -23,6 +23,8 @@ import { Issues, Preview } from './Preview.js';
 import { Resources } from './Resources.js';
 import { ListingImport } from './ListingImport.js';
 import { ConnectionForm } from './ConnectionForm.js';
+import { ProductionConnectionForm } from './ProductionConnectionForm.js';
+import { ShopNameEditor } from './ShopNameEditor.js';
 import { AssistantPanel } from './AssistantPanel.js';
 import { useFileUploads } from './useFileUploads.js';
 import { clearIntakeRecovery } from './intake-state.js';
@@ -32,8 +34,21 @@ import { createFolderReader } from './folder-reader.js';
 import { newIntakeDraft, type IntakeDraft } from './intake-state.js';
 import { Workbench } from './Workbench.js';
 import { HandoffIntake } from './HandoffIntake.js';
+import { ImportUpdates } from './ImportUpdates.js';
+import { PreparedBatch } from './PreparedBatch.js';
+import { ProductionPilot } from './ProductionPilot.js';
+import { ProductionBatches } from './ProductionBatches.js';
+import { ProductionPreparation } from './ProductionPreparation.js';
+import { ImageQuality } from './ImageQuality.js';
+import { SandboxTryout } from './SandboxTryout.js';
+import { SourceCatalog } from './SourceCatalog.js';
+import { ArchiveAction, LifecycleFilter, type Lifecycle, type ArchiveFlags } from './LocalArchive.js';
 type Page =
+  | 'sandbox-tryout'
+  | 'image-qc'
+  | 'prepared-batches'
   | 'workbench'
+  | 'updates'
   | 'handoff'
   | 'products'
   | 'sources'
@@ -46,12 +61,48 @@ type Page =
   | 'guide'
   | 'folder';
 const navigation = [
-  { id: 'workbench', label: 'Công việc đăng hàng', icon: CheckCheck },
-  { id: 'products', label: 'Listing của tôi', icon: LayoutList },
-  { id: 'sources', label: 'Kho đầu vào', icon: Files },
+  { id: 'sources', label: 'Kho listing', icon: Files },
+  { id: 'prepared-batches', label: 'Đăng hàng', icon: Plus },
+  { id: 'updates', label: 'Cập nhật listing', icon: LayoutList },
+  { id: 'workbench', label: 'Theo dõi công việc', icon: CheckCheck },
 ] as const;
+const secondaryNavigation = [
+  { id: 'products', label: 'Listing của tôi', icon: LayoutList },
+  { id: 'image-qc', label: 'Kiểm tra ảnh', icon: CheckCheck },
+  { id: 'sandbox-tryout', label: 'Thử sandbox', icon: CheckCheck },
+  { id: 'shops', label: 'Kết nối shop', icon: Store },
+  { id: 'guide', label: 'Hướng dẫn sử dụng', icon: CircleHelp },
+  { id: 'assistant', label: 'Tra cứu & kiểm tra', icon: BookOpen },
+] as const;
+function restoredPage(): Page {
+  try {
+    if(new URLSearchParams(window.location.search).get('page')==='shops')return 'shops';
+    const value = sessionStorage.getItem('workspace-page');
+    const restorable = [...navigation, ...secondaryNavigation].map(item => item.id as string);
+    return value && restorable.includes(value) ? value as Page : 'sources';
+  } catch { return 'sources'; }
+}
+function applyWorkspaceReset(status: { workspaceResetId?: string }) {
+  if (!status.workspaceResetId) return false;
+  if (localStorage.getItem('workspace-reset-applied') === status.workspaceResetId) return false;
+  sessionStorage.clear();
+  localStorage.clear();
+  localStorage.setItem('workspace-reset-applied', status.workspaceResetId);
+  window.location.reload();
+  return true;
+}
+function restoredProductionView(): 'working' | 'new' {
+  try { return sessionStorage.getItem('workspace-production-view') === 'new' ? 'new' : 'working'; }
+  catch { return 'working'; }
+}
+function PreviousProductionResults() {
+  const [open, setOpen] = useState(false);
+  return <details className="production-batch-history" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>Kết quả đợt đăng trước</summary>{open && <ProductionPilot />}
+  </details>;
+}
 export default function Workspace() {
-  const [page, setPage] = useState<Page>('workbench'),
+  const [page, setPage] = useState<Page>(restoredPage),
     [imports, setImports] = useState<ImportRecord[]>([]),
     [products, setProducts] = useState<ListingDraft[]>([]),
     [shops, setShops] = useState<ShopConnection[]>([]),
@@ -82,7 +133,41 @@ export default function Workspace() {
     [folderManualDraft, setFolderManualDraft] = useState<IntakeDraft | undefined>(),
     [editorOrigin, setEditorOrigin] = useState<'import' | 'folder'>('import'),
     [pendingPage, setPendingPage] = useState<Page | null>(null);
+  const [patchTarget, setPatchTarget] = useState<string | undefined>();
+  const [patchReceipt, setPatchReceipt] = useState<string | undefined>();
+  const [patchInstance, setPatchInstance] = useState(0);
+  const [sourceMode, setSourceMode] = useState<'catalog' | 'intake'>('catalog');
+  const [productLifecycle, setProductLifecycle] = useState<Lifecycle>('active');
+  const [archivedProducts, setArchivedProducts] = useState<ListingDraft[]>([]);
+  const [archiveReload, setArchiveReload] = useState(0);
+  const [archiveReadError, setArchiveReadError] = useState('');
+  const [intakeSessionNotice, setIntakeSessionNotice] = useState('');
+  const [showLegacyPrepared, setShowLegacyPrepared] = useState(false);
+  const [productionBatchVersion,setProductionBatchVersion]=useState(0);
+  const [productionView,setProductionView]=useState<'working'|'new'>(restoredProductionView);
+  const [productionShopKey,setProductionShopKey]=useState(()=>{
+    try{return sessionStorage.getItem('production-target-shop-v1') ?? '';}catch{return '';}
+  });
+  const toolsDisclosure = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (toolsDisclosure.current) toolsDisclosure.current.open = false;
+    try {
+      sessionStorage.setItem('workspace-page', page);
+      sessionStorage.setItem('workspace-production-view', productionView);
+    } catch { /* Navigation still works if storage is unavailable. */ }
+  }, [page, productionView]);
+  const productionShops=shops.filter(shop=>shop.scope.environment==='production' && shop.state==='connected');
+  const selectedProductionShop=productionShops.find(shop=>`${shop.scope.partnerId}:${shop.scope.shopId}`===productionShopKey) ?? productionShops[0];
+  const selectedProductionScope=selectedProductionShop ? {environment:'production' as const,partnerId:selectedProductionShop.scope.partnerId,shopId:selectedProductionShop.scope.shopId} : null;
+  useEffect(()=>{
+    if(!selectedProductionShop)return;
+    const key=`${selectedProductionShop.scope.partnerId}:${selectedProductionShop.scope.shopId}`;
+    if(key!==productionShopKey)setProductionShopKey(key);
+    try{sessionStorage.setItem('production-target-shop-v1',key);}catch{}
+  },[selectedProductionShop?.id,productionShopKey]);
   const refreshing = useRef(false);
+  const livePage = useRef(page);
+  livePage.current = page;
   const openingBatchRef = useRef(false);
   const importsRef = useRef(imports);
   importsRef.current = imports;
@@ -90,29 +175,33 @@ export default function Workspace() {
   const editorUploadGuard = useRef(false);
   if (!folderReader.current)
     folderReader.current = createFolderReader({ known: () => importsRef.current });
+  function mergeImports(rows: (ImportRecord & ArchiveFlags)[]) {
+    setImports(current => {
+      const merged = new Map(current.map(item => [item.id, item]));
+      for (const item of rows) {
+        const previous = merged.get(item.id);
+        // Keep newly received bodies and never regress a completed parser result.
+        if (previous?.status === 'ready' && ['queued', 'running'].includes(item.status)) continue;
+        merged.set(item.id, { ...item, body: item.body ?? previous?.body });
+      }
+      return [...merged.values()].filter(item => !(item as ImportRecord & ArchiveFlags).archived);
+    });
+  }
   async function refresh() {
     if (refreshing.current) return;
     refreshing.current = true;
     try {
+      const options = { signal: AbortSignal.timeout(30_000) };
       const [a, b, c, d, e, f] = await Promise.all([
-        api<ImportRecord[]>('/v1/imports'),
-        api<ListingDraft[]>('/v1/products'),
-        api<ShopConnection[]>('/v1/shops'),
-        api<ChangePlan[]>('/v1/plans'),
-        api<JobRecord[]>('/v1/jobs'),
-        api<{ worker: string }>('/v1/status'),
+        api<(ImportRecord & ArchiveFlags)[]>('/v1/imports?lifecycle=all', options),
+        api<ListingDraft[]>('/v1/products', options),
+        api<ShopConnection[]>('/v1/shops', options),
+        api<ChangePlan[]>('/v1/plans', options),
+        api<JobRecord[]>('/v1/jobs', options),
+        api<{ worker: string; workspaceResetId?: string }>('/v1/status', options),
       ]);
-      setImports((current) => {
-        const merged = new Map(current.map((item) => [item.id, item]));
-        for (const item of a) {
-          const previous = merged.get(item.id);
-          // Import identities are immutable. An older list request must not erase files
-          // received during that request, or drop their parsed bodies at editor handoff.
-          if (previous?.status === 'ready' && ['queued', 'running'].includes(item.status)) continue;
-          merged.set(item.id, { ...item, body: item.body ?? previous?.body });
-        }
-        return [...merged.values()];
-      });
+      if (applyWorkspaceReset(f)) return;
+      mergeImports(a);
       setProducts(b);
       setShops(c);
       setPlans(d);
@@ -133,9 +222,48 @@ export default function Workspace() {
   } = useFileUploads(refresh, saveBusy || folderBusy);
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
-    return () => clearInterval(timer);
+  }, [page]);
+  useEffect(() => {
+    // Large immutable sources refresh on navigation/mutation, never on a heartbeat.
+    // Imports only need polling while the parser is actually working.
+    let polling = false;
+    const controller = new AbortController();
+    const poll = async () => {
+      if (polling || refreshing.current || document.visibilityState === 'hidden') return;
+      polling = true;
+      try {
+        const options = { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) };
+        if (importsRef.current.some(item => ['queued', 'running'].includes(item.status))) {
+          const nextImports = await api<(ImportRecord & ArchiveFlags)[]>('/v1/imports?lifecycle=all', options);
+          if (!controller.signal.aborted) mergeImports(nextImports);
+        }
+        const next = await api<{ worker: string; workspaceResetId?: string }>('/v1/status', options);
+        if (controller.signal.aborted) return;
+        if (applyWorkspaceReset(next)) return;
+        setStatus(previous => previous?.worker === next.worker ? previous : next);
+        if (livePage.current === 'results') {
+          const nextJobs = await api<JobRecord[]>('/v1/jobs', options);
+          if (!controller.signal.aborted) setJobs(nextJobs);
+        }
+      } catch {
+        if (!controller.signal.aborted) setStatus(null);
+      } finally {
+        polling = false;
+      }
+    };
+    const timer = setInterval(() => void poll(), 5000);
+    return () => { clearInterval(timer); controller.abort(); };
   }, []);
+  useEffect(() => {
+    if (page !== 'products' || productLifecycle !== 'archived') return;
+    const controller = new AbortController();
+    setArchiveReadError('');
+    void api<ListingDraft[]>('/v1/products?lifecycle=archived', { signal: controller.signal })
+      .then((rows) => { if (!controller.signal.aborted) setArchivedProducts(rows); })
+      .catch((cause) => { if (!controller.signal.aborted) setArchiveReadError((cause as Error).message); });
+    return () => controller.abort();
+  }, [page, productLifecycle, archiveReload]);
+  function productArchiveChanged() { void refresh(); setArchiveReload((value) => value + 1); }
   useEffect(() => {
     if (!dirty && !uploadBusy && !saveBusy && !folderBusy && !folderDirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -178,6 +306,27 @@ export default function Workspace() {
     setError('');
     setPage('folder');
     window.scrollTo(0, 0);
+  }
+  function startFreshIntakeSession() {
+    if (saveBusy || uploadBusy || folderBusy || openingBatchRef.current) return;
+    if (dirty || folderDirty) {
+      setError('Còn thay đổi chưa lưu. Lưu hoặc bỏ thay đổi ở màn đang làm trước khi bắt đầu phiên nhập mới.');
+      return;
+    }
+    setIntakeSessionNotice('');
+    try {
+      sessionStorage.removeItem('shopee:prepared-intake:v1');
+      sessionStorage.removeItem('production-preparation-working-copy-v1');
+    } catch {
+      setError('Trình duyệt chưa cho phép bỏ lựa chọn tạm. Kiểm tra quyền lưu trữ rồi thử lại.');
+      return;
+    }
+    setDraft(null);
+    setEditor(null);
+    setEditorVariants([]);
+    setEditorSourceIds(null);
+    startBatch();
+    setIntakeSessionNotice('Đã bỏ lựa chọn tạm. Dữ liệu đã lưu vẫn ở kho.');
   }
   async function resumeBatch(id: string) {
     if (saveBusy || uploadBusy || folderBusy || openingBatchRef.current) return;
@@ -252,6 +401,22 @@ export default function Workspace() {
     setError('');
     window.scrollTo(0, 0);
   }
+  async function openLatestSource(key: string) {
+    try {
+      const latest = await api<ListingDraft>('/v1/products/' + encodeURIComponent(key));
+      if (!latest.sourceSelection) { open(latest); return; }
+      setPendingPage(null);
+      setDraft(latest);
+      setEditorSourceIds(null);
+      setEditor({ ...latest.sourceSelection, productKey: latest.productKey, expectedRevision: latest.revision });
+      setEditorSection('content');
+      setEditorVariants(latest.variants.map(variant => ({ sku: variant.sku.value, originalPrice: variant.originalPrice.value })));
+      setDirty(false);
+      setError('');
+      setPage('editor');
+      window.scrollTo(0, 0);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Chưa mở được nguồn mới nhất.'); }
+  }
   function edit(section: 'content' | 'images' | 'structure' = 'content') {
     if (draft?.sourceSelection) {
       setEditorSourceIds(null);
@@ -300,25 +465,24 @@ export default function Workspace() {
       setFolderBusy(false);
     }
   }
-  const displayed = products.filter(
+  const visibleProducts = productLifecycle === 'archived' ? archivedProducts : products;
+  const displayed = visibleProducts.filter(
     (p) =>
       (filter !== 'issues' || p.issues.some((i) => i.severity === 'block')) &&
       `${p.productKey} ${p.title.value} ${p.variants.map((v) => v.sku.value).join(' ')}`
         .toLocaleLowerCase('vi')
         .includes(search.toLocaleLowerCase('vi')),
   );
-  const parent = ['import', 'preview', 'editor', 'folder'].includes(page) ? 'products' : page;
+  const parent = ['import', 'preview', 'editor', 'folder', 'products'].includes(page)
+    ? 'sources'
+    : page;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#workspace-main">
         Đến nội dung chính
       </a>
-      <header className="app-header">
-        <button
-          className="app-brand"
-          onClick={() => go('workbench')}
-          aria-label="Về công việc đăng hàng"
-        >
+      <header className="app-header task-navigation">
+        <button className="app-brand" onClick={() => go('sources')} aria-label="Về kho listing">
           <span className="brand-tile">
             <LayoutList size={23} />
           </span>
@@ -340,37 +504,44 @@ export default function Workspace() {
             </button>
           ))}
         </nav>
-        <div className="header-tools">
-          <button
-            onClick={() => go('guide')}
-            aria-label="Hướng dẫn sử dụng"
-            title="Hướng dẫn sử dụng"
-          >
-            <CircleHelp size={18} />
-            <span>Hướng dẫn</span>
-          </button>
-          <button onClick={() => go('shops')} aria-current={page === 'shops' ? 'page' : undefined}>
-            <Store size={17} />
-            <span>Kết nối shop</span>
-          </button>
-          <button
-            onClick={() => go('assistant')}
-            aria-label="Tra cứu & kiểm tra"
-            title="Tra cứu & kiểm tra"
-          >
-            <BookOpen size={18} />
-          </button>
-        </div>
+        <details
+          className="workspace-tools"
+          ref={toolsDisclosure}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && toolsDisclosure.current) {
+              toolsDisclosure.current.open = false;
+              toolsDisclosure.current.querySelector('summary')?.focus();
+            }
+          }}
+        >
+          <summary>Công cụ</summary>
+          <nav aria-label="Công cụ bổ sung">
+            {secondaryNavigation.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => go(id)}
+                aria-current={page === id ? 'page' : undefined}
+              >
+                <Icon size={17} />
+                {label}
+              </button>
+            ))}
+          </nav>
+        </details>
       </header>
       <div className="environment-bar">
         <span>
           <span className={'dot ' + (status?.worker === 'online' ? 'online' : '')} />
           {status?.worker === 'online' ? 'Ứng dụng đang hoạt động' : 'Đang kiểm tra kết nối'}
         </span>
-        <span>Shop thật chỉ đọc · Thực thi sandbox theo phạm vi đã kiểm tra</span>
+        <span>{page === 'prepared-batches' ? 'Đăng qua API · Kiểm tra shop đích và bộ nguồn trên màn hình' : 'Thao tác theo phạm vi shop và bộ nguồn đã chọn'}</span>
       </div>
-      <main id="workspace-main" className="workspace-main">
+      <main
+        id="workspace-main"
+        className={'workspace-main' + (page === 'sources' ? ' source-home-main' : '')}
+      >
         {uploadProgress}
+        {intakeSessionNotice && <p role="status" className="context-note">{intakeSessionNotice}</p>}
         {folderBusy && (
           <p role="status" className="context-note">
             Đang nhận hoặc lưu đợt nhập. Giữ trang mở đến khi có xác nhận đã lưu.
@@ -449,12 +620,56 @@ export default function Workspace() {
           </div>
         ) : (
           <>
+            {page === 'prepared-batches' && <>
+              <section className="panel" aria-label="Shop đích đang chọn">
+                <label htmlFor="production-target-shop"><strong>Đăng vào shop</strong></label>
+                {selectedProductionShop ? <>
+                  <select id="production-target-shop" value={`${selectedProductionShop.scope.partnerId}:${selectedProductionShop.scope.shopId}`} onChange={event=>setProductionShopKey(event.target.value)}>
+                    {productionShops.map(shop=><option key={shop.id} value={`${shop.scope.partnerId}:${shop.scope.shopId}`}>{shop.displayName || shop.name} · Shop {shop.scope.shopId}</option>)}
+                  </select>
+                  <p className="caption">Shop đích: <strong>{selectedProductionShop.displayName || selectedProductionShop.name}</strong> · Shop ID {selectedProductionShop.scope.shopId} · Partner ID {selectedProductionShop.scope.partnerId}. Mỗi lô được khóa với shop này.</p>
+                </> : <p className="empty">Chưa có shop production đang kết nối. Mở Kết nối shop và hoàn tất cấp quyền trước khi chuẩn bị lô.</p>}
+              </section>
+              <div className="production-workflow-tabs" role="tablist" aria-label="Luồng đăng hàng">
+                <button type="button" role="tab" id="production-working-tab" aria-controls="production-working-panel" aria-selected={productionView==='working'} onClick={()=>setProductionView('working')}>Đợt đang làm</button>
+                <button type="button" role="tab" id="production-new-tab" aria-controls="production-new-panel" aria-selected={productionView==='new'} onClick={()=>setProductionView('new')}>Chuẩn bị lô mới</button>
+              </div>
+              <div id="production-working-panel" role="tabpanel" aria-labelledby="production-working-tab" hidden={productionView!=='working'}>
+                {selectedProductionScope && <ProductionBatches key={`${productionBatchVersion}:${productionShopKey}`} targetScope={selectedProductionScope} active={productionView==='working'} onImageQc={()=>go('image-qc')} onSource={key=>void openLatestSource(key)} />}
+                <PreviousProductionResults />
+              </div>
+              <div id="production-new-panel" role="tabpanel" aria-labelledby="production-new-tab" hidden={productionView!=='new'}>
+                {selectedProductionScope && <ProductionPreparation key={productionShopKey} targetScope={selectedProductionScope} onFolders={()=>startBatch()} onSource={key=>{const draft=products.find(d=>d.productKey===key);if(draft)open(draft);}} onRegistered={()=>setProductionBatchVersion(value=>value+1)} />}
+                <details className="production-pilot-legacy" onToggle={event => setShowLegacyPrepared(event.currentTarget.open)}>
+                  <summary>Công cụ chuẩn bị lô khác</summary>
+                  {showLegacyPrepared && <PreparedBatch />}
+                </details>
+              </div>
+            </>}
+            {page === 'image-qc' && <ImageQuality />}
+            {page === 'sandbox-tryout' && <SandboxTryout />}
             {page === 'workbench' && (
               <Workbench
+                onUpdates={(workOrderId, receiptId) => {
+                  setPatchTarget(workOrderId);
+                  setPatchReceipt(receiptId);
+                  setPatchInstance((value) => value + 1);
+                  go('updates');
+                }}
                 onReceive={() => go('handoff')}
                 onFolders={() => startBatch()}
                 onSource={open}
                 onShops={() => go('shops')}
+                onDirty={setDirty}
+                onBusy={setSaveBusy}
+              />
+            )}
+            {page === 'updates' && (
+              <ImportUpdates
+                key={patchInstance}
+                initialWorkOrderId={patchTarget}
+                initialReceiptId={patchReceipt}
+                onBack={() => go('workbench')}
                 onDirty={setDirty}
                 onBusy={setSaveBusy}
               />
@@ -509,24 +724,28 @@ export default function Workspace() {
                       <small>Đối chiếu giá, phân loại và shop</small>
                     </div>
                   </li>
-                  <li className="unavailable">
+                  <li>
                     <span>3</span>
                     <div>
                       <strong>Đăng & theo dõi</strong>
-                      <small>Chưa mở trong bản hiện tại</small>
+                      <small>Mở Đăng hàng để tiếp tục đợt API</small>
                     </div>
                   </li>
                 </ol>
+                <LifecycleFilter value={productLifecycle} onChange={(value) => {
+                  setProductLifecycle(value); setArchivedProducts([]); setFilter('all');
+                }} />
+                {archiveReadError && <p role="alert">{archiveReadError} <button onClick={() => setArchiveReload((value) => value + 1)}>Tải lại</button></p>}
                 <div className="list-toolbar">
                   <div className="tabbar">
                     <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-                      Tất cả <span>{products.length}</span>
+                      Tất cả <span>{visibleProducts.length}</span>
                     </button>
                     <button aria-pressed={filter === 'issues'} onClick={() => setFilter('issues')}>
                       Cần bổ sung{' '}
                       <span>
                         {
-                          products.filter((p) => p.issues.some((i) => i.severity === 'block'))
+                          visibleProducts.filter((p) => p.issues.some((i) => i.severity === 'block'))
                             .length
                         }
                       </span>
@@ -561,6 +780,7 @@ export default function Workspace() {
                         <div>
                           <button
                             className="listing-title"
+                            disabled={productLifecycle === 'archived'}
                             aria-label={p.title.value + ' · Xem & kiểm tra'}
                             onClick={() => open(p)}
                           >
@@ -593,13 +813,18 @@ export default function Workspace() {
                         </span>
                         <small className="row-note">Bộ nguồn nội bộ</small>
                       </div>
+                      <div className="local-row-actions">
+                      <ArchiveAction kind="product" resourceId={p.productKey} name={p.title.value}
+                        archived={productLifecycle === 'archived'} onChanged={productArchiveChanged} />
                       <button
                         className="open-listing"
+                        disabled={productLifecycle === 'archived'}
                         aria-label={'Mở chi tiết bộ ' + p.productKey}
                         onClick={() => open(p)}
                       >
                         <ArrowRight size={18} />
                       </button>
+                      </div>
                     </article>
                   ))}
                   {!displayed.length && (
@@ -632,22 +857,60 @@ export default function Workspace() {
                       không tự quyết định gộp hay tách link.
                     </li>
                     <li>
-                      Bước gửi lên Shopee hiện chưa mở. Lưu trong ứng dụng chỉ giữ bản nguồn nội bộ.
+                      Lưu bộ nguồn xong, sang Đăng hàng để chọn shop, kiểm tra và chuẩn bị lô. Lưu
+                      trong ứng dụng chưa gửi lên Shopee; bạn thực hiện bước gửi riêng.
                     </li>
                   </ol>
                 </details>
               </>
             )}
             {page === 'sources' && (
-              <Resources
-                imports={imports}
-                products={products}
-                uploadFiles={uploadFiles}
-                uploading={uploadBusy || openingBatch}
-                onNewBatch={startBatch}
-                onResumeBatch={(id) => void resumeBatch(id)}
-                onOpenListing={open}
-              />
+              <section className="source-workspace">
+                <div className="source-workspace-topline">
+                  <header className="source-workspace-heading">
+                    <h1>Kho listing</h1>
+                  </header>
+                  <nav className="source-workspace-modes" aria-label="Chế độ kho listing">
+                    <button
+                      aria-pressed={sourceMode === 'catalog'}
+                      disabled={uploadBusy || openingBatch || saveBusy || folderBusy}
+                      onClick={() => setSourceMode('catalog')}
+                    >
+                      Dữ liệu đã nhận
+                    </button>
+                    <button
+                      aria-pressed={sourceMode === 'intake'}
+                      disabled={uploadBusy || openingBatch || saveBusy || folderBusy}
+                      onClick={() => setSourceMode('intake')}
+                    >
+                      Nhập Word / ảnh / bảng giá
+                    </button>
+                  </nav>
+                  <button type="button" disabled={uploadBusy || openingBatch || saveBusy || folderBusy}
+                    onClick={startFreshIntakeSession}>
+                    Bắt đầu phiên nhập mới
+                  </button>
+                </div>
+                {sourceMode === 'catalog' ? (
+                  <SourceCatalog onImport={() => setSourceMode('intake')} />
+                ) : (
+                  <>
+                    <p className="source-intake-context">
+                      Dành cho bộ Word, ảnh và bảng giá có sẵn. Excel nội dung đã tiếp nhận nằm ở
+                      mục Dữ liệu đã nhận.
+                    </p>
+                    <Resources
+                      imports={imports}
+                      products={products}
+                      uploadFiles={uploadFiles}
+                      uploading={uploadBusy || openingBatch}
+                      onNewBatch={startBatch}
+                      onResumeBatch={(id) => void resumeBatch(id)}
+                      onOpenListing={open}
+                    />
+                  </>
+                )}
+              </section>
             )}
             {folderStarted && (
               <div hidden={page !== 'folder'}>
@@ -655,7 +918,10 @@ export default function Workspace() {
                   key={folderInstanceKey}
                   initialBatch={initialBatch}
                   initialPriceImportId={initialPriceImportId}
-                  onOpenLibrary={() => go('sources')}
+                  onOpenLibrary={() => {
+                    setSourceMode('intake');
+                    go('sources');
+                  }}
                   imports={imports}
                   products={products}
                   active={page === 'folder'}
@@ -698,7 +964,10 @@ export default function Workspace() {
                   onDraft={folderManual ? setFolderManualDraft : undefined}
                   onDirty={setDirty}
                   onCancel={() => go(folderManual ? 'folder' : 'products')}
-                  onSources={() => go('sources')}
+                  onSources={() => {
+                    setSourceMode('intake');
+                    go('sources');
+                  }}
                   onUploadFiles={uploadFiles}
                   externalBusy={uploadBusy || saveBusy || folderBusy}
                   onContinue={(seed, variants = []) => {
@@ -739,6 +1008,8 @@ export default function Workspace() {
                   shops={shops}
                   onEdit={edit}
                   onBusy={setSaveBusy}
+                  onProduction={() => { setProductionView('working'); go('prepared-batches'); }}
+                  onUpdates={() => go('updates')}
                   onPlan={() => {
                     setPendingPage(null);
                     void refresh();
@@ -812,10 +1083,29 @@ export default function Workspace() {
                           </div>
                           <button onClick={() => open(p.desired)}>Xem bản đã lưu</button>
                         </div>
-                        <Issues issues={p.issues} />
-                        <p className="caption">
-                          Chưa gửi lên Shopee. Bước thực thi đang được hoàn thiện.
-                        </p>
+                        <div className="application-limit">
+                          <strong>Bản kiểm tra nội bộ · chưa gửi yêu cầu đăng</strong>
+                          <p>
+                            Đây là bản lưu của luồng kiểm tra cũ. Các thông báo khóa gửi trong bản
+                            này không phản ánh trạng thái kết nối hoặc đợt đăng API hiện tại.
+                            Mở Đợt đang làm để tiếp tục đúng sản phẩm và xem kết quả thực tế.
+                          </p>
+                          <button onClick={() => { setProductionView('working'); go('prepared-batches'); }}>
+                            Mở đợt đăng qua API
+                          </button>
+                        </div>
+                        {p.issues.some(i => i.code === 'DUPLICATE_SKU') && (
+                          <p className="caption">
+                            SKU có trong nhiều dòng hoặc bộ giá của Excel. Đây là cảnh báo chọn
+                            nguồn giá, không phải kết luận phân loại trong listing bị trùng.
+                            Luồng đăng kiểm lại đúng dòng và bộ giá đã chọn trước khi gửi.
+                          </p>
+                        )}
+                        <Issues issues={p.issues.filter(i => !['PRODUCTION_READ_ONLY', 'EXECUTOR_NOT_RELEASED'].includes(i.code))} />
+                        <details>
+                          <summary>Thông báo được lưu cùng bản kiểm tra cũ</summary>
+                          <Issues issues={p.issues.filter(i => ['PRODUCTION_READ_ONLY', 'EXECUTOR_NOT_RELEASED'].includes(i.code))} />
+                        </details>
                       </section>
                     ))
                   ) : (
@@ -851,6 +1141,7 @@ export default function Workspace() {
                     <p>Kiểm tra đúng tài khoản và môi trường trước khi dùng dữ liệu của shop.</p>
                   </div>
                 </div>
+                <ProductionConnectionForm onConnected={() => void refresh()} />
                 {shops.map((s) => (
                   <section className="panel" key={s.id}>
                     <span
@@ -858,9 +1149,10 @@ export default function Workspace() {
                         'tag ' + (s.scope.environment === 'sandbox' ? 'neutral' : 'danger')
                       }
                     >
-                      {s.scope.environment === 'sandbox' ? 'TEST / SANDBOX' : 'SHOP THẬT / CHỈ ĐỌC'}
+                      {s.scope.environment === 'sandbox' ? 'TEST / SANDBOX' : 'SHOP THẬT / PRODUCTION'}
                     </span>
                     <h2>{s.name}</h2>
+                    <ShopNameEditor shop={s} onSaved={() => refresh()} />
                     <dl>
                       <div>
                         <dt>Shop ID</dt>
@@ -873,8 +1165,8 @@ export default function Workspace() {
                       <div>
                         <dt>Kết nối</dt>
                         <dd>
-                          {s.state === 'connected'
-                            ? 'Đã kết nối để đọc thông tin shop'
+                          {s.state === 'token_expired' ? 'Token đã hết hạn' : s.state === 'refresh_unknown' ? 'Gia hạn chưa rõ kết quả' : s.state === 'connected'
+                            ? 'Đã lưu kết nối · cần kiểm tra token trước khi chạy'
                             : 'Cần kiểm tra kết nối'}
                         </dd>
                       </div>
@@ -888,8 +1180,8 @@ export default function Workspace() {
                   <p className="empty">Chưa có shop được cấu hình trong ứng dụng.</p>
                 )}
                 <p className="caption">
-                  Kết nối đọc shop không đồng nghĩa đã hỗ trợ đăng listing. Khóa và token được giữ ở
-                  máy chủ ứng dụng.
+                  Khả năng đăng hoặc cập nhật được kiểm tra trong từng luồng thao tác. Khóa và token
+                  được giữ ở máy chủ ứng dụng.
                 </p>
               </>
             )}

@@ -66,6 +66,9 @@ export type DraftField =
   | 'fulfillment'
   | 'publication';
 export type SourceSelection = {
+  folderBinding?: import('./folder-source-identity.js').FolderSourceBinding;
+  /** Exact ID from the source; null/blank means create, a supplied ID means update. */
+  sourceListingId?: string | null;
   title: string;
   headline: string;
   body: string;
@@ -76,9 +79,11 @@ export type SourceSelection = {
   variants: { importId: string; rowKey: string; optionLabels: string[]; imageId?: string }[];
 };
 export type ListingDraft = {
+  folderSource?: import('./folder-source-identity.js').FolderSourceProof;
   productKey: string;
   revision: number;
   sourceSelection?: SourceSelection;
+  sourceListingId?: Fact<string | null>;
   title: Fact<string>;
   description: ContentBlock[];
   coverKey: string;
@@ -160,6 +165,17 @@ export type ApiOutcome =
   | { kind: 'rejected'; code: string; requestId?: string; data: Json }
   | { kind: 'unknown'; reason: 'timeout' | 'disconnected' | 'invalid_response' };
 export type Clock = { now(): Date };
+export type CatalogSourceField =
+  | 'sku'
+  | 'name'
+  | 'brand'
+  | 'category'
+  | 'originalPrice'
+  | 'promotionTarget'
+  | 'unitOfMeasure'
+  | 'physicalWeightGrams'
+  | 'declaredWeightGrams'
+  | 'imageUrl';
 export type CatalogRow = {
   key: string;
   sheet: string;
@@ -167,10 +183,14 @@ export type CatalogRow = {
   headerRow: number;
   block?: string;
   priceProfile?: string;
+  sheetVisibility?: 'visible' | 'hidden' | 'veryHidden';
+  hiddenPriceColumns?: string[];
+  sourceHeaders?: Partial<Record<CatalogSourceField, Fact<string>>>;
   sku: Fact<string>;
   name: Fact<string>;
   brand?: Fact<string>;
   category?: Fact<string>;
+  unitOfMeasure?: Fact<string>;
   originalPrice?: Fact<MoneyVnd>;
   promotionTarget?: Fact<MoneyVnd>;
   physicalWeightGrams?: Fact<string>;
@@ -182,15 +202,27 @@ export type WorkbookImport = {
   source: SourceRef;
   rows: CatalogRow[];
   issues: Issue[];
-  sheets: { name: string; rowCount: number; importedRows: number; headerRows: number[] }[];
+  sheets: {
+    name: string;
+    rowCount: number;
+    importedRows: number;
+    headerRows: number[];
+    visibility?: 'visible' | 'hidden' | 'veryHidden';
+    hiddenColumns?: string[];
+  }[];
 };
 export type WordImport = { source: SourceRef; paragraphs: string[] };
 export type ShopConnection = {
   id: string;
   scope: Scope;
   name: string;
+  /** Local alias, separate from the last shop name returned by Shopee. */
+  displayName?: string | null;
+  officialName?: string;
+  nameRevision?: number;
   region: string;
-  state: 'disconnected' | 'connected' | 'reauth_required' | 'refresh_unknown';
+  state: 'disconnected' | 'connected' | 'reauth_required' | 'refresh_unknown' | 'token_expired';
+  autoRefresh?:boolean; refreshStatus?:string; refreshReason?:string|null; healthCheckedAt?:string;
   tokenExpiresAt?: IsoTime;
   capabilities: Capability[];
   updatedAt: IsoTime;

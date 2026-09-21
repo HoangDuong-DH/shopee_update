@@ -107,7 +107,7 @@ export function ImagePicker({
                       aria-label={`Bỏ ${title.toLocaleLowerCase('vi')} ${index + 1} khỏi bản nháp`}
                       onClick={() => onChange(selectedIds.filter((value) => value !== id))}
                     >
-                      <X size={16} />
+                      <X size={16} /> Bỏ chọn
                     </button>
                   </div>
                 )}

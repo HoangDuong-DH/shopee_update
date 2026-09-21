@@ -1158,6 +1158,9 @@ dd {
     padding: 9px 10px;
     font-size: 12px;
     gap: 6px;
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
   }
   .environment-bar {
     display: block;

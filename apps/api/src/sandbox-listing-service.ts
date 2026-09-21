@@ -13,7 +13,13 @@ import type {
   WorkOrderConfig,
 } from '@shopee/domain';
 import type { Pool, PoolClient } from 'pg';
-import { Repository, BlobStore, transaction } from '@shopee/persistence';
+import {
+  Repository,
+  BlobStore,
+  transaction,
+  lockSandboxMutationLane,
+  sandboxMutationLaneBusy,
+} from '@shopee/persistence';
 import {
   SandboxProductClient,
   SecretBox,
@@ -541,8 +547,13 @@ export class SandboxListingService {
     code: string,
   ): Promise<Stored> {
     return transaction(this.repo.pool, async (c) => {
-      if (code === 'CLAIMED' || code === 'WRITE_INTENT')
+      if (code === 'CLAIMED' || code === 'WRITE_INTENT') {
+        const ownerKey = 'sandbox:1232297:227418363';
+        await lockSandboxMutationLane(c, ownerKey);
+        if (await sandboxMutationLaneBusy(c, ownerKey, { family: 'listing', id: row.id }))
+          fail('SANDBOX_TARGET_BUSY');
         await this.assertWorkOrder(row.intent.input, c, true);
+      }
       let updated;
       try {
         updated = (
@@ -917,6 +928,13 @@ export class SandboxListingService {
     const input = changeSchema.parse(raw);
     const row = await this.stored(input.id);
     if (row.revision !== input.expectedRevision) fail('SANDBOX_RUN_REVISION_CONFLICT');
+    const archived = await this.repo.pool.query(
+      `SELECT 1 FROM sandbox_listing_reconciliations q JOIN sandbox_listing_runs r ON r.id=q.run_id
+       WHERE r.id=$1 AND q.verified AND q.run_revision=r.revision
+         AND q.run_input_fingerprint=r.input_fingerprint AND q.run_snapshot=to_jsonb(r) LIMIT 1`,
+      [row.id],
+    );
+    if (archived.rowCount) fail('SANDBOX_RUN_ALREADY_RECONCILED');
     if (row.state === 'verified' || row.state === 'rejected' || row.state === 'drift')
       return publicRun(row);
     if (

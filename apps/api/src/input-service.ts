@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { folderManifestSchema } from '@shopee/domain';
+import { pendingListingMappingSchema } from '../../../packages/domain/src/pending-listing-mapping.js';
 import { InputLibraryRepository, type Repository } from '@shopee/persistence';
 
 const path = z.string().min(1).max(1024);
@@ -67,10 +69,59 @@ export const inputBatchSave = z
           .strict()
           .nullable(),
         productKeys: z.record(path, productKey),
+        pendingMappings: z.record(path, pendingListingMappingSchema).optional(),
+        manifests: z
+          .record(
+            path,
+            z
+              .object({
+                relativePath: path,
+                sha256: z.string().regex(/^[a-f0-9]{64}$/),
+                document: folderManifestSchema,
+              })
+              .strict(),
+          )
+          .optional(),
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine(({ state }, ctx) => {
+    for (const [group, mapping] of Object.entries(state.pendingMappings ?? {})) {
+      const files = state.files.filter((f) => f.relativePath === mapping.relativePath);
+      if (
+        state.manifests?.[group] ||
+        !state.productKeys[group] ||
+        mapping.relativePath !== group + '/listing-mapping.pending.json' ||
+        files.length !== 1 ||
+        files[0].name !== 'listing-mapping.pending.json' ||
+        files[0].sha256 !== mapping.sha256 ||
+        files[0].importId
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['state', 'pendingMappings', group],
+          message:
+            'Pending mapping must match its exact local file, source group and product identity.',
+        });
+    }
+    for (const [group, manifest] of Object.entries(state.manifests ?? {})) {
+      const files = state.files.filter((file) => file.relativePath === manifest.relativePath);
+      if (
+        !state.productKeys[group] ||
+        manifest.relativePath !== group + '/listing-source.json' ||
+        files.length !== 1 ||
+        files[0].name !== 'listing-source.json' ||
+        files[0].sha256 !== manifest.sha256 ||
+        files[0].importId
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['state', 'manifests', group],
+          message: 'Manifest must match its exact local sidecar file and source group.',
+        });
+    }
+  });
 
 export class InputService {
   readonly library: InputLibraryRepository;

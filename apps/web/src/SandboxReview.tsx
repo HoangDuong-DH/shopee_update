@@ -133,6 +133,21 @@ export function SandboxReview({
       onBusy(false);
     }
   }
+  if (order.sandboxReconciliation)
+    return (
+      <section className="sandbox-review" aria-label="Lịch sử đã đối chiếu">
+        <h2>Lamy đã được đối chiếu trạng thái hiện tại</h2>
+        <p>Đã giải phóng khóa của lần gửi cũ lúc {date(order.sandboxReconciliation.verifiedAt)}.</p>
+        <p>
+          Lịch sử vẫn giữ kết quả kiểm ban đầu. Phiếu đối chiếu mới xác nhận dữ liệu hiện tại và ảnh
+          bìa; không gửi lại lần cập nhật cũ.
+        </p>
+        <p>
+          Chọn <strong>Thử sandbox</strong> ở đầu trang để thực hiện phép thử mới trên listing mẫu.
+        </p>
+        <small>Mã phiếu: {order.sandboxReconciliation.id}</small>
+      </section>
+    );
   return (
     <section className="sandbox-review" aria-label="Đối chiếu và thực hiện sandbox">
       <div className="section-heading">

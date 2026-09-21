@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { folderDraftSelection } from '../../domain/src/folder-source-identity.js';
 import {
   planFingerprint,
   canonicalJson,
@@ -8,6 +9,7 @@ import {
 } from '@shopee/domain';
 import type { Pool, PoolClient } from 'pg';
 import { transaction, probeMigrations } from './db.js';
+import { localArchiveList, lockLocalSourceSelection, assertDraftLocalSourcesActive, assertLocalResourcesActive, type LocalLifecycle } from './local-archives.js';
 export type ImportRecord = {
   id: string;
   sha256: string;
@@ -70,10 +72,13 @@ export class Repository {
     );
     return importRow(result.rows[0]);
   }
-  async listImports() {
-    return (
+  async listImports(lifecycle: LocalLifecycle = 'active') {
+    const rows = (
       await this.pool.query('SELECT *,NULL AS body FROM source_files ORDER BY created_at DESC')
     ).rows.map(importRow);
+    // Only pricebooks have archive controls; other imported files remain historical evidence.
+    const marked = await localArchiveList(this.pool, 'pricebook', rows, r => r.kind === 'xlsx' ? r.id : '', 'all');
+    return marked.filter(r => lifecycle === 'all' || r.archived === (lifecycle === 'archived'));
   }
   async getImport(id: string) {
     const r = await this.pool.query('SELECT * FROM source_files WHERE id=$1', [id]);
@@ -91,9 +96,29 @@ export class Repository {
       [id, message ? 'failed' : 'ready', body, message],
     );
   }
-  async saveProduct(draft: ListingDraft, expectedRevision: number): Promise<ListingDraft> {
+  async saveProduct(
+    draft: ListingDraft,
+    expectedRevision: number,
+    folderClaim?: {
+      batchId: string;
+      revision: number;
+      groupKey: string;
+      fingerprint: string;
+    },
+  ): Promise<ListingDraft> {
     if (draft.revision !== expectedRevision + 1) throw new Error('PRODUCT_REVISION_CONFLICT');
-    await transaction(this.pool, async (c) => {
+    return transaction(this.pool, async (c) => {
+      await lockLocalSourceSelection(c);
+      await assertDraftLocalSourcesActive(c, draft);
+      if (folderClaim) await assertLocalResourcesActive(c, [{kind:'input_batch',resourceId:folderClaim.batchId}]);
+      if (folderClaim) {
+        const latestBatch = await c.query(
+          'SELECT latest_revision FROM input_batches WHERE id=$1 FOR SHARE',
+          [folderClaim.batchId],
+        );
+        if (latestBatch.rows[0]?.latest_revision !== folderClaim.revision)
+          throw new Error('FOLDER_SOURCE_BINDING_STALE');
+      }
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [draft.productKey]);
       const prior = await c.query(
         `SELECT p.latest_revision, r.body FROM products p
@@ -101,8 +126,44 @@ export class Repository {
          WHERE p.product_key=$1 FOR UPDATE OF p`,
         [draft.productKey],
       );
+      const selectionFingerprint = () =>
+        createHash('sha256')
+          .update(canonicalJson(folderDraftSelection(draft)))
+          .digest('hex');
+      if (folderClaim) {
+        if (
+          expectedRevision !== 0 ||
+          draft.folderSource?.productKey !== draft.productKey ||
+          draft.folderSource.fingerprint !== folderClaim.fingerprint
+        )
+          throw new Error('FOLDER_SOURCE_BINDING_INVALID');
+        const claim = (
+          await c.query('SELECT * FROM folder_source_claims WHERE product_key=$1', [
+            draft.productKey,
+          ])
+        ).rows[0];
+        if (claim) {
+          if (
+            claim.source_fingerprint !== folderClaim.fingerprint ||
+            claim.selection_fingerprint !== selectionFingerprint() ||
+            !prior.rows[0] ||
+            createHash('sha256')
+              .update(canonicalJson(folderDraftSelection(prior.rows[0].body)))
+              .digest('hex') !== claim.selection_fingerprint
+          )
+            throw new Error('FOLDER_SOURCE_CHANGED');
+          return prior.rows[0].body as ListingDraft;
+        }
+        if (prior.rows[0]) throw new Error('FOLDER_SOURCE_IDENTITY_CONFLICT');
+      } else if (expectedRevision === 0 && draft.folderSource)
+        throw new Error('FOLDER_SOURCE_BINDING_REQUIRED');
       if ((prior.rows[0]?.latest_revision ?? 0) !== expectedRevision)
         throw new Error('PRODUCT_REVISION_CONFLICT');
+      if (
+        prior.rows[0]?.body.folderSource &&
+        canonicalJson(prior.rows[0].body.folderSource) !== canonicalJson(draft.folderSource ?? null)
+      )
+        throw new Error('FOLDER_SOURCE_IDENTITY_CONFLICT');
       if (
         prior.rows[0] &&
         canonicalJson(preparedStructure(prior.rows[0].body)) !==
@@ -118,8 +179,20 @@ export class Repository {
         draft.revision,
         draft,
       ]);
+      if (folderClaim)
+        await c.query(
+          'INSERT INTO folder_source_claims(product_key,source_fingerprint,selection_fingerprint,batch_id,batch_revision,group_key) VALUES($1,$2,$3,$4,$5,$6)',
+          [
+            draft.productKey,
+            folderClaim.fingerprint,
+            selectionFingerprint(),
+            folderClaim.batchId,
+            folderClaim.revision,
+            folderClaim.groupKey,
+          ],
+        );
+      return draft;
     });
-    return draft;
   }
   async getProduct(key: string, revision?: number): Promise<ListingDraft | null> {
     const r = await this.pool.query(
@@ -128,12 +201,13 @@ export class Repository {
     );
     return r.rows[0]?.body ?? null;
   }
-  async listProducts(): Promise<ListingDraft[]> {
-    return (
+  async listProducts(lifecycle: LocalLifecycle = 'active'): Promise<ListingDraft[]> {
+    const rows = (
       await this.pool.query(
         'SELECT r.body FROM products p JOIN product_revisions r ON r.product_key=p.product_key AND r.revision=p.latest_revision ORDER BY p.updated_at DESC',
       )
     ).rows.map((r) => r.body);
+    return localArchiveList(this.pool, 'product', rows, r => r.productKey, lifecycle);
   }
   async savePlan(plan: ChangePlan) {
     if (planFingerprint(plan) !== plan.fingerprint) throw new Error('PLAN_CONFLICT');

@@ -1,3 +1,4 @@
+import { openWorkspaceTool } from './workspace-navigation.js';
 import { test, expect } from '@playwright/test';
 // Read-only acceptance against the private source recipe imported into the running local app.
 // Separate from unit/integration fixtures; requires scripts/import-recipe.mts .local/recipes/lamy.json.
@@ -11,10 +12,7 @@ test('renders the real Lamy source, six SKU bindings and every description image
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await expect(page.getByRole('heading', { name: 'Kiểm tra listing', exact: true })).toBeVisible();
   await expect(page.getByTestId('variant-row')).toHaveCount(6);
@@ -52,10 +50,7 @@ test('reviews the prepared source with locked SKU structure and unchanged data a
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
   await expect(page.getByLabel('Tiêu đề listing')).toHaveValue(
@@ -72,10 +67,7 @@ test('reviews the prepared source with locked SKU structure and unchanged data a
     await expect(button).toBeDisabled();
   }
   await page.reload();
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await expect(page.getByTestId('variant-row')).toHaveCount(6);
   await expect(page.getByTestId('description-image')).toHaveCount(9);
@@ -84,10 +76,7 @@ test('reviews the prepared source with locked SKU structure and unchanged data a
 test('keeps a narrow screen usable without horizontal page overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await expect(page.getByRole('heading', { name: 'Kiểm tra listing' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(

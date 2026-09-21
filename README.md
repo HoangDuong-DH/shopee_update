@@ -1,8 +1,20 @@
 # Shopee Workspace
 
+**Checkpoint hiện tại — 16/09/2026:** đã đăng qua backend OpenAPI và đối chiếu đạt **xịt thơm ô tô / 48 phân loại** và **xịt khử mùi thảm / 48 phân loại** trên shop **1423724897 / vuatinhdau.vn**. Cùng can 5L và Ngọc Lan Tây của lượt trước, GET mới xác nhận **4 listing đều NORMAL**. Xịt khử mùi tủ giày và giày da nam chưa gửi vì ngành yêu cầu bảng kích cỡ; đã có [phiếu xử lý tay](docs/operator-guides/pass1-viec-can-xu-ly-tay.md). Đọc [bằng chứng và giới hạn mới nhất](docs/delivery/2026-09-16-pass1-continuation.md).
+
+Kiểm mới **1753 unit/integration + 7 legacy, typecheck/build đạt**; một browser fixture gọi tên sản phẩm đạt riêng. 17 browser fixture của workflow thuộc ngày 15/09. Đã nối **listing đã lưu → kiểm nguồn/metadata → chuẩn bị lô → hàng đợi API → đọc lại/QC** trong phạm vi được cho phép; xem [hướng dẫn nhân viên](docs/operator-guides/dang-hang-tu-bo-listing-da-luu.md). Chưa nghiệm thu 80 listing thật, nhiều shop, mọi nhóm cập nhật hoặc chạy liên tục 24h. 80 bộ ở test chỉ chứng minh chuẩn bị nguồn/manifest tại máy. Các mốc bên dưới là lịch sử, không thay thế checkpoint mới.
+
+## Các mốc trước ngày 15/09
+
+Bổ sung 14/09: **Kho listing** là trang đầu; đã nhận bộ nội dung Vina Tươi gồm 604 dòng và danh mục 227 thiết kế Canva/5.961 trang vào database nội bộ. Mỗi phần giữ nguồn theo ô; ảnh và tham khảo shop cũ chưa tự áp dụng. Xem [bàn giao kho nguồn và giao diện](docs/delivery/2026-09-14-source-catalog-and-ux.md). Chưa có ảnh gốc, giá/tồn/SKU đầy đủ hoặc luồng xác nhận catalog thành bộ đăng.
+
 Ứng dụng nội bộ để tiếp nhận bộ listing đã chuẩn bị, đối chiếu SKU/giá/nội dung/ảnh và chuẩn bị đăng/cập nhật cho nhiều shop. Bảng giá là nguồn tra cứu, không phải nơi tự ghép các SKU thành listing.
 
-**Trạng thái 12/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Trang chính là **Công việc đăng hàng**, gắn bản nguồn đã chuẩn bị với từng shop. Backend cập nhật Lamy sandbox cũ vẫn chờ đối chiếu mã bìa. Nhánh tạo thử riêng đã gửi **80 nguồn kỹ thuật qua API backend/worker: 76 listing đọc lại đạt, 4 bị Shopee từ chối**, tất cả link tạo được giữ UNLIST. Không gửi lại bốn nguồn lỗi hoặc nhân bản Lamy. Đây là phép thử thật trên sandbox với dữ liệu giả, tách khỏi ca mô phỏng 80 nguồn trong integration. Đăng hàng loạt từ nguồn doanh nghiệp, làm mới token tự động, khuyến mại, QC và vận hành bền 24 giờ chưa nghiệm thu. Shop thật chỉ đọc.
+**Trạng thái 14/09/2026: bản phát triển chạy tại máy; chưa nghiệm thu production.** Luồng nhập 80 thư mục đã đạt tại tầng ứng dụng với gateway mô phỏng. Lớp gửi OpenAPI mới có nhật ký từng yêu cầu, kiểm metadata/nguồn và đối chiếu sau ghi; 80 sản phẩm / 200 SKU / 3 shop / 4 ngành giả lập đã được kiểm ở lớp HTTP. Một patch tiêu đề mới trên mẫu kỹ thuật sandbox 803935036 đã gửi thật và đọc lại đúng, giữ nguyên phần không chọn. Xem [bàn giao OpenAPI](docs/delivery/2026-09-14-openapi-wire-bridge.md) để phân biệt phạm vi. Worker cho nguồn doanh nghiệp vẫn chưa nối trọn với lớp gửi này; refresh token, production và vận hành 24h chưa nghiệm thu. Shop thật chỉ đọc.
+
+Lượt sandbox kỹ thuật trước đó tạo 76/80 nguồn và có 4 nguồn bị từ chối; đó không phải 80 listing doanh nghiệp đã được nghiệm thu. Không gửi lại 4 nguồn lỗi, không nhân bản Lamy 803934364 hoặc chạy lại phép ghi bìa đang `unknown`.
+
+Bổ sung kiểm thử cập nhật 14/09: tồn 0 và ảnh phân loại hai tầng đạt trên sandbox. Phép chuyển gallery 1:1 → 3:4 phát hiện Shopee thay bìa ngoài yêu cầu; bìa mẫu đã khôi phục bằng lệnh riêng, QC ảnh tự động chưa được nghiệm thu. Luồng tự động chuyển tỷ lệ bị chặn. Xem [kết quả từng tình huống](docs/delivery/2026-09-14-patch-scenarios.md) trước khi chạy thêm; không phát lại intent cũ.
 
 ## Chạy tại máy
 
@@ -20,6 +32,7 @@ Mở **http://127.0.0.1:5173/**. PostgreSQL phát triển dùng cổng **5442**,
 
 ## Phần đã triển khai
 
+- **Nhập bộ cập nhật** nhận riêng Excel giá/tồn, Word và ảnh, không bắt nhập lại bộ listing đầy đủ. Mỗi sheet/bộ giá có nhóm công việc/shop riêng; SKU được ghép chính xác, ô trống giữ nguyên và tồn 0 được nhận diện. Xem trước theo bản nguồn đã lưu, chọn/bỏ chọn nhóm thay đổi, lưu biên nhận qua API/PostgreSQL rồi mở lại. Cùng ảnh có thể dùng nhiều vai trò với thứ tự riêng; không tự viết/crop nguồn. Luồng này chỉ chuẩn bị nội bộ, chưa đọc trạng thái hiện tại hoặc gửi patch lên Shopee. Xem [cách nhập cập nhật](docs/runbooks/import-updates.md).
 - Bảng công việc tách bộ nguồn khỏi nơi đăng: chọn nhiều bộ, shop đích, đăng mới/cập nhật và trường cần cập nhật. Lưu cấu hình có phiên bản; phân biệt thiếu nguồn, cần ánh xạ, lỗi kết nối, xung đột và tính năng chưa hỗ trợ. Tồn đăng bán nhập riêng theo SKU/shop, để trống không được hiểu là 0.
 - Hồ sơ bàn giao tùy chọn được xuất từ nguồn đã lưu, dùng lại ánh xạ nội dung/ảnh/SKU/giá. Nhập lại cần xem khác biệt trước khi lưu; không thay thế các tệp nguồn và không yêu cầu nhân viên tự viết JSON. Luồng đầu vào chính vẫn là thư mục Word/ảnh với bảng giá chung.
 - Luồng sandbox trực tiếp chỉ cho phép partner `1232297`, shop `227418363`, item `803934364`; các trường `title`, `description`, `gallery`. Giữ byte ảnh và bố cục nguồn; kiểm SKU/nhãn, giới hạn thật từ API, phiên bản công việc và dữ liệu trước khi gửi. Ghi checkpoint, khóa mục tiêu, đọc lại cả trường được chọn và trường giữ nguyên. Kết quả chưa rõ được phục hồi từ server để đối chiếu, không tự gửi lại.
@@ -44,10 +57,13 @@ node scripts/verify.mjs
 
 Kiểm kiểu, build, test extension cũ và unit/integration dùng PostgreSQL thật. Test tự tạo schema riêng. Không thay DB bằng mock để báo đạt.
 
-`npm run test:e2e` là phép nghiệm thu đọc trên app local đang chạy và bộ Lamy đã nhập; cần Edge trên Windows. Nó không tự seed dữ liệu riêng và không gửi lệnh Shopee. CI chỉ chạy fixture unit/integration, không tải dữ liệu doanh nghiệp.
+`npm run test:e2e` cần Edge trên Windows và app local đang chạy. Suite gồm kiểm tra chỉ đọc với Lamy, các fixture trình duyệt và luồng nhập cập nhật chạy API/worker nhập/PostgreSQL thật trong schema và blob riêng. Runner cập nhật giới hạn DB localhost:5442, chặn fetch ra ngoài localhost và dọn fixture khi kết thúc. Không gửi lệnh Shopee hoặc seed bộ cập nhật vào dữ liệu doanh nghiệp chính. CI hiện chỉ chạy fixture unit/integration, không tải dữ liệu doanh nghiệp.
 
 ## Tài liệu và phạm vi
 
+- [Bàn giao và nghiệm thu luồng nhập cập nhật](docs/delivery/2026-09-12-import-patch-workflow.md)
+- [Hướng dẫn nhập giá, tồn, Word và ảnh cập nhật](docs/runbooks/import-updates.md)
+- [Phản biện UX/API luồng cập nhật](docs/reviews/2026-09-12-import-patch-ui-backend-review.md)
 - [Thử hàng loạt bằng API backend sandbox](docs/runbooks/sandbox-backend-trials.md)
 - [Kết quả backend ngày 12/09](docs/delivery/2026-09-12-backend-sandbox-trial.md)
 - [Hướng dẫn chạy](docs/runbooks/local-development.md)

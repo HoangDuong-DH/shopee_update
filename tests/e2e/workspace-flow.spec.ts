@@ -1,3 +1,4 @@
+import { openWorkspaceTool } from './workspace-navigation.js';
 import { test, expect } from '@playwright/test';
 import type { ListingDraft } from '@shopee/domain';
 
@@ -10,10 +11,7 @@ test('starts from prepared listings with a clear next action', async ({ page }) 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await expect(page.getByRole('heading', { name: 'Listing của tôi', exact: true })).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }),
@@ -40,14 +38,12 @@ test('keeps the price catalog read-only instead of assembling arbitrary SKU grou
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
+    .getByRole('button', { name: 'Kho listing', exact: true })
     .click();
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Kho đầu vào', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Nhập Word / ảnh / bảng giá', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Bộ listing', exact: true })).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Bộ listing đã tiếp nhận', exact: true }),
@@ -78,10 +74,7 @@ test('opens prepared listing import without creating a product or choosing arbit
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Nhập listing theo thư mục', exact: true }),
@@ -100,10 +93,7 @@ test('preserves unfinished import when staying and discards only after explicit 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   const workbook = page.getByRole('combobox', { name: 'File bảng giá', exact: true });
@@ -115,7 +105,7 @@ test('preserves unfinished import when staying and discards only after explicit 
   await workbook.selectOption(sourceId!);
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .getByRole('button', { name: 'Kho listing', exact: true })
     .click();
   const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
   await expect(dialog).toBeVisible();
@@ -124,10 +114,11 @@ test('preserves unfinished import when staying and discards only after explicit 
   await expect(workbook).toHaveValue(sourceId!);
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .getByRole('button', { name: 'Kho listing', exact: true })
     .click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Bỏ thay đổi và rời đi', exact: true }).click();
+  await page.getByRole('button', { name: 'Nhập Word / ảnh / bảng giá', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Kho đầu vào', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Nhập listing có sẵn', exact: true })).toHaveCount(
     0,
@@ -203,11 +194,8 @@ test('fixture: reviews both classification tiers without flattening or unlocking
     await route.fulfill({ json: [fixture] });
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
-  await page.getByRole('button', { name: new RegExp(title) }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
+  await page.getByRole('button', { name: title + ' · Xem & kiểm tra', exact: true }).click();
   await expect(page.getByTestId('variant-row')).toHaveCount(2);
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
   await page.getByRole('tab', { name: /^SKU & phân loại/ }).click();
@@ -239,11 +227,8 @@ test('explains a disabled save and opens the exact missing field without changin
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
-  await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
+  await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
   await page.getByRole('button', { name: 'Điều chỉnh nội dung và ảnh', exact: true }).click();
   await page.getByLabel('Tiêu đề listing', { exact: true }).fill('');
@@ -270,11 +255,8 @@ test('shows selected media by role and opens an explicit thumbnail picker only w
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
-  await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
+  await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await page
     .getByRole('region', { name: 'Việc tiếp theo', exact: true })
     .getByRole('button', { name: /Ảnh bìa và ảnh sản phẩm/ })
@@ -331,11 +313,8 @@ test('fixture: keeps the listing screen stable while a plan save is pending', as
   });
   try {
     await page.goto('/');
-    await page
-      .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Listing của tôi', exact: true })
-      .click();
-    await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+    await openWorkspaceTool(page, 'Listing của tôi');
+    await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
     const shop = page.getByLabel('Shop đích', { exact: true });
     const sandboxValue = await shop
       .locator('option')
@@ -351,7 +330,7 @@ test('fixture: keeps the listing screen stable while a plan save is pending', as
     await expect(page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true })).toBeDisabled();
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .getByRole('button', { name: 'Kho listing', exact: true })
       .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Kiểm tra listing', exact: true }),
@@ -366,8 +345,9 @@ test('fixture: keeps the listing screen stable while a plan save is pending', as
     await expect(page.getByRole('alert')).toContainText('Giữ phần đang nhập và thử lại');
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .getByRole('button', { name: 'Kho listing', exact: true })
       .click();
+    await page.getByRole('button', { name: 'Nhập Word / ảnh / bảng giá', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Kho đầu vào', exact: true })).toBeVisible();
     expect(interceptedWrites).toEqual(['POST']);
   } finally {
@@ -393,11 +373,8 @@ test('fixture: retains edited content after a failed save and blocks navigation 
   });
   try {
     await page.goto('/');
-    await page
-      .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Listing của tôi', exact: true })
-      .click();
-    await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+    await openWorkspaceTool(page, 'Listing của tôi');
+    await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
     await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
     await page.getByRole('button', { name: 'Điều chỉnh nội dung và ảnh', exact: true }).click();
     const title = page.getByLabel('Tiêu đề listing', { exact: true });
@@ -410,7 +387,7 @@ test('fixture: retains edited content after a failed save and blocks navigation 
     await requestStarted;
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .getByRole('button', { name: 'Kho listing', exact: true })
       .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Đối chiếu nguồn listing', exact: true }),
@@ -425,7 +402,7 @@ test('fixture: retains edited content after a failed save and blocks navigation 
     await expect(title).toBeEditable();
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho đầu vào', exact: true })
+      .getByRole('button', { name: 'Kho listing', exact: true })
       .click();
     const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
     await expect(dialog).toBeVisible();
@@ -445,11 +422,8 @@ test('routes next actions to the prepared content and locked SKU structure witho
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
-  await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
+  await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   const checklist = page.getByRole('region', { name: 'Việc tiếp theo', exact: true });
   await expect(checklist).toBeVisible();
   await checklist.getByRole('button', { name: /Tiêu đề và nội dung/ }).click();
@@ -482,17 +456,14 @@ test('fixture: assigning Word paragraphs previews before replacement and keeps l
   page.on('request', (request) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) mutations.push(request.url());
   });
-  await page.route('**/v1/imports', async (route) => {
+  await page.route(/\/v1\/imports(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.abort();
     return route.fulfill({ json: [fixture] });
   });
   await page.route('**/v1/imports/' + wordId, (route) => route.fulfill({ json: fixture }));
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
-  await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
+  await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
   await page.getByRole('button', { name: 'Điều chỉnh nội dung và ảnh', exact: true }).click();
   const title = page.getByLabel('Tiêu đề listing', { exact: true });
@@ -539,11 +510,8 @@ test('fixture: retrying an upload from the editor locks save and preserves unfin
   });
   try {
     await page.goto('/');
-    await page
-      .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Listing của tôi', exact: true })
-      .click();
-    await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+    await openWorkspaceTool(page, 'Listing của tôi');
+    await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
     await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
     await page.getByRole('button', { name: 'Điều chỉnh nội dung và ảnh', exact: true }).click();
     const title = page.getByLabel('Tiêu đề listing', { exact: true });
@@ -588,10 +556,7 @@ test('discarding an edit to a saved listing keeps a separate unfinished intake r
   });
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   const workbook = page.getByRole('combobox', { name: 'File bảng giá', exact: true });
@@ -602,23 +567,20 @@ test('discarding an edit to a saved listing keeps a separate unfinished intake r
   expect(sourceId).toBeTruthy();
   await workbook.selectOption(sourceId!);
   await page.reload();
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Listing của tôi', exact: true })
-    .click();
-  await page.getByRole('button', { name: /Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
+  await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
   await page.getByRole('button', { name: 'Đối chiếu nguồn', exact: true }).click();
   await page.getByRole('button', { name: 'Điều chỉnh nội dung và ảnh', exact: true }).click();
   await page.getByLabel('Tiêu đề listing', { exact: true }).fill('TEST FIXTURE · Bỏ sửa bộ đã lưu');
   await page
     .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Kho đầu vào', exact: true })
+    .getByRole('button', { name: 'Kho listing', exact: true })
     .click();
   await page
     .getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true })
     .getByRole('button', { name: 'Bỏ thay đổi và rời đi', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Listing của tôi', exact: true }).click();
+  await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
   await page.getByRole('button', { name: 'Nhập thủ công khi cần', exact: true }).click();
   await expect(

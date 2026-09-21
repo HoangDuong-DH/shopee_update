@@ -4,6 +4,55 @@ import { canonicalJson } from '@shopee/domain';
 import { transaction, type Pool } from './db.js';
 import type { PoolClient } from 'pg';
 
+export type SandboxMutationLaneFamily =
+  'create' | 'field' | 'listing' | 'media' | 'wire' | 'variation';
+/** All live sandbox writers reserve the same owner lane before recording mutation intent. */
+export async function lockSandboxMutationLane(
+  query: Pick<PoolClient, 'query'>,
+  ownerKey: string,
+  tryOnly = false,
+): Promise<boolean> {
+  if (tryOnly)
+    return (
+      (
+        await query.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS ok', [
+          'prepared-wire:' + ownerKey,
+        ])
+      ).rows[0].ok === true
+    );
+  await query.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+    'prepared-wire:' + ownerKey,
+  ]);
+  return true;
+}
+export async function sandboxMutationLaneBusy(
+  query: Pick<PoolClient, 'query'>,
+  ownerKey: string,
+  exclude?: { family: SandboxMutationLaneFamily; id: string },
+): Promise<boolean> {
+  const result = await query.query(
+    `SELECT EXISTS (
+    SELECT 1 FROM (
+      SELECT 'create' AS family,i.id,concat(c.environment,':',c.partner_id,':',c.shop_id) AS owner_key
+      FROM sandbox_create_trial_items i JOIN connections c ON c.id=i.connection_id WHERE i.state IN ('running','unknown')
+      UNION ALL SELECT 'field',r.id,concat(c.environment,':',c.partner_id,':',c.shop_id)
+      FROM sandbox_field_trials r JOIN connections c ON c.id=r.connection_id WHERE r.state='unknown'
+      UNION ALL SELECT 'listing',r.id,concat(c.environment,':',c.partner_id,':',c.shop_id)
+      FROM sandbox_listing_runs r JOIN connections c ON c.id=r.connection_id WHERE r.state IN ('in_flight','unknown')
+        AND NOT EXISTS (SELECT 1 FROM sandbox_listing_reconciliations q
+          WHERE q.run_id=r.id AND q.verified AND q.run_revision=r.revision
+            AND q.run_input_fingerprint=r.input_fingerprint AND q.run_snapshot=to_jsonb(r))
+      UNION ALL SELECT 'media',r.id,concat(c.environment,':',c.partner_id,':',c.shop_id)
+      FROM sandbox_trial_preparations r JOIN connections c ON c.id=r.connection_id WHERE r.state IN ('preparing','unknown')
+      UNION ALL SELECT 'wire',id,owner_key FROM prepared_wire_operations WHERE state IN ('running','unknown')
+      UNION ALL SELECT 'variation',id,owner_key FROM variation_operations WHERE state IN ('running','unknown')
+    ) busy WHERE owner_key=$1 AND ($2::text IS NULL OR family<>$2 OR id::text<>$3)
+  ) AS busy`,
+    [ownerKey, exclude?.family ?? null, exclude?.id ?? null],
+  );
+  return result.rows[0].busy === true;
+}
+
 const syntheticKey = z.string().regex(/^SBX-BULK-[A-Za-z0-9._:-]{1,160}$/);
 // This is only an envelope guard; the worker parses the full shared gateway schema before intent.
 const createSchema = z
@@ -291,11 +340,7 @@ export class SandboxCreateTrialStore {
   }
   async claim(workerId: string): Promise<SandboxCreateTrialClaim | null> {
     return transaction(this.pool, async (client) => {
-      const locked = (
-        await client.query(
-          "SELECT pg_try_advisory_xact_lock(hashtextextended('sandbox-create-test-shop:1232297:227418363',0)) AS ok",
-        )
-      ).rows[0].ok;
+      const locked = await lockSandboxMutationLane(client, 'sandbox:1232297:227418363', true);
       if (!locked) return null;
       const now = this.now();
       const expired = (
@@ -333,14 +378,7 @@ export class SandboxCreateTrialStore {
         );
       }
       // An unresolved mutation also holds the shop lane: another batch must not run beside a late request.
-      if (
-        (
-          await client.query(
-            "SELECT id FROM sandbox_create_trial_items WHERE state='running' OR (state='unknown' AND stage IN ('create_intent','tiers_intent')) LIMIT 1",
-          )
-        ).rowCount
-      )
-        return null;
+      if (await sandboxMutationLaneBusy(client, 'sandbox:1232297:227418363')) return null;
       const candidate = (
         await client.query(
           "SELECT i.*,t.connection_revision,t.evidence FROM sandbox_create_trial_items i JOIN sandbox_create_trials t ON t.id=i.trial_id WHERE i.state IN ('queued','waiting') AND i.next_run_at <= $1 AND NOT t.paused ORDER BY i.created_at,i.position FOR UPDATE OF i SKIP LOCKED LIMIT 1",

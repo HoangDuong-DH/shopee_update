@@ -1,0 +1,14 @@
+.local-lifecycle-filter { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-block: 14px; color: #42566a; }
+.local-lifecycle-filter select { width: auto; min-width: 190px; }
+.local-archive-action { min-width: 0; }
+.local-archive-action > button { white-space: nowrap; }
+.local-archive-confirm { padding: 14px; margin-top: 8px; border: 1px solid #d4dce3; border-radius: 8px; background: #f5f7f8; overflow-wrap: anywhere; max-width: 440px; }
+.local-archive-confirm p { margin-block: 8px; }
+.local-archive-confirm .actions { flex-wrap: wrap; }
+.local-archive-error { color: #9d2b20; }
+.local-row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: start; }
+.catalog-list-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.catalog-list-summary .local-lifecycle-filter { margin: 0; gap: 6px; }
+.catalog-list-summary .local-lifecycle-filter select { min-width: 0; width: 142px; min-height: 36px; padding: 6px; }
+.catalog-table .local-archive-action > button { font-size: 12px; min-height: 34px; padding: 6px 8px; margin-top: 4px; }
+.source-catalog .catalog-list-summary { padding-block: 4px; }

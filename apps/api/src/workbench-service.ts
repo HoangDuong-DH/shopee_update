@@ -9,7 +9,7 @@ import type {
   WorkOrderView,
   WorkbookImport,
 } from '@shopee/domain';
-import { Repository, WorkOrderRepository } from '@shopee/persistence';
+import { Repository, WorkOrderRepository, listShopConnections } from '@shopee/persistence';
 
 const field = z.enum([
   'title',
@@ -66,26 +66,7 @@ export class WorkbenchService {
     this.orders = new WorkOrderRepository(repo.pool);
   }
   async shops(): Promise<ShopConnection[]> {
-    return (
-      await this.repo.pool.query(
-        'SELECT id,name,region,state,environment,partner_id,shop_id,revision,capability_revision,expires_at,capabilities,updated_at FROM connections ORDER BY environment,name',
-      )
-    ).rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      region: r.region,
-      state: r.state,
-      tokenExpiresAt: r.expires_at?.toISOString(),
-      capabilities: r.capabilities,
-      updatedAt: r.updated_at.toISOString(),
-      scope: {
-        environment: r.environment,
-        partnerId: r.partner_id,
-        shopId: r.shop_id,
-        connectionRevision: r.revision,
-        capabilityRevision: r.capability_revision,
-      },
-    }));
+    return listShopConnections(this.repo.pool);
   }
   async view(order: WorkOrder, shops?: ShopConnection[]): Promise<WorkOrderView> {
     const source = await this.repo.getProduct(order.config.productKey, order.config.sourceRevision);
@@ -103,6 +84,20 @@ export class WorkbenchService {
     ) => issues.push({ code, kind, field, message, action });
     const selected = new Set<DraftField>(order.config.fieldMask);
     const sandboxRun = await this.orders.sandboxRun(order.config, order.id);
+    const recovery = sandboxRun
+      ? (
+          await this.repo.pool.query(
+            `SELECT q.id,q.created_at FROM sandbox_listing_reconciliations q
+       JOIN sandbox_listing_runs r ON r.id=q.run_id WHERE r.id=$1 AND q.verified
+         AND q.run_revision=r.revision AND q.run_input_fingerprint=r.input_fingerprint
+         AND q.run_snapshot=to_jsonb(r) ORDER BY q.created_at DESC LIMIT 1`,
+            [sandboxRun.id],
+          )
+        ).rows[0]
+      : undefined;
+    const sandboxReconciliation = recovery
+      ? { id: recovery.id, verifiedAt: recovery.created_at.toISOString() }
+      : undefined;
     const sandboxRunMatchesConfig =
       !!sandboxRun &&
       sandboxRun.connectionId === order.config.connectionId &&
@@ -118,10 +113,14 @@ export class WorkbenchService {
         'SANDBOX_RUN_NEEDS_RECOVERY',
         'conflict',
         'execution',
-        sandboxRun.state === 'in_flight'
-          ? 'Lần gửi trước của link này đang được xử lý; chưa thể đổi lựa chọn hoặc gửi tiếp.'
-          : 'Lần gửi trước của link này chưa xác định kết quả. Cần đọc lại kết quả trước khi đổi lựa chọn hoặc gửi tiếp.',
-        'Mở kết quả lần gửi đã lưu và đối chiếu; giữ nguyên phạm vi của lần gửi đó.',
+        sandboxReconciliation
+          ? 'Trạng thái Lamy hiện tại đã được đối chiếu và giải phóng khóa shop. Công việc cũ được giữ làm lịch sử.'
+          : sandboxRun.state === 'in_flight'
+            ? 'Lần gửi trước của link này đang được xử lý; chưa thể đổi lựa chọn hoặc gửi tiếp.'
+            : 'Lần gửi trước của link này chưa xác định kết quả. Cần đọc lại kết quả trước khi đổi lựa chọn hoặc gửi tiếp.',
+        sandboxReconciliation
+          ? 'Mở Thử sandbox để làm phép thử mới trên listing mẫu.'
+          : 'Mở kết quả lần gửi đã lưu và đối chiếu; giữ nguyên phạm vi của lần gửi đó.',
       );
     if (latest.revision !== source.revision)
       add(
@@ -266,6 +265,7 @@ export class WorkbenchService {
       issues,
       state: issues.length ? 'needs_attention' : 'ready_to_check',
       sandboxRun,
+      ...(sandboxReconciliation ? { sandboxReconciliation } : {}),
       sandboxRunMatchesConfig,
     };
   }

@@ -30,6 +30,7 @@ const pool = new Pool({
 const repo = new Repository(pool),
   connectionId = randomUUID(),
   productionId = randomUUID(),
+  protectedOtherOwnerId = randomUUID(),
   lamyRunId = randomUUID();
 const key = '82'.repeat(32),
   box = new SecretBox(key),
@@ -297,12 +298,20 @@ beforeAll(async () => {
     ],
   );
   await pool.query(
+    "INSERT INTO connections(id,environment,partner_id,shop_id,name,state) VALUES($1,'sandbox','1232297','227418364','MOCK other owner protected historical fixture','connected')",
+    [protectedOtherOwnerId],
+  );
+  // The shared owner lane now intentionally blocks a same-owner unknown. Keep
+  // this untouched historical fixture under a separate authored owner; a
+  // dedicated regression below proves same-owner unknown still blocks creates.
+  await pool.query(
     "INSERT INTO sandbox_listing_runs(id,connection_id,item_id,product_key,source_revision,connection_revision,input_fingerprint,state,intent,body) VALUES($1,$2,'803934364','lamy-5d',1,1,'protected-mock','unknown',$3,$3)",
-    [lamyRunId, connectionId, { protectedFixture: true }],
+    [lamyRunId, protectedOtherOwnerId, { protectedFixture: true }],
   );
 });
 beforeEach(async () => {
   await pool.query('TRUNCATE sandbox_create_trials CASCADE');
+  await pool.query('DELETE FROM sandbox_listing_runs WHERE id<>$1', [lamyRunId]);
   await pool.query('UPDATE connections SET revision=1,state=$2,expires_at=NULL WHERE id=$1', [
     connectionId,
     'connected',
@@ -345,7 +354,25 @@ it('atomically deduplicates trial replay and prevents source reuse or production
   expect(await store.list()).toHaveLength(1);
 });
 
-it('processes 80 zero/one/two-tier fixtures through real gateway+PG worker with two competing workers, without touching Lamy', async () => {
+it('holds the create lane for a same-owner legacy unknown without changing that record or sending a mutation', async () => {
+  const unresolvedId = randomUUID();
+  await pool.query(
+    "INSERT INTO sandbox_listing_runs(id,connection_id,item_id,product_key,source_revision,connection_revision,input_fingerprint,state,intent,body) VALUES($1,$2,'999001','lamy-5d',1,1,'same-owner-unknown-fixture','unknown',$3,$3)",
+    [unresolvedId, connectionId, { synthetic: true, unresolvedMutation: true }],
+  );
+  const before = (
+    await pool.query('SELECT * FROM sandbox_listing_runs WHERE id=$1', [unresolvedId])
+  ).rows[0];
+  const trial = await store.submit(manifest(1), evidence());
+  expect(await store.claim('blocked-owner-worker')).toBeNull();
+  expect((await store.get(trial.id))!.items[0]!.state).toBe('queued');
+  expect(remote.requests).toEqual([]);
+  expect(
+    (await pool.query('SELECT * FROM sandbox_listing_runs WHERE id=$1', [unresolvedId])).rows[0],
+  ).toEqual(before);
+});
+
+it('processes 80 zero/one/two-tier fixtures through real gateway+PG worker with two competing workers, without touching the other-owner protected Lamy fixture', async () => {
   const sourceBefore = await repo.getProduct('lamy-5d'),
     lamyBefore = (await pool.query('SELECT * FROM sandbox_listing_runs WHERE id=$1', [lamyRunId]))
       .rows[0];
