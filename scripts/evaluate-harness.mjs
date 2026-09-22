@@ -8,6 +8,7 @@ const result = spawnSync(
     'node_modules/vitest/vitest.mjs',
     'run',
     'tests/unit/harness.test.ts',
+    'tests/unit/management-harness.test.ts',
     'tests/unit/knowledge.test.ts',
     'tests/integration/assistant.test.ts',
     '--reporter=default',

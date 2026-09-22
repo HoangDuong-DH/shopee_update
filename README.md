@@ -167,7 +167,7 @@ Các phần chưa nên suy rộng từ kết quả hiện có:
 - Tự động retry chỉ phù hợp với lỗi được phân loại là tạm thời; kết quả không xác định phải được đối chiếu trước.
 - Không có cơ chế tự sửa dữ liệu nguồn để vượt validation của Shopee.
 
-Xem [workflow production](docs/delivery/2026-09-15-production-workflow.md) để biết ranh giới đã nghiệm thu và [hướng dẫn chạy local](docs/runbooks/local-development.md) để xử lý lỗi môi trường.
+Xem [handoff hiện hành](docs/handoffs/PROJECT_HANDOFF.md) để biết ranh giới vận hành đã công bố và [hướng dẫn chạy local](docs/runbooks/local-development.md) để xử lý lỗi môi trường.
 
 ## Tài liệu
 
@@ -178,8 +178,12 @@ Xem [workflow production](docs/delivery/2026-09-15-production-workflow.md) để
 - [Kết nối sandbox](docs/runbooks/sandbox-connection.md)
 - [Thiết kế workflow production](docs/superpowers/specs/2026-09-15-production-workflow-design.md)
 - [Quy tắc tra cứu kiến thức Shopee](AGENTS.md)
+- [Handoff hiện hành](docs/handoffs/PROJECT_HANDOFF.md)
+- [Harness dẫn model quản lý hệ thống](docs/ai/MODEL_MANAGEMENT_HARNESS.md)
+- [Skill vận hành listing](skills/shopee-uploader-operator/SKILL.md)
+- [Skill cập nhật handoff](skills/shopee-uploader-handoff/SKILL.md)
 
-Các báo cáo theo ngày trong `docs/delivery/` ghi lại bằng chứng và giới hạn tại từng checkpoint. Chúng là hồ sơ kỹ thuật, không phải trang bắt đầu cho người mới.
+Các báo cáo theo ngày và bằng chứng chứa dữ liệu vận hành được giữ local. GitHub chỉ công bố handoff hiện hành, các runbook ổn định và hành lang quản lý dành cho model.
 
 ## CI và đóng góp
 

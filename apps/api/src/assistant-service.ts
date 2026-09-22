@@ -5,6 +5,7 @@ import { Repository, transaction } from '@shopee/persistence';
 import {
   InvestigationHarness,
   Deadline,
+  buildManagementCorridor,
   sameScope,
   safeHarnessCode,
   validateCitations,
@@ -146,6 +147,16 @@ export class AssistantService {
       },
     });
     try {
+      const corridor = buildManagementCorridor({
+        mode: 'inspect',
+        scope: plan.scope,
+        authorization: 'read_only',
+        source: {
+          planId: plan.id,
+          revision: plan.revision,
+          fingerprint: plan.fingerprint,
+        },
+      });
       const inspection = await harness.call('inspect_plan', {});
       let hits: KnowledgeHit[] = [];
       let issues: string[] = [];
@@ -164,6 +175,7 @@ export class AssistantService {
       await this.assertCurrent(plan, deadline);
       const result = {
         mode: 'deterministic_review',
+        corridor,
         inspection,
         hits,
         sources,

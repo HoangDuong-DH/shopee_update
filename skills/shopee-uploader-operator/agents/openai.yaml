@@ -1,0 +1,6 @@
+interface:
+  display_name: 'Shopee Uploader Operator'
+  short_description: 'Operate listing batches with source and scope guards'
+  default_prompt: 'Use $shopee-uploader-operator to inspect and safely continue this Shopee listing workflow.'
+policy:
+  allow_implicit_invocation: true

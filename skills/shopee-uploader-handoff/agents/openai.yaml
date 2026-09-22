@@ -1,0 +1,6 @@
+interface:
+  display_name: 'Shopee Uploader Handoff'
+  short_description: 'Create a concise evidence-backed project handoff'
+  default_prompt: 'Use $shopee-uploader-handoff to update the current project handoff.'
+policy:
+  allow_implicit_invocation: true

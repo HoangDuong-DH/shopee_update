@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 const commands = [
   ['typecheck', 'node_modules/typescript/bin/tsc', '--noEmit', '-p', 'tsconfig.check.json'],
+  ['repository-skills', 'scripts/validate-repository-skills.mjs'],
   ['build-typescript', 'node_modules/typescript/bin/tsc', '-b'],
   ['build-web', 'node_modules/vite/bin/vite.js', 'build', '--config', 'apps/web/vite.config.ts'],
   ['legacy', '--test', 'tests/shared.test.js'],

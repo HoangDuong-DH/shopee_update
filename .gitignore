@@ -18,6 +18,9 @@ knowledge-base/
 docs/research/
 docs/sources/
 docs/test-reports/
+# Detailed session checkpoints stay local. GitHub receives a sanitized current handoff.
+docs/delivery/*.md
+docs/handoffs/20*.md
 *.xlsx
 *.docx
 *.zip

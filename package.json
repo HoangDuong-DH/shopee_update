@@ -26,6 +26,7 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "test:eval": "node scripts/evaluate-harness.mjs",
+    "test:skills": "node scripts/validate-repository-skills.mjs",
     "test": "npm run test:legacy && npm run test:unit && npm run test:integration"
   },
   "devDependencies": {

@@ -90,6 +90,8 @@ it('persists a scoped source-backed review and exposes no completion claim about
   const result = response.json();
   expect(result.state).toBe('completed');
   expect(result.result.mode).toBe('deterministic_review');
+  expect(result.result.corridor.mode).toBe('inspect');
+  expect(result.result.corridor.canWriteShopee).toBe(false);
   expect(result.result.inspection.listingExecution).toBe('not_verified');
   expect(result.result.inspection.qc).toBe('not_verified');
   expect(result.result.sources).toEqual([source]);
