@@ -734,7 +734,7 @@ export class SellerKnowledgeService {
       query = normalize(input.query ?? '').replace(/[\\%_]/g, '\\$&');
     const rows = (
       await this.repo.pool.query(
-        `SELECT i.*,o.scope,o.body,o.observed_at FROM seller_knowledge_items i JOIN seller_knowledge_observations o ON o.id=i.evidence_id WHERE i.connection_id=$1 AND ($2::text IS NULL OR i.category_id=$2) AND ($3::text IS NULL OR i.brand_id=$3) AND ($4='' OR i.item_id=$4 OR i.normalized_text LIKE '%'||$4||'%') ORDER BY CASE WHEN i.item_status IN ('NORMAL','UNLIST') AND i.title<>'' THEN 0 WHEN i.item_status NOT IN ('SELLER_DELETE','SHOPEE_DELETE') THEN 1 ELSE 2 END,i.last_seen_at DESC,i.item_id LIMIT $5`,
+        `SELECT i.evidence_id,i.summary AS body,i.last_seen_at FROM seller_knowledge_items i WHERE i.connection_id=$1 AND ($2::text IS NULL OR i.category_id=$2) AND ($3::text IS NULL OR i.brand_id=$3) AND ($4='' OR i.item_id=$4 OR i.normalized_text LIKE '%'||$4||'%') ORDER BY CASE WHEN i.item_status IN ('NORMAL','UNLIST') AND i.title<>'' THEN 0 WHEN i.item_status NOT IN ('SELLER_DELETE','SHOPEE_DELETE') THEN 1 ELSE 2 END,i.last_seen_at DESC,i.item_id LIMIT $5`,
         [input.connectionId, input.categoryId ?? null, input.brandId ?? null, query, input.limit],
       )
     ).rows;
@@ -743,8 +743,8 @@ export class SellerKnowledgeService {
       rawItem: undefined,
       rawModels: undefined,
       evidenceId: r.evidence_id,
-      scope: r.scope,
-      observedAt: iso(r.observed_at),
+      scope: r.body.scope,
+      observedAt: r.body.observedAt,
       lastSeenAt: iso(r.last_seen_at),
     }));
   }
@@ -769,7 +769,7 @@ export class SellerKnowledgeService {
       exclude = input.excludeItemId === undefined ? null : numericId.parse(input.excludeItemId);
     const rows = (
       await this.repo.pool.query(
-        `SELECT i.*,o.scope,o.body,o.observed_at,row_number() OVER(PARTITION BY i.model_skus,i.item_sku,o.body->'attributes' ORDER BY i.last_seen_at DESC,i.item_id) AS duplicate_rank FROM seller_knowledge_items i JOIN seller_knowledge_observations o ON o.id=i.evidence_id WHERE i.connection_id=$1 AND i.category_id=$2 AND ($3::text IS NULL OR i.brand_id=$3) AND ($4::text IS NULL OR i.item_id<>$4) AND i.item_status IN ('NORMAL','UNLIST') AND i.complete ORDER BY (i.model_skus && $5::text[] OR i.item_sku=ANY($5::text[])) DESC,duplicate_rank,i.last_seen_at DESC,i.item_id LIMIT 100`,
+        `SELECT i.evidence_id,i.summary AS body,i.last_seen_at,row_number() OVER(PARTITION BY i.model_skus,i.item_sku,i.summary->'attributes' ORDER BY i.last_seen_at DESC,i.item_id) AS duplicate_rank FROM seller_knowledge_items i WHERE i.connection_id=$1 AND i.category_id=$2 AND ($3::text IS NULL OR i.brand_id=$3) AND ($4::text IS NULL OR i.item_id<>$4) AND i.item_status IN ('NORMAL','UNLIST') AND i.complete ORDER BY (i.model_skus && $5::text[] OR i.item_sku=ANY($5::text[])) DESC,duplicate_rank,i.last_seen_at DESC,i.item_id LIMIT 100`,
         [checked.connectionId, checked.categoryId, checked.brandId ?? null, exclude, skus],
       )
     ).rows;
@@ -778,8 +778,8 @@ export class SellerKnowledgeService {
       rawItem: undefined,
       rawModels: undefined,
       evidenceId: r.evidence_id,
-      scope: r.scope,
-      observedAt: iso(r.observed_at),
+      scope: r.body.scope,
+      observedAt: r.body.observedAt,
       lastSeenAt: iso(r.last_seen_at),
     })) as SellerKnowledgeListing[];
   }
