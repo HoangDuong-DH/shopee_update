@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
@@ -31,8 +32,8 @@ const record = (value: unknown): value is Record<string, any> =>
 const metadataSchema = z
   .object({
     environment: z.literal('production'),
-    partnerId: z.literal('2010476'),
-    shopId: z.literal('1423724897'),
+    partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+    shopId: z.string().refine(value => value === currentProductionScope().shopId),
     connectionRevision: revision,
     categoryId: z.string().min(1),
     observedAt: z.iso.datetime(),
@@ -129,8 +130,8 @@ function readbacks(value: unknown): ProductionPilotReadback[] {
     .array(
       z
         .object({
-          shopId: z.literal('1423724897'),
-          partnerId: z.literal('2010476'),
+          shopId: z.string().refine(value => value === currentProductionScope().shopId),
+          partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
           itemId: z.string().regex(/^[1-9]\d*$/),
           connectionRevision: revision,
           observedAt: z.iso.datetime(),
@@ -216,7 +217,7 @@ export class ProductionPilotPublicationJournal {
   }
   private lock(c: PoolClient) {
     return c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-      'production-pilot:' + owner,
+      'production-pilot:' + productionOwner(),
     ]);
   }
   private async connection(c: PoolClient, connectionId: string, expectedRevision?: number) {
@@ -226,8 +227,8 @@ export class ProductionPilotPublicationJournal {
     if (
       !row ||
       row.environment !== 'production' ||
-      row.partner_id !== '2010476' ||
-      row.shop_id !== '1423724897'
+      row.partner_id !== currentProductionScope().partnerId ||
+      row.shop_id !== currentProductionScope().shopId
     )
       fail('SCOPE_FORBIDDEN');
     if (expectedRevision !== undefined && row.revision !== expectedRevision)
@@ -247,7 +248,7 @@ export class ProductionPilotPublicationJournal {
         uuid.parse(createOperationId),
       ])
     ).rows[0];
-    if (!row || row.owner_key !== owner) fail('CREATE_NOT_FOUND');
+    if (!row || row.owner_key !== productionOwner()) fail('CREATE_NOT_FOUND');
     this.allow(row);
     assertProductionPilotBatchBinding(this.batchAuthorization, row);
     const verification = (
@@ -277,11 +278,11 @@ export class ProductionPilotPublicationJournal {
         uuid.parse(operationId),
       ])
     ).rows[0];
-    if (!row || row.owner_key !== owner) fail('OPERATION_NOT_FOUND');
+    if (!row || row.owner_key !== productionOwner()) fail('OPERATION_NOT_FOUND');
     this.allow(row);
     const source = (await c.query('SELECT * FROM production_pilot_operations WHERE id=$1 FOR SHARE',
       [row.create_operation_id])).rows[0];
-    if (!source || source.owner_key !== owner || source.source_identity !== row.source_identity ||
+    if (!source || source.owner_key !== productionOwner() || source.source_identity !== row.source_identity ||
       source.source_revision !== row.source_revision || source.source_fingerprint !== row.source_fingerprint)
       fail('CREATE_UNVERIFIED');
     assertProductionPilotBatchBinding(this.batchAuthorization, source);
@@ -293,13 +294,13 @@ export class ProductionPilotPublicationJournal {
     const existing = (
       await c.query(
         'SELECT operation_id FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE',
-        [owner],
+        [productionOwner()],
       )
     ).rows[0];
     if (existing && existing.operation_id !== createOperationId) fail('SHOP_BUSY');
     if (!existing)
       await c.query('INSERT INTO production_pilot_lanes(owner_key,operation_id) VALUES($1,$2)', [
-        owner,
+        productionOwner(),
         createOperationId,
       ]);
   }
@@ -433,7 +434,7 @@ export class ProductionPilotPublicationJournal {
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'authorized')`,
         [
           operationId,
-          owner,
+          productionOwner(),
           source.id,
           verification.id,
           input.connectionId,
@@ -570,7 +571,7 @@ export class ProductionPilotPublicationJournal {
         [operation.id],
       );
       await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2', [
-        owner,
+        productionOwner(),
         operation.create_operation_id,
       ]);
       return this.view(c, operation.id);

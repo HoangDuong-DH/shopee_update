@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
@@ -99,8 +100,8 @@ const envelopeSchema = z.record(z.string(), z.unknown());
 const inventoryScanSchema = z
   .object({
     environment: z.literal('production'),
-    partnerId: z.literal('2010476'),
-    shopId: z.literal('1423724897'),
+    partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+    shopId: z.string().refine(value => value === currentProductionScope().shopId),
     connectionRevision: revision,
     observedAt: z.iso.datetime(),
     requestIds: z.array(z.string().min(1).max(256)).min(4).max(10000),
@@ -350,8 +351,8 @@ function inventoryIdentity(
     .sort((a, b) => a.itemId.localeCompare(b.itemId));
 }
 export type ProductionPilotReadback = {
-  shopId: '1423724897';
-  partnerId: '2010476';
+  shopId: string;
+  partnerId: string;
   itemId: string;
   connectionRevision: number;
   observedAt: string;
@@ -414,7 +415,7 @@ export class ProductionPilotJournal {
   }
   private async lock(c: PoolClient) {
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-      'production-pilot:' + owner,
+      'production-pilot:' + productionOwner(),
     ]);
   }
   private async closedAncestry(
@@ -480,9 +481,9 @@ export class ProductionPilotJournal {
     ).rows[0];
     if (
       !row ||
-      row.environment !== scope.environment ||
-      row.partner_id !== scope.partnerId ||
-      row.shop_id !== scope.shopId
+      row.environment !== currentProductionScope().environment ||
+      row.partner_id !== currentProductionScope().partnerId ||
+      row.shop_id !== currentProductionScope().shopId
     )
       fail('SCOPE_FORBIDDEN');
     if (expectedRevision !== undefined && row.revision !== expectedRevision)
@@ -502,7 +503,7 @@ export class ProductionPilotJournal {
         uuid.parse(id),
       ])
     ).rows[0];
-    if (!row || row.owner_key !== owner) return fail('OPERATION_NOT_FOUND');
+    if (!row || row.owner_key !== productionOwner()) return fail('OPERATION_NOT_FOUND');
     this.allowedSource(row.source_identity, row.source_revision);
     assertProductionPilotBatchBinding(this.batchAuthorization, row);
     if (expectedRevision !== undefined && row.revision !== expectedRevision)
@@ -515,8 +516,8 @@ export class ProductionPilotJournal {
     if (!eligible) return false;
     await c.query(`INSERT INTO production_pilot_qc_wait_receipts(operation_id,operation_revision,source_fingerprint,item_id)
       SELECT id,revision,source_fingerprint,item_id FROM production_pilot_operations WHERE id=$1 AND owner_key=$2
-      ON CONFLICT(operation_id) DO NOTHING`,[operationId,owner]);
-    await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2',[owner,operationId]);
+      ON CONFLICT(operation_id) DO NOTHING`,[operationId,productionOwner()]);
+    await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2',[productionOwner(),operationId]);
     return true;
   }
   async waitForQc(operationId: string): Promise<boolean> {
@@ -530,17 +531,17 @@ export class ProductionPilotJournal {
     const row = (
       await c.query(
         'SELECT operation_id FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE',
-        [owner],
+        [productionOwner()],
       )
     ).rows[0];
     if (row && row.operation_id !== operationId) {
       if (!await this.parkCompletedWrites(c,row.operation_id)) fail('SHOP_BUSY');
-      await c.query('INSERT INTO production_pilot_lanes(owner_key,operation_id) VALUES($1,$2)',[owner,operationId]);
+      await c.query('INSERT INTO production_pilot_lanes(owner_key,operation_id) VALUES($1,$2)',[productionOwner(),operationId]);
       return;
     }
     if (!row)
       await c.query('INSERT INTO production_pilot_lanes(owner_key,operation_id) VALUES($1,$2)', [
-        owner,
+        productionOwner(),
         operationId,
       ]);
   }
@@ -602,7 +603,7 @@ export class ProductionPilotJournal {
       if (op.state !== 'authorized' || op.item_id !== null || view.steps.length ||
         view.verification || view.rejectionClosure || view.deferredImageVerification ||
         op.source_fingerprint !== input.expectedSourceFingerprint) fail('PREFLIGHT_RENEWAL_FORBIDDEN');
-      if (fingerprint({ scope, sourceIdentity: op.source_identity, sourceRevision: op.source_revision,
+      if (fingerprint({ scope: currentProductionScope(), sourceIdentity: op.source_identity, sourceRevision: op.source_revision,
         sourcePayload: op.source_payload, expectedProjection: op.expected_projection }) !== op.source_fingerprint)
         fail('PREFLIGHT_RENEWAL_INVALID');
       for (const key of ['sourceIdentity', 'sourceRevision', 'connectionId', 'document', 'assets', 'issues', 'supersedesOperationId'])
@@ -613,7 +614,7 @@ export class ProductionPilotJournal {
       if (op.source_payload.batchAuthorization) source.batchAuthorization = snapshot(op.source_payload.batchAuthorization);
       else if (Object.hasOwn(source, 'batchAuthorization')) fail('PREFLIGHT_SOURCE_CHANGED');
       const meta = source.metadata as Record<string, any>;
-      if (!meta || meta.environment !== scope.environment || meta.partnerId !== scope.partnerId || meta.shopId !== scope.shopId ||
+      if (!meta || meta.environment !== currentProductionScope().environment || meta.partnerId !== currentProductionScope().partnerId || meta.shopId !== currentProductionScope().shopId ||
         meta.connectionRevision !== source.connectionRevision || meta.categoryId !== (source.document as any)?.categoryId ||
         !z.iso.datetime().safeParse(meta.observedAt).success || !z.iso.datetime().safeParse(meta.expiresAt).success ||
         Date.parse(meta.observedAt) > Date.now() || Date.parse(meta.expiresAt) <= Date.now() ||
@@ -738,7 +739,7 @@ export class ProductionPilotJournal {
       if (canonicalJson(inventories[0]) !== canonicalJson(inventories[1]))
         fail('INVENTORY_UNSTABLE');
       const lane = (
-        await c.query('SELECT * FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE', [owner])
+        await c.query('SELECT * FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE', [productionOwner()])
       ).rows[0];
       if (!lane || lane.operation_id !== op.id) fail('SHOP_OWNER_MISMATCH');
       await c.query(
@@ -761,7 +762,7 @@ export class ProductionPilotJournal {
         ],
       );
       await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2', [
-        owner,
+        productionOwner(),
         op.id,
       ]);
       return this.view(c, op.id);
@@ -799,7 +800,7 @@ export class ProductionPilotJournal {
     if (input.supersedesOperationId) source.supersedesOperationId = input.supersedesOperationId;
     if (!Object.keys(source).length || !Object.keys(projection).length) fail('INVALID_SNAPSHOT');
     const sourceFingerprint = fingerprint({
-      scope,
+      scope: currentProductionScope(),
       sourceIdentity: input.sourceIdentity,
       sourceRevision: input.sourceRevision,
       sourcePayload: source,
@@ -814,13 +815,13 @@ export class ProductionPilotJournal {
       const batchRows = this.batchAuthorization ? (await c.query(
         `SELECT * FROM production_pilot_operations WHERE owner_key=$1
          AND source_payload->'batchAuthorization'->>'batchId'=$2 FOR UPDATE`,
-        [owner, this.batchAuthorization.batchId],
+        [productionOwner(), this.batchAuthorization.batchId],
       )).rows : undefined;
       for (const row of batchRows ?? []) assertProductionPilotBatchBinding(this.batchAuthorization, row);
       const previous = (
         await c.query(
           'SELECT * FROM production_pilot_operations WHERE owner_key=$1 AND source_identity=$2 ORDER BY source_revision DESC FOR UPDATE',
-          [owner, input.sourceIdentity],
+          [productionOwner(), input.sourceIdentity],
         )
       ).rows;
       for (const row of previous) assertProductionPilotBatchBinding(this.batchAuthorization, row);
@@ -848,13 +849,13 @@ export class ProductionPilotJournal {
           fail('SUPERSESSION_UNPROVEN');
         await this.closedAncestry(c, previous, input.connectionId);
       } else if (input.supersedesOperationId) fail('SUPERSESSION_UNPROVEN');
-      const occupied = (await c.query('SELECT operation_id FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE', [owner])).rows[0];
+      const occupied = (await c.query('SELECT operation_id FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE', [productionOwner()])).rows[0];
       if (occupied && !await this.parkCompletedWrites(c,occupied.operation_id)) fail('SHOP_BUSY');
       const counts = batchRows ? { total: batchRows.length, identities: new Set(batchRows.map(row => row.source_identity)).size } : (
         await c.query(
           `SELECT count(*) AS total,count(DISTINCT source_identity) AS identities FROM production_pilot_operations
            WHERE owner_key=$1 AND NOT (source_payload ? 'batchAuthorization')`,
-          [owner],
+          [productionOwner()],
         )
       ).rows[0];
       if (
@@ -869,7 +870,7 @@ export class ProductionPilotJournal {
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'authorized',$10)`,
         [
           id,
-          owner,
+          productionOwner(),
           input.connectionId,
           input.expectedConnectionRevision,
           input.sourceIdentity,
@@ -1101,8 +1102,8 @@ export class ProductionPilotJournal {
       .array(
         z
           .object({
-            shopId: z.literal('1423724897'),
-            partnerId: z.literal('2010476'),
+            shopId: z.string().refine(value => value === currentProductionScope().shopId),
+            partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
             itemId: z.string().regex(/^[1-9]\d*$/),
             connectionRevision: revision,
             observedAt: z.iso.datetime(),
@@ -1174,14 +1175,14 @@ export class ProductionPilotJournal {
           basis:'image_qc_deferred_by_operator',expected_core_fingerprint:fingerprint(coreProjectionWithoutImages(op.expected_projection)),
           readbacks:savedReads,evidence_fingerprint:fingerprint(savedReads)};
         assertDeferredImageVerification(receipt,op,this.executionPolicy);
-        const lane=(await c.query('SELECT operation_id FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE',[owner])).rows[0];
+        const lane=(await c.query('SELECT operation_id FROM production_pilot_lanes WHERE owner_key=$1 FOR UPDATE',[productionOwner()])).rows[0];
         if(!lane || lane.operation_id!==op.id) {
           const parked=(await c.query('SELECT 1 FROM production_pilot_qc_wait_receipts WHERE operation_id=$1 AND operation_revision=$2 AND source_fingerprint=$3',[op.id,op.revision,op.source_fingerprint])).rows.length===1;
           if(!parked || !(await c.query('SELECT production_pilot_can_wait_for_qc($1) AS ok',[op.id])).rows[0]?.ok)fail('SHOP_OWNER_MISMATCH');
         }
         await c.query(`INSERT INTO production_pilot_deferred_image_verifications(operation_id,operation_revision,item_id,source_fingerprint,basis,expected_core_fingerprint,readbacks,evidence_fingerprint,execution_policy_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[op.id,op.revision,op.item_id,op.source_fingerprint,receipt.basis,receipt.expected_core_fingerprint,JSON.stringify(savedReads),receipt.evidence_fingerprint,this.executionPolicy?.id ?? null]);
-        await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2',[owner,op.id]);
+        await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2',[productionOwner(),op.id]);
         return this.view(c,op.id);
       }
       await c.query(
@@ -1202,7 +1203,7 @@ export class ProductionPilotJournal {
         [op.id, op.revision],
       );
       await c.query('DELETE FROM production_pilot_lanes WHERE owner_key=$1 AND operation_id=$2', [
-        owner,
+        productionOwner(),
         op.id,
       ]);
       return this.view(c, op.id);

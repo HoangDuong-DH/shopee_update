@@ -145,17 +145,17 @@ it('dispatches five ready sources across two groups with one command and never r
   expect(await queue.get(f.input.id)).toMatchObject({publicationMode:'hidden_for_review',completionTarget:'created_hidden'});
   await queue.start(f.input.id,{expectedFingerprint:preview.fingerprint});expect(start).toHaveBeenCalledTimes(2);
 });
-it('pauses hidden creation honestly for pending QC and resumes later groups only after child verification',async()=>{
+it('holds a child needing QC, finishes independent later groups, then resumes only unfinished work',async()=>{
   const f=await setup(5),preview=await f.service.preview(f.input),registered=await f.service.register(f.input.id,{expectedFingerprint:preview.fingerprint});
   const done=new Set<string>();let reviewed=false;
   const status=vi.fn(async(id:string)=>({batchId:id,manifestSha256:registered.batches.find((b:any)=>b.batchId===id).manifestSha256,
     state:done.has(id)?'completed':'ready',busy:false,canExecute:true,statusFingerprint:'a'.repeat(64),
     listings:[{state:done.has(id)?'created_unlisted':'created_readback_pending'}]}));
-  const start=vi.fn(async(id:string)=>{if(reviewed)done.add(id);return {};});
+  const start=vi.fn(async(id:string)=>{if(reviewed || id===registered.batches[1].batchId)done.add(id);return {};});
   const queue=new ProductionPreparationExecution(repo,f.service,{status,start} as any,{enabled:true,sleep:async()=>{}});
   await queue.start(f.input.id,{expectedFingerprint:preview.fingerprint});await queue.waitForIdle(f.input.id);
-  expect(await queue.get(f.input.id)).toMatchObject({state:'paused',code:'PREPARATION_CHILD_QC_REVIEW_REQUIRED',publicationMode:'hidden_for_review',completedBatches:[]});
-  expect(start).toHaveBeenCalledTimes(1);expect(start.mock.calls[0]![0]).toBe(registered.batches[0].batchId);
+  expect(await queue.get(f.input.id)).toMatchObject({state:'paused',code:'PREPARATION_PARTIAL_REVIEW_REQUIRED',publicationMode:'hidden_for_review',completedBatches:[registered.batches[1].batchId],heldBatches:[{batchId:registered.batches[0].batchId,code:'PREPARATION_CHILD_QC_REVIEW_REQUIRED'}]});
+  expect(start).toHaveBeenCalledTimes(2);expect(start.mock.calls[0]![0]).toBe(registered.batches[0].batchId);
   reviewed=true;
   await queue.start(f.input.id,{expectedFingerprint:preview.fingerprint});await queue.waitForIdle(f.input.id);
   expect(await queue.get(f.input.id)).toMatchObject({state:'completed',completionTarget:'created_hidden',completedBatches:registered.batches.map((b:any)=>b.batchId)});
@@ -176,6 +176,35 @@ it('exposes an interrupted parent as resumable while leaving its durable record 
   expect(await queue.get(f.input.id)).toMatchObject({state:'paused',code:'PREPARATION_INTERRUPTED_REVIEW_REQUIRED',canResume:true});
   expect((await pool.query('SELECT body FROM production_preparation_executions WHERE preparation_id=$1',[f.input.id])).rows[0].body).toEqual(body);expect(start).not.toHaveBeenCalled();
 });
+it('serializes two independent coordinators and restores completed work after a refresh without replay',async()=>{
+  const f=await setup(),preview=await f.service.preview(f.input),registered=await f.service.register(f.input.id,{expectedFingerprint:preview.fingerprint});
+  let release!:()=>void,entered!:()=>void,done=false;
+  const held=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+  const status=vi.fn(async()=>({manifestSha256:registered.batches[0].manifestSha256,state:done?'completed':'ready',busy:false,canExecute:true,statusFingerprint:'a'.repeat(64)}));
+  const start=vi.fn(async()=>{entered();await held;done=true;return {};});
+  const queue=new ProductionPreparationExecution(repo,f.service,{status,start} as any,{enabled:true,sleep:async()=>{}});
+  const peer=new ProductionPreparationExecution(repo,f.service,{status,start} as any,{enabled:true,sleep:async()=>{}});
+  try {
+    await queue.start(f.input.id,{expectedFingerprint:preview.fingerprint});await started;
+    expect(await peer.get(f.input.id)).toMatchObject({state:'running',fingerprint:preview.fingerprint});
+    await expect(peer.start(f.input.id,{expectedFingerprint:preview.fingerprint})).rejects.toThrow('PREPARATION_IN_PROGRESS');
+    expect(start).toHaveBeenCalledOnce();
+  } finally {release();await queue.waitForIdle(f.input.id);}
+  const completed=await peer.get(f.input.id);
+  expect(completed.state).toBe('completed');
+  expect(await peer.start(f.input.id,{expectedFingerprint:preview.fingerprint})).toEqual(completed);
+  expect(start).toHaveBeenCalledOnce();
+});
+it('stops later groups when the same child contains both a local failure and an infrastructure failure',async()=>{
+  const f=await setup(5),preview=await f.service.preview(f.input),registered=await f.service.register(f.input.id,{expectedFingerprint:preview.fingerprint});
+  const status=vi.fn(async()=>({manifestSha256:registered.batches[0].manifestSha256,state:'ready',busy:false,canExecute:false,
+    listings:[{sourceKey:'a',state:'not_sent'},{sourceKey:'b',state:'not_sent'}],
+    lastResult:{mode:'execute',listings:[{sourceKey:'a',state:'blocked',code:'PASS1_PLAN_BLOCKED'},{sourceKey:'b',state:'blocked',code:'PASS1_CONNECTION_REQUIRED'}]}}));
+  const start=vi.fn(),queue=new ProductionPreparationExecution(repo,f.service,{status,start} as any,{enabled:true,sleep:async()=>{}});
+  await queue.start(f.input.id,{expectedFingerprint:preview.fingerprint});await queue.waitForIdle(f.input.id);
+  expect(await queue.get(f.input.id)).toMatchObject({state:'paused',code:'PREPARATION_CHILD_REVIEW_REQUIRED',completedBatches:[]});
+  expect(status).toHaveBeenCalledOnce();expect(start).not.toHaveBeenCalled();
+});
 it('prepares and registers with a single database connection without acquiring a nested pool slot',async()=>{
   const f=await setup(),single=new Pool({connectionString:process.env.DATABASE_URL,options:`-c search_path=${schema},public`,max:1,connectionTimeoutMillis:500});
   try {
@@ -185,4 +214,21 @@ it('prepares and registers with a single database connection without acquiring a
     const preview=await service.preview(f.input);
     expect((await service.register(f.input.id,{expectedFingerprint:preview.fingerprint})).batches).toHaveLength(1);
   } finally {await single.end();}
+});
+it('rejects all stale unstarted sources before a claim while keeping an independent current source startable',async()=>{
+  const f=await setup(2),preview=await f.service.preview(f.input),registered=await f.service.register(f.input.id,{expectedFingerprint:preview.fingerprint});
+  f.readSource.mockImplementation(async(key:string)=>({productKey:key,revision:2}));
+  const status=vi.fn(),start=vi.fn();
+  const queue=new ProductionPreparationExecution(repo,f.service,{status,start} as any,{enabled:true,sleep:async()=>{}});
+  await expect(queue.start(f.input.id,{expectedFingerprint:preview.fingerprint})).rejects.toThrow('PREPARATION_SOURCE_CHANGED');
+  expect(status).not.toHaveBeenCalled();expect(start).not.toHaveBeenCalled();
+  expect((await pool.query('SELECT body FROM production_preparation_executions WHERE preparation_id=$1',[f.input.id])).rows).toHaveLength(0);
+  let sent=false;const stale=f.input.entries[0]!.productKey;
+  f.readSource.mockImplementation(async(key:string)=>({productKey:key,revision:key===stale?2:1}));
+  status.mockImplementation(async()=>({manifestSha256:registered.batches[0].manifestSha256,state:'ready',busy:false,canExecute:!sent,statusFingerprint:'a'.repeat(64),
+    listings:[{sourceKey:stale,state:'not_sent',currentSource:'source_changed'},{state:sent?'created_unlisted':'not_sent',currentSource:'current'}]}));
+  start.mockImplementation(async()=>{sent=true;return {};});
+  await queue.start(f.input.id,{expectedFingerprint:preview.fingerprint});await queue.waitForIdle(f.input.id);
+  expect(start).toHaveBeenCalledOnce();
+  expect(await queue.get(f.input.id)).toMatchObject({state:'paused',code:'PREPARATION_PARTIAL_REVIEW_REQUIRED'});
 });

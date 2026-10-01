@@ -1,3 +1,6 @@
+import { ProductionExecutionPolicyService, assertExecutionPolicySource } from './production-execution-policy.js';
+import { intendedHiddenCapabilityProbe } from './production-batch-capability.js';
+import { currentProductionScope, productionOwner, assertProductionScope, productionScopeSchema, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -195,6 +198,7 @@ const savedListing = listing.extend({
 });
 const savedManifest = legacyManifest.extend({
   version: z.literal(2),
+  scope: productionScopeSchema,
   publicationMode: productionPublicationModeSchema.optional(),
   imageQcPolicy: productionImageQcPolicySchema.optional(),
   preparation: z.object({ id: z.string().uuid(), fingerprint: sha }).strict(),
@@ -330,6 +334,7 @@ export async function loadProductionBatchSource(manifestPath: string, expectedSh
     value = loaded.value,
     root = await realpath(productionBatchPass1Root),
     descriptors = checkRelations(value);
+  assertProductionScope(value.scope);
   for (const file of value.sourceFiles) {
     if (!isAbsolute(file.path)) fail('SOURCE_PATH_INVALID');
     const sourceBytes = await readFile(file.path);
@@ -354,7 +359,7 @@ export async function loadProductionBatchSource(manifestPath: string, expectedSh
   return loaded;
 }
 
-/** Shared fresh GET collector, isolated evidence files, no registrations, writes or capability probe. */
+/** Shared fresh GET collector; exact intended-source probe permissions are checked, never executed here. */
 export async function collectProductionBatchInput(
   repo: Repository,
   input: {
@@ -370,19 +375,36 @@ export async function collectProductionBatchInput(
   const evidence = options?.priorCapabilityEvidence;
   if (
     !evidence ||
-    evidence.environment !== productionPilotScope.environment ||
-    evidence.partnerId !== productionPilotScope.partnerId ||
-    evidence.shopId !== productionPilotScope.shopId ||
-    evidence.gallery34?.state !== 'supported' ||
-    !evidence.gallery34.verifiedOperationId
+    evidence.environment !== currentProductionScope().environment ||
+    evidence.partnerId !== currentProductionScope().partnerId ||
+    evidence.shopId !== currentProductionScope().shopId ||
+    (evidence.gallery34?.state !== 'unknown' && (evidence.gallery34?.state !== 'supported' || !evidence.gallery34.verifiedOperationId))
   )
     fail('CAPABILITY_EVIDENCE_REQUIRED');
   const loaded = await loadProductionBatchSource(input.manifestPath, input.expectedSha256);
   const selected = loaded.value.listings.find((source) => source.sourceKey === input.sourceKey);
   if (!selected) fail('SOURCE_NOT_ALLOWED');
+  let hidden = productionPublicationMode(loaded.value) === 'hidden_for_review';
+  if (!hidden && options.capabilityProbe && loaded.value.version === 2) {
+    const policy = await new ProductionExecutionPolicyService(repo).getForBatch(loaded.value.batchId, loaded.sha256);
+    if (policy) {
+      assertExecutionPolicySource(policy, {batchId:loaded.value.batchId, manifestSha256:loaded.sha256,
+        sourceIdentity:selected.sourceIdentity, sourceRevision:selected.sourceRevision,
+        documentSha256:hash(Buffer.from(canonicalJson(selected.document))),
+        ...(options.trustedExistingOperation ? {operationId:options.trustedExistingOperation.operationId,
+          itemId:options.trustedExistingOperation.itemId,sourceFingerprint:options.trustedExistingOperation.sourceFingerprint} : {})});
+      hidden = true;
+    }
+  }
+  const expectedProbe = intendedHiddenCapabilityProbe({
+    hidden,
+    batchId: loaded.value.batchId, manifestSha256: loaded.sha256,
+    authorizationReference: loaded.value.authorizationReference, source: selected, evidence,
+  });
+  if (canonicalJson(options.capabilityProbe ?? null) !== canonicalJson(expectedProbe ?? null)) fail('CAPABILITY_PROBE_FORBIDDEN');
   if (
     selected.document.description.some((block) => block.type === 'image') &&
-    (evidence.extendedDescription.state === 'unknown' ||
+    ((evidence.extendedDescription.state === 'unknown' && !expectedProbe) ||
       (evidence.extendedDescription.state === 'supported' &&
         !evidence.extendedDescription.verifiedOperationId))
   )
@@ -394,6 +416,7 @@ export async function collectProductionBatchInput(
     readSession: options.readSession,
     trustedExistingOperation: options.trustedExistingOperation,
     priorCapabilityEvidence: evidence,
+    ...(expectedProbe ? { capabilityProbe: expectedProbe } : {}),
     ...(selected.document.description.some((block) => block.type === 'image') &&
     evidence.extendedDescription.state === 'unsupported'
       ? { descriptionFallbackPolicy: 'plain_text_when_unsupported' as const }
@@ -404,7 +427,7 @@ export async function collectProductionBatchInput(
       load: () => loadProductionBatchSource(input.manifestPath, input.expectedSha256),
       sourceKeys: loaded.value.listings.map((source) => source.sourceKey),
       evidenceRoot: resolve(productionBatchPass1Root, 'evidence', loaded.value.batchId),
-      shopName: options.shopName ?? 'Vuatinhdau - Đại Lý Chính Hãng',
+      ...(options.shopName ? { shopName: options.shopName } : {}),
     },
   });
   if (loaded.value.version === 2) {
@@ -419,7 +442,11 @@ export async function collectProductionBatchInput(
     if (snapshot?.draft?.productKey !== selected.sourceIdentity ||
       snapshot.draft.revision !== selected.sourceRevision)
       fail('SOURCE_CONTRACT_INVALID');
-    collected.input.context.sourceContract = sourceContractFromApprovedDraft(snapshot.draft);
+    if(!snapshot.input?.stocks || snapshot.decisionSource?.kind!=='user_decision'
+      || !snapshot.decisionSource.locator?.trim() || !snapshot.decisionSource.fileSha256
+      || !Number.isFinite(Date.parse(snapshot.decisionSource.observedAt)))
+      fail('SOURCE_STOCK_DECISION_REQUIRED');
+    collected.input.context.sourceContract = sourceContractFromApprovedDraft(snapshot.draft,snapshot.input.stocks);
   }
   return collected;
 }

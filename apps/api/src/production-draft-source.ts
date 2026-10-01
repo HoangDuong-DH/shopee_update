@@ -1,3 +1,5 @@
+import { ContentWorkbookService } from './content-workbook-service.js';
+import { localBulkEditReceiptSchema } from '../../../packages/domain/src/bulk-product-edit.js';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -24,6 +26,7 @@ import {
 } from '../../../packages/domain/src/source/selected-price-issues.js';
 import { folderDraftSelection } from '../../../packages/domain/src/folder-source-identity.js';
 import { resolveFolderSourceClaim } from './folder-source-claim.js';
+import { readMappingSourceHashes, currentProductMappingDecision, hasStructuredMappingDecision } from './product-mapping-decision.js';
 
 const nonblank = z
   .string()
@@ -168,6 +171,7 @@ const grams = (value: unknown) =>
 const draftKeys = new Set([
   // Server-owned intake provenance; it changes no product fields or writer permissions.
   'folderSource',
+  'localBulkEdit',
   'sourceListingId',
   'productKey',
   'revision',
@@ -258,6 +262,20 @@ export async function buildProductionDraftSource(
     return blocked();
   }
   draft = structuredClone(draft);
+  const bulkReceipt = (draft as ListingDraft & { localBulkEdit?: unknown }).localBulkEdit;
+  if (bulkReceipt !== undefined) {
+    const parsed = localBulkEditReceiptSchema.safeParse(bulkReceipt);
+    let receiptMatches=parsed.success && parsed.data.previousRevision===draft.revision-1;
+    if(parsed.success && parsed.data.previousRevision+1<draft.revision) {
+      try {
+        const original=await repo.getProduct(draft.productKey,parsed.data.previousRevision+1);
+        receiptMatches=original?.revision===parsed.data.previousRevision+1
+          && same((original as ListingDraft & {localBulkEdit?:unknown})?.localBulkEdit,bulkReceipt);
+      } catch { /* An unavailable historical receipt stays unverified. */ }
+    }
+    if (!receiptMatches)
+      add('BULK_EDIT_RECEIPT_INVALID', 'localBulkEdit', 'Nhật ký sửa hàng loạt không khớp phiên bản nguồn. Giữ bản đã lưu để đối chiếu, không gửi đăng.');
+  }
   for (const key of Object.keys(draft))
     if (!draftKeys.has(key) && active((draft as any)[key]))
       add('UNSUPPORTED_SOURCE_FIELD', key, 'Trường nguồn này chưa được hỗ trợ; không được bỏ qua.');
@@ -380,7 +398,14 @@ export async function buildProductionDraftSource(
   // A saved selection is not independent evidence: a mistaken one-tier mapping or an
   // unrelated imported image can be self-consistent. Recheck a bound folder against its
   // immutable manifest, or require an explicit decision bound to the complete mapping.
-  if (selection.folderBinding) {
+  let currentMappingDecision=false;
+  if(hasStructuredMappingDecision(draft)) {
+    try {currentMappingDecision=currentProductMappingDecision(draft,await readMappingSourceHashes(repo,draft));}
+    catch { /* Unknown source identities cannot authorize a mapping. */ }
+    if(!currentMappingDecision) add('SOURCE_MAPPING_DECISION_CHANGED','sourceSelection',
+      'Bản nguồn hoặc quyết định ánh xạ đã đổi. Đọc lại đúng phiên bản rồi xác nhận cấu trúc và ảnh nguồn.');
+  }
+  if (selection.folderBinding && !currentMappingDecision) {
     if (!repo.pool || !draft.folderSource) {
       add('SOURCE_MAPPING_PROOF_REQUIRED', 'sourceSelection', 'Thiếu bằng chứng bộ nguồn gốc cho cấu trúc phân loại và vai trò ảnh.');
     } else {
@@ -389,6 +414,7 @@ export async function buildProductionDraftSource(
           productKey: draft.productKey,
           expectedRevision: 0,
           folderBinding: selection.folderBinding,
+          contentBinding: selection.contentBinding,
           sourceListingId: draft.sourceListingId?.value,
           title: selection.title,
           headline: selection.headline,
@@ -405,7 +431,7 @@ export async function buildProductionDraftSource(
         add('SOURCE_MAPPING_PROOF_MISMATCH', 'sourceSelection', 'Cấu trúc hoặc ảnh không còn khớp đúng manifest và thư mục nguồn của listing.');
       }
     }
-  } else {
+  } else if(!currentMappingDecision) {
     const confirmation = selection.mappingConfirmation;
     const expected = hash(canonicalJson({ productKey: draft.productKey, mapping: folderDraftSelection(draft) }));
     if (
@@ -428,7 +454,23 @@ export async function buildProductionDraftSource(
       'Cấu trúc phân loại chưa được luồng này hỗ trợ.',
     );
 
-
+  let contentRecord: ImportRecord | undefined;
+  if (selection.contentBinding) {
+    try {
+      const content = await new ContentWorkbookService(repo, blobs).resolve(selection.contentBinding);
+      if (content.title !== selection.title || content.headline !== selection.headline || content.body !== selection.body)
+        throw Error('CONTENT_SELECTION_MISMATCH');
+      const record = await repo.getImport(selection.contentBinding.mapping.importId);
+      if (!record || record.sha256 !== selection.contentBinding.mapping.sha256 || record.kind !== 'xlsx')
+        throw Error('CONTENT_WORKBOOK_HASH_MISMATCH');
+      // Price-parser readiness is unrelated to this exact raw content binding.
+      contentRecord = record;
+    } catch {
+      add('CONTENT_SELECTION_MISMATCH', 'sourceSelection.contentBinding',
+        'Nội dung không còn đối chiếu được với ô Excel gốc. Mở nguồn đã lưu để sửa hoặc chọn lại đúng dòng; chưa gửi Shopee.');
+      return blocked();
+    }
+  }
   const records = new Map<string, ImportRecord>();
   const checkedBytes = new Map<string, Uint8Array>();
   async function imported(importId: string, kind: ImportRecord['kind']) {
@@ -924,7 +966,7 @@ export async function buildProductionDraftSource(
     draft,
     input: structuredClone(input),
     decisionSource: structuredClone(decisionSource),
-    imports: [...records.values()].map((r) => ({
+    imports: [...records.values(), ...(contentRecord && !records.has(contentRecord.id) ? [contentRecord] : [])].map((r) => ({
       id: r.id,
       sha256: r.sha256,
       filename: r.filename,

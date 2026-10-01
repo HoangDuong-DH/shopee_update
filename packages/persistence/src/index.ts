@@ -1,4 +1,5 @@
 export * from './db.js';
+export * from './runtime-pool.js';
 export * from './repository.js';
 export * from './blob-store.js';
 export * from './input-library.js';
@@ -9,3 +10,4 @@ export * from './connection-names.js';
 export * from './source-catalogs.js';
 export * from './source-catalog-evidence.js';
 export * from './local-archives.js';
+export * from './local-library.js';

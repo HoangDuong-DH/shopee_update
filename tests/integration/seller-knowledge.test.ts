@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import { Pool, Repository, migrate } from '../../packages/persistence/src/index.js';
 import { SellerKnowledgeService } from '../../apps/api/src/seller-knowledge-service.js';
@@ -118,6 +120,20 @@ it('persists a bounded cursor, resumes after restart and caches unchanged model 
   const rows = await restarted.search({ connectionId: f.connectionId, query: 'tinh dau' });
   expect(rows).toHaveLength(3);
   expect(rows[0]!.modelSkus).toHaveLength(1);
+  const stored = await pool.query(
+    'SELECT summary FROM seller_knowledge_items WHERE connection_id=$1 AND item_id=$2',
+    [f.connectionId, rows[0]!.itemId],
+  );
+  expect(stored.rows[0].summary).toMatchObject({
+    itemId: rows[0]!.itemId,
+    title: rows[0]!.title,
+    scope: rows[0]!.scope,
+  });
+  expect(stored.rows[0].summary).not.toHaveProperty('rawItem');
+  expect(stored.rows[0].summary).not.toHaveProperty('rawModels');
+  const fullEvidence = await restarted.getEvidence(rows[0]!.evidenceId);
+  expect(fullEvidence?.body.rawItem).toBeDefined();
+  expect(fullEvidence?.body.rawModels).toBeDefined();
   const modelReads = f.calls.filter((c) => c.path.endsWith('get_model_list')).length;
   const second = await restarted.startSync({
     connectionId: f.connectionId,
@@ -582,4 +598,38 @@ it('puts named current listings before newly observed deletion markers and retai
     itemStatus: 'SELLER_DELETE',
     title: '',
   });
+});
+
+it('backfills old listing evidence and keeps the summary correct for an older writer', async () => {
+  const db = await pool.connect();
+  const isolatedSchema = 'summary_migration_' + randomUUID().replaceAll('-', '');
+  try {
+    await db.query('BEGIN');
+    await db.query(`CREATE SCHEMA ${isolatedSchema}`);
+    await db.query(`SET LOCAL search_path TO ${isolatedSchema}`);
+    await db.query('CREATE TABLE seller_knowledge_observations(id uuid PRIMARY KEY, connection_id uuid NOT NULL, kind text NOT NULL, body jsonb NOT NULL)');
+    await db.query('CREATE TABLE seller_knowledge_items(connection_id uuid NOT NULL, item_id text NOT NULL, evidence_id uuid NOT NULL, last_seen_at timestamptz NOT NULL)');
+    const connectionId = randomUUID();
+    const originalId = randomUUID();
+    const nextId = randomUUID();
+    const body = { itemId: '123', title: 'Bản cũ', scope: { shopId: '8' }, observedAt: new Date().toISOString(), rawItem: { privateDetail: true }, rawModels: { model: [] } };
+    for (const [id, title] of [[originalId, 'Bản cũ'], [nextId, 'Bản mới']] as const) {
+      await db.query('INSERT INTO seller_knowledge_observations(id,connection_id,kind,body) VALUES($1,$2,$3,$4)', [id, connectionId, 'listing', { ...body, title }]);
+    }
+    await db.query('INSERT INTO seller_knowledge_items(connection_id,item_id,evidence_id,last_seen_at) VALUES($1,$2,$3,now())', [connectionId, '123', originalId]);
+    for (const name of ['047_seller_knowledge_compact_projection.sql', '048_seller_knowledge_summary_trigger.sql']) {
+      await db.query(await readFile(resolve(process.cwd(), 'packages/persistence/migrations', name), 'utf8'));
+    }
+    const summary = async () => (await db.query('SELECT summary FROM seller_knowledge_items WHERE connection_id=$1', [connectionId])).rows[0].summary;
+    expect(await summary()).toMatchObject({ itemId: '123', title: 'Bản cũ' });
+    expect(await summary()).not.toHaveProperty('rawItem');
+    await db.query('UPDATE seller_knowledge_items SET evidence_id=$1 WHERE connection_id=$2', [nextId, connectionId]);
+    expect(await summary()).toMatchObject({ itemId: '123', title: 'Bản mới' });
+    await db.query('INSERT INTO seller_knowledge_items(connection_id,item_id,evidence_id,last_seen_at) VALUES($1,$2,$3,now())', [connectionId, '456', originalId]);
+    const oldWriterSummary = (await db.query('SELECT summary FROM seller_knowledge_items WHERE item_id=$1', ['456'])).rows[0].summary;
+    expect(oldWriterSummary.title).toBe('Bản cũ');
+  } finally {
+    await db.query('ROLLBACK');
+    db.release();
+  }
 });

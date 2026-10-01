@@ -1,12 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { ArchiveManifest } from '../../packages/domain/src/archive-clone.js';
+import { syntheticArchiveManifest } from '../fixtures/archive-clone.js';
 import { compareCurrentArchiveSource } from '../../apps/api/src/archive-clone-current-source.js';
 
-const manifest = JSON.parse(readFileSync(
-  '.local/haby-archive-20260930/clone-manifest-9411abc005e25b4185bbd41ea3a07d126fda2a4e624376f18bd4ddeef817c306.json',
-  'utf8')) as ArchiveManifest;
-const item = manifest.items.find((row) => row.sourceItemId === '43534008943')!;
+const manifest = syntheticArchiveManifest();
+const item = manifest.items.find((row) => row.tierProjection.length === 2)!;
 
 function snapshot() {
   return {

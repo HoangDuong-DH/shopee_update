@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { beforeAll, afterAll, expect, it, vi } from 'vitest';
@@ -17,8 +18,7 @@ import { qaWorkbook, qaCanva, qaFolder } from '../fixtures/source-catalog.js';
 import { canonicalJson } from '../../packages/domain/src/index.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(database.hostname) || database.port !== '5442')
-  throw Error('Isolated local PG required');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_local_archive_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: database.href });
 const pool = new Pool({ connectionString: database.href, options: `-c search_path=${schema}` });

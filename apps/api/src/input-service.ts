@@ -1,3 +1,5 @@
+import { contentSelectionSchema } from '../../../packages/domain/src/content-workbook.js';
+import type { ContentWorkbookService } from './content-workbook-service.js';
 import { z } from 'zod';
 import { folderManifestSchema } from '@shopee/domain';
 import { pendingListingMappingSchema } from '../../../packages/domain/src/pending-listing-mapping.js';
@@ -59,6 +61,7 @@ export const inputBatchSave = z
             .strict(),
         ),
         wordPaths: z.record(path, path),
+        contentSelections: z.record(path, contentSelectionSchema).optional(),
         wordRule: z
           .object({
             titleHeader: z.string().min(1).max(500),
@@ -125,11 +128,24 @@ export const inputBatchSave = z
 
 export class InputService {
   readonly library: InputLibraryRepository;
-  constructor(repo: Repository) {
+  constructor(repo: Repository, readonly contents?: ContentWorkbookService) {
     this.library = new InputLibraryRepository(repo.pool);
   }
-  save(raw: unknown) {
+  async save(raw: unknown) {
     const { id, expectedRevision, state } = inputBatchSave.parse(raw);
+    const verified: NonNullable<typeof state.contentSelections> = {};
+    const entries = Object.entries(state.contentSelections ?? {});
+    if(entries.length && !this.contents) throw Error('CONTENT_READER_UNAVAILABLE');
+    const resolved = entries.length ? await this.contents!.resolveMany(entries.map(([,v])=>v.binding)) : [];
+    for (const [index, [group, selection]] of entries.entries()) {
+      if (!state.productKeys[group] || state.manifests?.[group] || state.pendingMappings?.[group]) throw Error('CONTENT_GROUP_INVALID');
+      if (!this.contents) throw Error('CONTENT_READER_UNAVAILABLE');
+      const row = resolved[index]!;
+      if (row.title !== selection.title || row.body !== selection.body || row.headline !== selection.headline)
+        throw Error('CONTENT_SELECTION_MISMATCH');
+      verified[group] = row as typeof selection;
+    }
+    if (state.contentSelections) state.contentSelections = verified;
     return this.library.save(id, expectedRevision, state);
   }
 }

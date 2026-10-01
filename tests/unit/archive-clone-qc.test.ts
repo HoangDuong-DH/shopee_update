@@ -1,13 +1,11 @@
-import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { checkArchiveCloneReadback, type CloneQcInput } from '../../packages/domain/src/archive-clone-qc.js';
 import { canonicalJson } from '../../packages/domain/src/plans.js';
-import type { ArchiveItem, ArchiveManifest } from '../../packages/domain/src/archive-clone.js';
+import type { ArchiveItem } from '../../packages/domain/src/archive-clone.js';
+import { syntheticArchiveManifest } from '../fixtures/archive-clone.js';
 
-const manifest = JSON.parse(readFileSync(
-  '.local/haby-archive-20260930/clone-manifest-9411abc005e25b4185bbd41ea3a07d126fda2a4e624376f18bd4ddeef817c306.json','utf8'
-)) as ArchiveManifest;
+const manifest = syntheticArchiveManifest();
 const clone=<T>(x:T):T=>structuredClone(x);
 function evidence(item:ArchiveItem):CloneQcInput {
   const remote=clone(item.rawItem), models=clone(item.rawModels ?? {model:[],tier_variation:[]});
@@ -57,7 +55,7 @@ describe('archive clone independent QC',()=>{
     expect(result.fields.some(f=>f.status==='source_only')).toBe(true);
     expect(result.fields.some(f=>f.status==='promotion_exception')).toBe(Boolean(item.rawItem.has_promotion));
   });
-  it('covers every one of the 35 immutable source items',()=>{
+  it('covers every synthetic immutable source item',()=>{
     for (const item of manifest.items) {
       const result=checkArchiveCloneReadback(evidence(item));
       expect(result.mismatchedPaths,item.sourceItemId+':'+result.mismatchedPaths.join(',')).toEqual([]);

@@ -9,7 +9,7 @@ import { runPass1ProductionBatch } from '../../apps/api/src/production-batch-run
 async function fixture() {
   await mkdir(productionBatchPass1Root,{recursive:true});
   const root=await mkdtemp(resolve(productionBatchPass1Root,'lifecycle-test-'));
-  const loaded:any={manifestPath:resolve(root,'manifest.json'),sha256:'a'.repeat(64),value:{version:1,batchId:randomUUID(),authorizationReference:'User-approved source',assets:{},listings:[{sourceIdentity:'local-product',sourceRevision:1,sourceKey:'source-a',document:{title:'Tinh dầu Cam Sả',models:[{sku:'SKU-A'}]}}]}};
+  const loaded:any={manifestPath:resolve(root,'manifest.json'),sha256:'a'.repeat(64),value:{version:1,batchId:randomUUID(),scope:{environment:'production',partnerId:'2010476',shopId:'1423724897'},authorizationReference:'User-approved source',assets:{},listings:[{sourceIdentity:'local-product',sourceRevision:1,sourceKey:'source-a',document:{title:'Tinh dầu Cam Sả',publication:'unlisted',description:[],gallery:[],models:[{sku:'SKU-A'}]}}]}};
   const data={revision:1 as number|null,archived:false,operation:null as any};
   const query=vi.fn(async(sql:string)=>{
     if(sql.includes('SELECT to_jsonb(o) AS operation'))return {rows:data.operation?[{operation:data.operation,steps:[]}]:[]};

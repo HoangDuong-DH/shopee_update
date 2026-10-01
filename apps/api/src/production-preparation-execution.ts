@@ -1,8 +1,10 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { z } from 'zod';
 import type { Repository } from '@shopee/persistence';
 import type { ProductionPreparationService } from './production-preparation-service.js';
 import type { ProductionBatchService } from './production-batch-service.js';
 import { ProductionExecutionPolicyService } from './production-execution-policy.js';
+import { independentBatchHold } from './production-batch-block.js';
 
 type BatchPort = Pick<ProductionBatchService,'status'|'start'>;
 const input=z.object({expectedFingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
@@ -11,10 +13,11 @@ const delay=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 /** Resumable parent queue. All child writes still pass through the existing durable journal. */
 export class ProductionPreparationExecution {
   private active=new Map<string,Promise<void>>();
-  constructor(private readonly repo:Repository,private readonly preparation:Pick<ProductionPreparationService,'get'>,
+  constructor(private readonly repo:Repository,private readonly preparation:Pick<ProductionPreparationService,'get'|'sourceChanges'>,
     private readonly batches:BatchPort,private readonly options:{sleep?:typeof delay;maximumPolls?:number;enabled?:boolean}={}){}
   async get(id:string) {
     z.string().uuid().parse(id);
+    await this.preparation.get(id);
     const row=(await this.repo.pool.query('SELECT body FROM production_preparation_executions WHERE preparation_id=$1',[id])).rows[0];
     if (!row) return null;
     const policy = await new ProductionExecutionPolicyService(this.repo).getForPreparation(id);
@@ -42,28 +45,42 @@ export class ProductionPreparationExecution {
     const client=await this.repo.pool.connect(),key='production-preparation-execution:'+id;
     let locked=false,ownerLocked=false,dispatched=false;
     try {
-      ownerLocked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema() || chr(58) || $1,0)) AS locked',[ownerKey])).rows[0].locked;
+      ownerLocked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema() || chr(58) || $1,0)) AS locked',[('production-preparation-owner:' + productionOwner())])).rows[0].locked;
       if(!ownerLocked) throw Error('PREPARATION_IN_PROGRESS');
       locked=(await client.query('SELECT pg_try_advisory_lock(hashtextextended(current_schema() || chr(58) || $1,0)) AS locked',[key])).rows[0].locked;
       if(!locked) throw Error('PREPARATION_IN_PROGRESS');
       const old=await this.get(id);
       if(['completed','completed_with_exclusions'].includes(old?.state)) return old;
+      const changes=await this.preparation.sourceChanges(id);
+      const ready=prepared.entries.filter((entry:any)=>entry.kind==='ready');
+      const stale=new Set(changes.entries.filter(entry=>entry.state!=='current').map(entry=>entry.productKey));
+      if(ready.some((entry:any)=>stale.has(entry.productKey))) {
+        const operations=(await this.repo.pool.query(`SELECT o.source_identity,o.state,p.state AS publication_state
+          FROM production_pilot_operations o LEFT JOIN production_pilot_publications p ON p.create_operation_id=o.id
+          WHERE o.owner_key=$1 AND o.source_identity=ANY($2::text[])`,[productionOwner(),ready.map((entry:any)=>entry.productKey)])).rows;
+        const remaining=ready.filter((entry:any)=>!operations.some(op=>op.source_identity===entry.productKey));
+        const unfinished=operations.some(op=>op.state!=='verified' || prepared.publicationMode!=='hidden_for_review' && op.publication_state!=='verified');
+        // Do not claim an empty stale run. Existing unfinished operations still go
+        // through journal reconciliation; a current independent sibling may run.
+        if(!unfinished && remaining.length && remaining.every((entry:any)=>stale.has(entry.productKey)))throw Error('PREPARATION_SOURCE_CHANGED');
+      }
       const policy = await new ProductionExecutionPolicyService(this.repo).getForPreparation(id);
       if (policy && policy.preparationFingerprint !== prepared.fingerprint) throw Error('PREPARATION_REVIEW_CHANGED');
       const publicationMode = policy?.publicationMode ?? prepared.publicationMode;
       const state={id,fingerprint:prepared.fingerprint,state:'running',startedAt:old?.startedAt ?? new Date().toISOString(),
+        scope:currentProductionScope(),heldBatches:[],
         publicationMode,completionTarget:publicationMode==='hidden_for_review'?'created_hidden':'published',
         ...(policy ? {imageQcPolicy:policy.imageQcPolicy,executionPolicyFingerprint:policy.fingerprint} : {}),
         resumedAt:new Date().toISOString(),completedBatches:old?.completedBatches ?? [],excludedCount:old?.excludedCount ?? 0,totalBatches:prepared.registration.batches.length,currentBatchId:null,code:null};
       await this.save(id,prepared.fingerprint,state);
       const running=this.perform(state,prepared.registration.batches).finally(async()=>{
         this.active.delete(id);try { await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[key]);
-          await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[ownerKey]); } finally {client.release();}
+          await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[('production-preparation-owner:' + productionOwner())]); } finally {client.release();}
       });
       this.active.set(id,running);dispatched=true; void running.catch(()=>undefined);
       return {...state};
     } finally {
-      if(!dispatched) { try {if(locked) await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[key]);if(ownerLocked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[ownerKey]);}finally{client.release();} }
+      if(!dispatched) { try {if(locked) await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[key]);if(ownerLocked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[('production-preparation-owner:' + productionOwner())]);}finally{client.release();} }
     }
   }
   private async save(id:string,fp:string,body:unknown) {
@@ -74,28 +91,46 @@ export class ProductionPreparationExecution {
   private async perform(state:any,batches:{batchId:string;manifestSha256:string}[]) {
     try {
       state.excludedCount=0;
+      state.heldBatches=[];
+      state.completedBatches=[];
       for(const batch of batches) {
         state.currentBatchId=batch.batchId;await this.save(state.id,state.fingerprint,state);
         let child=await this.batches.status(batch.batchId);
         if(child.manifestSha256!==batch.manifestSha256) throw Error('PREPARATION_BATCH_CHANGED');
         // Always inspect durable child state on resume; do not trust the parent's completed list.
         if(!['completed','completed_with_exclusions'].includes(child.state)) {
-          if(child.busy || !child.canExecute) throw Error('PREPARATION_CHILD_REVIEW_REQUIRED');
+          if(child.busy || !child.canExecute) {
+            if(independentBatchHold(child)) {
+              state.heldBatches.push({batchId:batch.batchId,code:'PREPARATION_CHILD_REVIEW_REQUIRED'});
+              await this.save(state.id,state.fingerprint,state);continue;
+            }
+            throw Error('PREPARATION_CHILD_REVIEW_REQUIRED');
+          }
           await this.batches.start(batch.batchId,{mode:'execute',expectedStatusFingerprint:child.statusFingerprint});
           let polls=0;
           do {
             await (this.options.sleep ?? delay)(1000);
             child=await this.batches.status(batch.batchId);
             if(child.manifestSha256!==batch.manifestSha256)throw Error('PREPARATION_BATCH_CHANGED');
-            if(++polls >= (this.options.maximumPolls ?? 1800)) throw Error('PREPARATION_CHILD_STILL_RUNNING');
+            if(++polls >= (this.options.maximumPolls ?? 1800) && child.busy) throw Error('PREPARATION_CHILD_STILL_RUNNING');
           } while(child.busy);
-          if(!['completed','completed_with_exclusions'].includes(child.state)) throw Error(child.listings?.some(s=>s.state==='created_readback_pending') ? 'PREPARATION_CHILD_QC_REVIEW_REQUIRED' : 'PREPARATION_CHILD_REVIEW_REQUIRED');
+          if(!['completed','completed_with_exclusions'].includes(child.state)) {
+            const code=child.listings?.some(s=>s.state==='created_readback_pending') ? 'PREPARATION_CHILD_QC_REVIEW_REQUIRED' : 'PREPARATION_CHILD_REVIEW_REQUIRED';
+            if(independentBatchHold(child)) {
+              state.heldBatches.push({batchId:batch.batchId,code});
+              await this.save(state.id,state.fingerprint,state);continue;
+            }
+            throw Error(code);
+          }
         }
         state.excludedCount+=child.excludedCount ?? 0;
         state.completedBatches=[...new Set([...state.completedBatches,batch.batchId])];
         await this.save(state.id,state.fingerprint,state);
       }
-      state.state=state.excludedCount?'completed_with_exclusions':'completed';state.currentBatchId=null;state.finishedAt=new Date().toISOString();
+      state.state=state.heldBatches.length?'paused':state.excludedCount?'completed_with_exclusions':'completed';
+      state.code=state.heldBatches.length?'PREPARATION_PARTIAL_REVIEW_REQUIRED':null;
+      state.canResume=state.heldBatches.length>0;
+      state.currentBatchId=null;state.finishedAt=new Date().toISOString();
     } catch(error) {
       state.state='paused';const code=error instanceof Error?error.message:'';
       state.code=/^(PREPARATION|PRODUCTION_BATCH)_[A-Z_]+$/.test(code)?code:'PREPARATION_RUN_FAILED';

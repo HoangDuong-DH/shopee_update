@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { convertArchiveClone, type ArchiveManifest, type ArchiveItem, type TargetChoices } from '../../packages/domain/src/archive-clone.js';
+import { convertArchiveClone, type ArchiveItem, type TargetChoices } from '../../packages/domain/src/archive-clone.js';
+import { syntheticArchiveManifest } from '../fixtures/archive-clone.js';
 
-const manifest = JSON.parse(readFileSync(
-  '.local/haby-archive-20260930/clone-manifest-9411abc005e25b4185bbd41ea3a07d126fda2a4e624376f18bd4ddeef817c306.json',
-  'utf8',
-)) as ArchiveManifest;
+const manifest = syntheticArchiveManifest();
 
 function choices(item: ArchiveItem): TargetChoices {
   const rows = item.tierProjection.length ? item.modelProjection : [{ modelSku: item.sourceItemSku }];
@@ -41,14 +38,14 @@ function choices(item: ArchiveItem): TargetChoices {
       locationBySku: Object.fromEntries(rows.map((r) => [r.modelSku, 'TARGET-WAREHOUSE'])) },
     promotion: { mode: 'original_price_without_campaign', sourcePromotionReviewed: true },
     video: { mode: 'preserve', sourceVideoReviewed: true },
-    dimensions: { mode: 'omit_source_zero', targetRuleVerified: true },
+    dimensions: { mode: item.parentDimension.package_length === 0 ? 'omit_source_zero' : 'preserve_positive', targetRuleVerified: true },
     media,
   };
 }
 
 describe('archive clone converter', () => {
   for (const tierCount of [0, 1, 2]) {
-    it(`preserves a real ${tierCount}-tier snapshot and source facts`, () => {
+    it(`preserves a synthetic ${tierCount}-tier snapshot and source facts`, () => {
       const item = manifest.items.find((i) => i.tierProjection.length === tierCount)!;
       const result = convertArchiveClone(manifest, item.sourceItemId, choices(item));
       expect(result.kind, JSON.stringify(result.kind === 'blocked' ? result.issues : [])).toBe('prepared');

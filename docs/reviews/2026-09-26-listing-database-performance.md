@@ -4,7 +4,9 @@
 
 Ý tưởng lưu bản đầy đủ đã đọc và một bản rút gọn để tra cứu nhanh là đúng, nhưng ứng dụng đã có cấu trúc này trong PostgreSQL. Không nên tạo thêm DB hoặc di chuyển dữ liệu lúc này. Vấn đề thực tế là phạm vi dữ liệu được đồng bộ, trạng thái kết nối, và việc phân biệt bản chụp lịch sử với trạng thái Shopee hiện tại.
 
-## Bằng chứng tại máy
+## Bằng chứng vận hành tại ngày 26/09/2026
+
+Các số đo và trạng thái bên dưới là bản ghi của ngày 26/09, không phải kiểm tra lại khi tích hợp nhánh ngày 01/10.
 
 - `seller_knowledge_observations` giữ bằng chứng đọc Shopee bất biến, có hash nội dung và thời điểm đọc. `seller_knowledge_items` giữ một chỉ mục hiện hành theo `(connection_id, item_id)` gồm tên, SKU, ngành, trạng thái và liên kết đến bằng chứng đầy đủ.
 - Shop `1423724897` có 130 listing trong chỉ mục, lần đọc mới nhất ngày 16/09/2026. Shop vinatuoi.vn `1126307464` hiện có **0 listing** trong chỉ mục này. Các operation production được kiểm tra không có bản ghi của shop `1126307464`, nên không thể coi chúng là nguồn thay thế cho bản đọc Shopee của shop đó.
@@ -21,3 +23,15 @@
 ## Giới hạn
 
 Một bản chụp nhanh giúp tìm lại dữ liệu từng thấy, không thể chứng minh listing chưa bị nhân viên sửa trên Shopee. Giá, SKU, ảnh, video, trạng thái hiển thị và cấu trúc phân loại phải lấy từ bản đọc hiện tại khi chuẩn bị ghi. Không tự nạp hồ sơ lịch sử thành “trạng thái shop hiện tại” nếu chưa có bằng chứng đọc trực tiếp của chính item đó.
+
+## Bằng chứng nhánh nâng cấp tại ngày 26/09/2026
+
+Nhánh `codex/internal-operations` thêm migration `038_seller_knowledge_compact_projection.sql` để điền `summary` từ bằng chứng cũ, bỏ phần raw trả về của Shopee và bắt buộc chỉ mục có tóm tắt. Migration `039_seller_knowledge_summary_trigger.sql` giữ tóm tắt khớp bằng chứng bất biến ngay cả khi code API cũ ghi sau rollback. Tìm kiếm và chọn nguồn tham khảo đọc tóm tắt trực tiếp; mở bằng chứng tiếp tục đọc bản đầy đủ. Hai migration chỉ áp lên PostgreSQL thử nghiệm cổng 5443.
+
+Kiểm kiểu, build, 7 legacy và 2445 unit/integration đạt trước chỉnh sửa trigger; sau chỉnh sửa, kiểm kiểu và 53 ca liên quan đạt, gồm ca backfill dữ liệu cũ, thay bằng chứng và ghi bằng code cũ. Các kết quả này thuộc nhánh nâng cấp tại mốc đó, chưa phải nghiệm thu bản tích hợp ngày 01/10. Chưa đồng bộ listing vinatuoi.vn và chưa áp migration lên DB vận hành.
+
+## Đối chiếu chuỗi migration khi tích hợp ngày 01/10/2026
+
+Nhánh `codex/product-integration` giữ nguyên raw bytes của toàn bộ migration vận hành 001–046. Hai bổ sung phía nâng cấp đổi tên lần lượt thành `047_seller_knowledge_compact_projection.sql` và `048_seller_knowledge_summary_trigger.sql`; nội dung SQL vẫn giữ nguyên. Migration 047 cần các bảng chỉ mục và bằng chứng đã có; 048 cần cột `summary` do 047 thêm trước đó. Tên 038/039 trong mục lịch sử ở trên mô tả lần kiểm cũ.
+
+Việc đổi tên tệp không chuyển lịch sử migration của DB đã chạy 038/039. DB thử nghiệm có các đối tượng cũ phải được kiểm tra hoặc tạo schema thử mới trước khi chạy chuỗi mới; không sửa checksum của migration đã áp, không chạy lại DDL mù. Lượt tích hợp này chưa áp migration lên PostgreSQL vận hành cổng 5442 và không đọc hay ghi Shopee.

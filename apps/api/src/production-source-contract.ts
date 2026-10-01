@@ -4,6 +4,7 @@ import type { PreparedWireContext, PreparedWireImageRole } from '../../../packag
 /** Use the approved source selection, not the compiled wire document, as the comparison side. */
 export function sourceContractFromApprovedDraft(
   draft: ListingDraft,
+  stocks?: Record<string,number>,
 ): NonNullable<PreparedWireContext['sourceContract']> {
   const selection = draft.sourceSelection;
   if (!selection || selection.variants.length !== draft.variants.length)
@@ -34,10 +35,16 @@ export function sourceContractFromApprovedDraft(
     originalPriceBySku[sku] = variant.originalPrice.value;
     if (selected.imageId) media.variation.push(assetHash(selected.imageId)!);
   }
+  if(stocks!==undefined && (stocks===null || typeof stocks!=='object' || Array.isArray(stocks)
+    || Object.keys(stocks).length!==draft.variants.length
+    || draft.variants.some(variant=>!Object.hasOwn(stocks,variant.sku.value)
+      || !Number.isSafeInteger(stocks[variant.sku.value]) || stocks[variant.sku.value]!<0)))
+    throw Error('PRODUCTION_SOURCE_STOCK_DECISION_REQUIRED');
   return {
     tierNames: [...selection.tierNames],
     optionLabelsBySku,
     originalPriceBySku,
+    ...(stocks!==undefined?{stockBySku:{...stocks}}:{}),
     approvedMediaSha256: [...new Set(Object.values(media).flat())],
     approvedMediaByRole: Object.fromEntries(
       Object.entries(media).map(([role, hashes]) => [role, [...new Set(hashes)]]),

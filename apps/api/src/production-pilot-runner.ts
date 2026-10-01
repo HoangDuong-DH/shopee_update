@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -81,8 +82,8 @@ export type ProductionPilotPreparedInput = ProductionPilotSource & {
   issues: { code: string; field: string }[];
   capabilityEvidence: {
     environment: 'production';
-    partnerId: '2010476';
-    shopId: '1423724897';
+    partnerId: string;
+    shopId: string;
     connectionRevision: number;
     gallery34: CapabilityObservation;
     extendedDescription: CapabilityObservation;
@@ -95,8 +96,8 @@ export type ProductionPilotPreparedInput = ProductionPilotSource & {
    * This proves internal read locations separately from locations sent on writes. */
   stockLocationEvidence?: {
     environment: 'production';
-    partnerId: '2010476';
-    shopId: '1423724897';
+    partnerId: string;
+    shopId: string;
     connectionRevision: number;
     observedAt: string;
     observations: {
@@ -108,8 +109,8 @@ export type ProductionPilotPreparedInput = ProductionPilotSource & {
   };
   metadata: {
     environment: 'production';
-    partnerId: '2010476';
-    shopId: '1423724897';
+    partnerId: string;
+    shopId: string;
     connectionRevision: number;
     categoryId: string;
     observedAt: string;
@@ -463,8 +464,8 @@ export class ProductionPilotRunner {
     const parsed = z
       .object({
         environment: z.literal('production'),
-        partnerId: z.literal('2010476'),
-        shopId: z.literal('1423724897'),
+        partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+        shopId: z.string().refine(value => value === currentProductionScope().shopId),
         connectionRevision: z.number().int().positive(),
         gallery34: observation,
         extendedDescription: observation,
@@ -546,7 +547,9 @@ export class ProductionPilotRunner {
         !view.verification ||
         !document ||
         (key === 'extendedDescription' &&
-          !document.description.some((block) => block.type === 'image')) ||
+          (view.operation.source_payload.descriptionFallbackPolicy === 'plain_text_when_unsupported' &&
+            view.operation.source_payload.capabilityEvidence?.extendedDescription?.state === 'unsupported' ||
+          !document.description.some((block) => block.type === 'image'))) ||
         (key === 'gallery34' && !document.gallery.length)
       )
         fail('CAPABILITY_PROOF_UNVERIFIED');
@@ -561,7 +564,7 @@ export class ProductionPilotRunner {
         `SELECT o.* FROM production_pilot_operations o
       JOIN connections c ON c.id=o.connection_id WHERE o.id=$1 AND o.owner_key=$2
       AND c.environment='production' AND c.partner_id=$3 AND c.shop_id=$4`,
-        [z.string().uuid().parse(operationId), owner, target.partnerId, target.shopId],
+        [z.string().uuid().parse(operationId), productionOwner(), currentProductionScope().partnerId, currentProductionScope().shopId],
       )
     ).rows[0];
     if (!operation || operation.state !== 'verified' || !operation.item_id)
@@ -587,7 +590,7 @@ export class ProductionPilotRunner {
       operation.source_fingerprint !==
         hash(
           canonicalJson({
-            scope: target,
+            scope: currentProductionScope(),
             sourceIdentity: operation.source_identity,
             sourceRevision: operation.source_revision,
             sourcePayload: operation.source_payload,
@@ -626,8 +629,8 @@ export class ProductionPilotRunner {
       verification.evidence_fingerprint !== hash(canonicalJson(reads)) ||
       reads.some(
         (read) =>
-          read.partnerId !== target.partnerId ||
-          read.shopId !== target.shopId ||
+          read.partnerId !== currentProductionScope().partnerId ||
+          read.shopId !== currentProductionScope().shopId ||
           read.itemId !== operation.item_id ||
           !read.raw ||
           !read.projection ||
@@ -666,12 +669,13 @@ export class ProductionPilotRunner {
       };
     };
     return {
-      ...target,
+      ...currentProductionScope(),
       connectionRevision,
       gallery34: proof('gallery34', document.gallery.length > 0),
       extendedDescription: proof(
         'extendedDescription',
-        document.description.some((block) => block.type === 'image'),
+        !(view.operation.source_payload.descriptionFallbackPolicy === 'plain_text_when_unsupported' && prior?.extendedDescription?.state === 'unsupported') &&
+          document.description.some((block) => block.type === 'image'),
       ),
     };
   }
@@ -686,9 +690,9 @@ export class ProductionPilotRunner {
     ).rows[0];
     if (
       !row ||
-      row.environment !== target.environment ||
-      row.partner_id !== target.partnerId ||
-      row.shop_id !== target.shopId
+      row.environment !== currentProductionScope().environment ||
+      row.partner_id !== currentProductionScope().partnerId ||
+      row.shop_id !== currentProductionScope().shopId
     )
       fail('SCOPE_FORBIDDEN');
     if (!readOnly && row.revision !== input.connectionRevision) fail('CONNECTION_CHANGED');
@@ -718,8 +722,8 @@ export class ProductionPilotRunner {
     const metadata = z
       .object({
         environment: z.literal('production'),
-        partnerId: z.literal('2010476'),
-        shopId: z.literal('1423724897'),
+        partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+        shopId: z.string().refine(value => value === currentProductionScope().shopId),
         connectionRevision: z.number().int().positive(),
         categoryId: z.string().min(1),
         observedAt: z.iso.datetime(),
@@ -764,8 +768,8 @@ export class ProductionPilotRunner {
     const parsed = z
       .object({
         environment: z.literal('production'),
-        partnerId: z.literal('2010476'),
-        shopId: z.literal('1423724897'),
+        partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+        shopId: z.string().refine(value => value === currentProductionScope().shopId),
         connectionRevision: z.number().int().positive(),
         observedAt: z.iso.datetime(),
         observations: z
@@ -945,11 +949,11 @@ export class ProductionPilotRunner {
     const secrets = z
       .object({ partnerKey: z.string().min(1), accessToken: z.string().min(1) })
       .parse({
-        ...(box.open(row.partner_key_ciphertext, owner) as object),
-        ...(box.open(row.token_ciphertext, owner) as object),
+        ...(box.open(row.partner_key_ciphertext, productionOwner()) as object),
+        ...(box.open(row.token_ciphertext, productionOwner()) as object),
       });
     return new ProductionPilotTransport(
-      { ...target, ...secrets },
+      { ...currentProductionScope(), ...secrets },
       {
         transport: this.options.transport,
         ...(permit
@@ -1053,8 +1057,8 @@ export class ProductionPilotRunner {
           this.options.coverImageQc,
         );
         readbacks.push({
-          partnerId: target.partnerId,
-          shopId: target.shopId,
+          partnerId: currentProductionScope().partnerId,
+          shopId: currentProductionScope().shopId,
           itemId: create.operation.item_id,
           connectionRevision,
           observedAt,
@@ -1115,8 +1119,8 @@ export class ProductionPilotRunner {
     const checkedMetadata = z
       .object({
         environment: z.literal('production'),
-        partnerId: z.literal('2010476'),
-        shopId: z.literal('1423724897'),
+        partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+        shopId: z.string().refine(value => value === currentProductionScope().shopId),
         connectionRevision: z.number().int().positive(),
         categoryId: z.string().min(1),
         observedAt: z.iso.datetime(),
@@ -1517,8 +1521,8 @@ export class ProductionPilotRunner {
         deferImages,
       );
       proofs.push({
-        shopId: '1423724897',
-        partnerId: '2010476',
+        shopId: currentProductionScope().shopId,
+        partnerId: currentProductionScope().partnerId,
         itemId,
         connectionRevision: readConnection.revision,
         observedAt: record.observedAt,

@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, post, RequestError } from './api.js';
+import { validAuthorizationAttempt } from './connection-authorization.js';
 
 type Target = {
-  connectionId:string|null; tokenExpiresAt:string|null; autoRefresh:boolean; refreshStatus:string; refreshReason:string|null;
+  connectionId: string | null;
+  tokenExpiresAt: string | null;
+  autoRefresh: boolean;
+  refreshStatus: string;
+  refreshReason: string | null;
   partnerId: string;
   shopId: string;
   expectedHandle: string;
@@ -12,6 +17,7 @@ type Target = {
   hasSavedKey: boolean;
   officialName: string | null;
   state: string;
+  authorizationCallbackUrl?: string;
 };
 type AuthorizationAttempt = {
   attemptId: string;
@@ -24,25 +30,22 @@ type AuthorizationAttempt = {
 type ShopScope = { partnerId: string; shopId: string };
 const attemptKey = (scope: ShopScope) =>
   'shopee-authorization-attempt:' + scope.partnerId + ':' + scope.shopId;
-function restoreAttempt(scope: ShopScope): AuthorizationAttempt | null {
+function restoreAttempt(scope: ShopScope, expectedCallback?: string): AuthorizationAttempt | null {
+  if (!expectedCallback) return null;
   const key = attemptKey(scope);
-  const saved = sessionStorage.getItem(key);
-  if (!saved) return null;
   try {
+    const saved = sessionStorage.getItem(key);
+    if (!saved) return null;
     const attempt = JSON.parse(saved) as AuthorizationAttempt;
-    const url = new URL(attempt.authorizationUrl);
-    const callback = new URL(attempt.callbackUrl);
-    if (
-      attempt.partnerId !== scope.partnerId || attempt.shopId !== scope.shopId ||
-      url.origin !== 'https://open.shopee.com' || url.pathname !== '/auth' ||
-      url.username || url.password ||
-      callback.href !== 'http://127.0.0.1:4310/v1/connections/production-pilot/callback' ||
-      !/^[0-9a-f-]{36}$/i.test(attempt.attemptId) ||
-      !(Date.parse(String(attempt.expiresAt)) > Date.now())
-    ) throw Error('INVALID_SAVED_ATTEMPT');
+    if (!validAuthorizationAttempt(attempt, scope, expectedCallback))
+      throw Error('INVALID_SAVED_ATTEMPT');
     return attempt;
   } catch {
-    sessionStorage.removeItem(key);
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      /* Pending server state remains available. */
+    }
     return null;
   }
 }
@@ -54,7 +57,13 @@ function rememberSelectedShop(scope: ShopScope) {
 }
 type AuthorizationStatus =
   'pending' | 'exchanging' | 'verified' | 'rejected' | 'unknown' | 'expired';
-type AuthorizationResult = { status: AuthorizationStatus; partnerId: string; shopId: string; connectionRevision?: number; reason?:string };
+type AuthorizationResult = {
+  status: AuthorizationStatus;
+  partnerId: string;
+  shopId: string;
+  connectionRevision?: number;
+  reason?: string;
+};
 const authorizationMessages: Record<AuthorizationStatus, string> = {
   pending: 'Đang chờ bạn cấp quyền trên Shopee. Giữ ứng dụng này mở để nhận kết quả.',
   exchanging: 'Đã nhận phản hồi cấp quyền. Backend đang kiểm tra kết nối với đúng shop.',
@@ -70,10 +79,34 @@ function publicError(error: unknown) {
   if (error instanceof RequestError) return error.message;
   return 'Chưa xử lý được kết nối. Tải lại trạng thái để kiểm tra; không gửi khóa hoặc token vào chat.';
 }
-export function ProductionConnectionForm({ onConnected }: { onConnected: () => void }) {
-  const [partnerId,setPartnerId]=useState(()=>{const v=new URLSearchParams(window.location.search).get('partnerId');return v&&/^[1-9]\d{0,9}$/.test(v)?v:'2010476';});
-  const [shopId,setShopId]=useState(()=>{const v=new URLSearchParams(window.location.search).get('connectShop');return v&&/^[1-9]\d{0,15}$/.test(v)?v:'1423724897';});
-  const [shops,setShops]=useState<{id:string;name:string;scope:{environment:string;partnerId:string;shopId:string}}[]>([]);
+export function ProductionConnectionForm({
+  onConnected,
+  initialScope,
+}: {
+  onConnected: () => void;
+  initialScope?: { partnerId: string; shopId: string } | null;
+}) {
+  const [partnerId, setPartnerId] = useState(() => {
+    const v =
+      initialScope === null
+        ? ''
+        : (initialScope?.partnerId ?? new URLSearchParams(window.location.search).get('partnerId'));
+    return v && /^[1-9]\d{0,9}$/.test(v) ? v : '';
+  });
+  const [shopId, setShopId] = useState(() => {
+    const v =
+      initialScope === null
+        ? ''
+        : (initialScope?.shopId ?? new URLSearchParams(window.location.search).get('connectShop'));
+    return v && /^[1-9]\d{0,15}$/.test(v) ? v : '';
+  });
+  const [shops, setShops] = useState<
+    {
+      id: string;
+      name: string;
+      scope: { environment: string; partnerId: string; shopId: string };
+    }[]
+  >([]);
   const [target, setTarget] = useState<Target | null>(null);
   const [partnerKey, setPartnerKey] = useState('');
   const [accessToken, setAccessToken] = useState('');
@@ -81,27 +114,68 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [attempt, setAttempt] = useState<AuthorizationAttempt | null>(null);
+  const [authorizationReadRevision, setAuthorizationReadRevision] = useState(0);
   const [authorizationStatus, setAuthorizationStatus] = useState<AuthorizationStatus | null>(null);
   const mounted = useRef(false);
   const onConnectedRef = useRef(onConnected);
   const loadVersion = useRef(0);
   onConnectedRef.current = onConnected;
-  async function load(signal?: AbortSignal,selected={partnerId,shopId}) {
-    const version=++loadVersion.current;
-    const next = await api<Target>('/v1/connections/production?'+new URLSearchParams(selected), { signal });
-    if (mounted.current && !signal?.aborted && version===loadVersion.current) {
+  async function load(signal?: AbortSignal, selected = { partnerId, shopId }) {
+    if (!/^[1-9]\d{0,9}$/.test(selected.partnerId) || !/^[1-9]\d{0,15}$/.test(selected.shopId))
+      return;
+    const version = ++loadVersion.current;
+    const next = await api<Target>('/v1/connections/production?' + new URLSearchParams(selected), {
+      signal,
+    });
+    if (mounted.current && !signal?.aborted && version === loadVersion.current) {
       setTarget(next);
-      if(next.connectionId)setShops(rows=>[...rows.filter(r=>r.id!==next.connectionId),{id:next.connectionId!,name:next.officialName??next.expectedHandle,scope:{environment:'production',partnerId:next.partnerId,shopId:next.shopId}}]);
+      const saved = restoreAttempt(selected, next.authorizationCallbackUrl);
+      if (saved) {
+        setAttempt((current) => current ?? saved);
+        setAuthorizationStatus((current) => current ?? 'pending');
+      }
+      if (next.connectionId)
+        setShops((rows) => [
+          ...rows.filter((r) => r.id !== next.connectionId),
+          {
+            id: next.connectionId!,
+            name: next.officialName ?? next.expectedHandle,
+            scope: { environment: 'production', partnerId: next.partnerId, shopId: next.shopId },
+          },
+        ]);
     }
   }
   useEffect(() => {
     mounted.current = true;
     const controller = new AbortController();
-    void api<typeof shops>('/v1/shops',{signal:controller.signal}).then(rows=>{if(!controller.signal.aborted)setShops(rows.filter(r=>r.scope.environment==='production'));}).catch(()=>{});
-    const selected={partnerId,shopId};
-    const saved=restoreAttempt(selected);
-    if(saved){setAttempt(saved);setAuthorizationStatus('pending');}
-    void load(controller.signal,selected).catch(() => {
+    void api<typeof shops>('/v1/shops', { signal: controller.signal })
+      .then((rows) => {
+        if (controller.signal.aborted) return;
+        const production = rows.filter((row) => row.scope.environment === 'production');
+        setShops(production);
+        // Resolve a shop-only URL from the saved connection; never choose a partner by array order.
+        const matches = production.filter((row) => row.scope.shopId === shopId);
+        if (!partnerId && shopId && matches.length === 1 && initialScope !== null) {
+          const resolved = matches[0]!.scope;
+          setPartnerId(resolved.partnerId);
+          const saved = restoreAttempt(resolved);
+          if (saved) {
+            setAttempt(saved);
+            setAuthorizationStatus('pending');
+          }
+          void load(controller.signal, resolved).catch(() =>
+            setMessage('Chưa tải được kết nối shop đã chọn.'),
+          );
+        }
+      })
+      .catch(() => {});
+    const selected = { partnerId, shopId };
+    const saved = initialScope === null ? null : restoreAttempt(selected);
+    if (saved) {
+      setAttempt(saved);
+      setAuthorizationStatus('pending');
+    }
+    void load(controller.signal, selected).catch(() => {
       if (!controller.signal.aborted) setMessage('Chưa tải được kết nối shop thật. Bấm tải lại.');
     });
     return () => {
@@ -109,15 +183,28 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
       controller.abort();
     };
   }, []);
-  useEffect(()=>{
-    if(!target || busy)return;
-    const controller=new AbortController();
-    let inflight=false;
-    const update=async()=>{if(document.hidden||inflight)return;inflight=true;try{await load(controller.signal,{partnerId:target.partnerId,shopId:target.shopId});}catch{}finally{inflight=false;}};
-    const timer=setInterval(()=>void update(),30000);
-    window.addEventListener('focus',update);
-    return()=>{clearInterval(timer);window.removeEventListener('focus',update);controller.abort();};
-  },[target?.partnerId,target?.shopId,busy]);
+  useEffect(() => {
+    if (!target || busy) return;
+    const controller = new AbortController();
+    let inflight = false;
+    const update = async () => {
+      if (document.hidden || inflight) return;
+      inflight = true;
+      try {
+        await load(controller.signal, { partnerId: target.partnerId, shopId: target.shopId });
+      } catch {
+      } finally {
+        inflight = false;
+      }
+    };
+    const timer = setInterval(() => void update(), 30000);
+    window.addEventListener('focus', update);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', update);
+      controller.abort();
+    };
+  }, [target?.partnerId, target?.shopId, busy]);
   useEffect(() => {
     if (!attempt) return;
     const controller = new AbortController();
@@ -158,25 +245,40 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
         if (result.partnerId !== attempt!.partnerId || result.shopId !== attempt!.shopId) {
           ended = true;
           setAuthorizationStatus('unknown');
-          setMessage('Phiên cấp quyền trả về shop khác Shop ' + attempt!.shopId + '. Không lưu kết nối; kiểm tra lại phiên đang mở.');
+          setMessage(
+            'Phiên cấp quyền trả về shop khác Shop ' +
+              attempt!.shopId +
+              '. Không lưu kết nối; kiểm tra lại phiên đang mở.',
+          );
           return;
         }
         const status = Object.hasOwn(authorizationMessages, result.status)
           ? result.status
           : 'unknown';
         setAuthorizationStatus(status);
-        setMessage(result.reason==='UNEXPECTED_GRANT_SCOPE' || result.reason==='WRONG_SHOP'
-          ? 'Shopee đã cấp quyền shop khác Shop ' + attempt!.shopId + '. Chọn đúng shop này trên Shopee rồi chuẩn bị phiên mới.'
-          : authorizationMessages[status]);
+        setMessage(
+          result.reason === 'UNEXPECTED_GRANT_SCOPE' || result.reason === 'WRONG_SHOP'
+            ? 'Shopee đã cấp quyền shop khác Shop ' +
+                attempt!.shopId +
+                '. Chọn đúng shop này trên Shopee rồi chuẩn bị phiên mới.'
+            : authorizationMessages[status],
+        );
         if (status === 'pending' || status === 'exchanging') {
           timer = setTimeout(() => void poll(), Math.max(0, Math.min(3000, expiry - Date.now())));
           return;
         }
         ended = true;
-        sessionStorage.removeItem(attemptKey(attempt!));
+        try {
+          sessionStorage.removeItem(attemptKey(attempt!));
+        } catch {
+          /* Server receipt is authoritative; storage can be unavailable. */
+        }
         if (status === 'verified') {
           try {
-            await load(controller.signal,{partnerId:attempt!.partnerId,shopId:attempt!.shopId});
+            await load(controller.signal, {
+              partnerId: attempt!.partnerId,
+              shopId: attempt!.shopId,
+            });
           } catch {
             if (!controller.signal.aborted)
               setMessage(
@@ -192,14 +294,30 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
         setMessage(authorizationMessages.unknown);
       }
     }
-    timer = setTimeout(() => void poll(), 3000);
+    timer = setTimeout(() => void poll(), authorizationReadRevision > 0 ? 0 : 3000);
     return () => {
       ended = true;
       clearTimeout(timer);
       clearTimeout(deadline);
       controller.abort();
     };
-  }, [attempt]);
+  }, [attempt, authorizationReadRevision]);
+  async function reloadConnectionStatus() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await load();
+    } catch {
+      if (mounted.current) setMessage('Chưa tải được kết nối. Kiểm tra lại API nội bộ.');
+    } finally {
+      if (mounted.current) {
+        setBusy(false);
+        // Retry only the receipt read. The exact attempt is retained even when
+        // browser storage fails; this never prepares or exchanges another grant.
+        if (attempt) setAuthorizationReadRevision((revision) => revision + 1);
+      }
+    }
+  }
   function selectScope(selected: ShopScope) {
     const saved = restoreAttempt(selected);
     setPartnerId(selected.partnerId);
@@ -212,7 +330,9 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
     setAuthorizationStatus(saved ? 'pending' : null);
     setMessage(saved ? 'Đang chờ Shopee cấp quyền cho Shop ' + selected.shopId + '.' : '');
     rememberSelectedShop(selected);
-    void load(undefined, selected).catch(() => setMessage('Chưa tải được kết nối Shop ' + selected.shopId + '.'));
+    void load(undefined, selected).catch(() =>
+      setMessage('Chưa tải được kết nối Shop ' + selected.shopId + '.'),
+    );
   }
   const waiting = authorizationStatus === 'pending' || authorizationStatus === 'exchanging';
   const keyReady =
@@ -234,32 +354,31 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
       );
       if (!mounted.current) return;
       const result: AuthorizationAttempt = {
-        ...prepared, partnerId: target.partnerId, shopId: target.shopId,
+        ...prepared,
+        partnerId: target.partnerId,
+        shopId: target.shopId,
       };
       // Only the official authorization origin may become a clickable external action.
-      const url = new URL(result.authorizationUrl);
-      const callback = new URL(result.callbackUrl);
-      if (
-        url.origin !== 'https://open.shopee.com' ||
-        url.username ||
-        url.password ||
-        callback.origin !== 'http://127.0.0.1:4310' ||
-        callback.pathname !== '/v1/connections/production-pilot/callback' ||
-        callback.username ||
-        callback.password ||
-        callback.search ||
-        callback.hash
-      ) {
+      if (!validAuthorizationAttempt(result, target, target.authorizationCallbackUrl)) {
         setMessage(
           'Liên kết cấp quyền hoặc địa chỉ nhận kết quả không đúng cấu hình. Chưa mở trang và chưa xác nhận kết nối.',
         );
         return;
       }
       setPartnerKey('');
-      sessionStorage.setItem(attemptKey(result), JSON.stringify(result));
+      let remembered = true;
+      try {
+        sessionStorage.setItem(attemptKey(result), JSON.stringify(result));
+      } catch {
+        remembered = false;
+      }
       setAttempt(result);
       setAuthorizationStatus('pending');
-      setMessage(authorizationMessages.pending);
+      setMessage(
+        remembered
+          ? authorizationMessages.pending
+          : 'Phiên cấp quyền đã sẵn sàng, nhưng trình duyệt chưa lưu được để phục hồi. Giữ tab này mở đến khi hoàn tất.',
+      );
     } catch (error) {
       if (mounted.current) setMessage(publicError(error));
     } finally {
@@ -320,26 +439,110 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
       if (mounted.current) setBusy(false);
     }
   }
-  async function maintain(action:'refresh'|'check') {
-    if(!target?.connectionId || busy || waiting)return;
-    setBusy(true);setMessage(action==='refresh'?'Đang gia hạn kết nối…':'Đang kiểm tra quyền truy cập trên Shopee…');
+  async function maintain(action: 'refresh' | 'check') {
+    if (!target?.connectionId || busy || waiting) return;
+    setBusy(true);
+    setMessage(
+      action === 'refresh' ? 'Đang gia hạn kết nối…' : 'Đang kiểm tra quyền truy cập trên Shopee…',
+    );
     try {
-      const result=await post<{kind:string;code?:string}>(`/v1/connections/${target.connectionId}/${action}`,{expectedRevision:target.connectionRevision});
-      await load(undefined,{partnerId:target.partnerId,shopId:target.shopId});onConnectedRef.current();
-      setMessage(result.kind==='success'||result.kind==='already_saved' ? (action==='refresh'?'Đã gia hạn và lưu kết nối.':'Shopee đã xác nhận quyền truy cập ở lần kiểm tra này.') : result.kind==='waiting'?'Chưa thể gia hạn vì có thao tác khác đang giữ kết nối. Ứng dụng sẽ thử lại khi an toàn.':'Chưa xác nhận kết nối hoạt động. Xem trạng thái bên dưới; cấp quyền lại nếu được yêu cầu.');
-    }catch(error){setMessage(publicError(error));}finally{setBusy(false);}
+      const result = await post<{ kind: string; code?: string }>(
+        `/v1/connections/${target.connectionId}/${action}`,
+        { expectedRevision: target.connectionRevision },
+      );
+      await load(undefined, { partnerId: target.partnerId, shopId: target.shopId });
+      onConnectedRef.current();
+      setMessage(
+        result.kind === 'success' || result.kind === 'already_saved'
+          ? action === 'refresh'
+            ? 'Đã gia hạn và lưu kết nối.'
+            : 'Shopee đã xác nhận quyền truy cập ở lần kiểm tra này.'
+          : result.kind === 'waiting'
+            ? 'Chưa thể gia hạn vì có thao tác khác đang giữ kết nối. Ứng dụng sẽ thử lại khi an toàn.'
+            : 'Chưa xác nhận kết nối hoạt động. Xem trạng thái bên dưới; cấp quyền lại nếu được yêu cầu.',
+      );
+    } catch (error) {
+      setMessage(publicError(error));
+    } finally {
+      setBusy(false);
+    }
   }
-  const healthText:Record<string,string>={connected:target?.tokenExpiresAt?'Token còn hạn theo dữ liệu đã lưu':'Đã lưu kết nối; chưa biết thời hạn token',token_expired:'Token đã hết hạn — cần gia hạn',reauth_required:'Cần kiểm tra cấu hình hoặc cấp quyền lại',refresh_unknown:'Lần gia hạn chưa rõ kết quả — không tự gửi lại token',disconnected:'Chưa kết nối'};
+  const healthText: Record<string, string> = {
+    connected: target?.tokenExpiresAt
+      ? 'Token còn hạn theo dữ liệu đã lưu'
+      : 'Đã lưu kết nối; chưa biết thời hạn token',
+    token_expired: 'Token đã hết hạn — cần gia hạn',
+    reauth_required: 'Cần kiểm tra cấu hình hoặc cấp quyền lại',
+    refresh_unknown: 'Lần gia hạn chưa rõ kết quả — không tự gửi lại token',
+    disconnected: 'Chưa kết nối',
+  };
   return (
     <section className="panel connection-form" aria-label="Kết nối production đã chọn">
       <span className="tag danger">KẾT NỐI SHOP THẬT</span>
       <div className="form-grid">
-        <label>Shop đã lưu<select disabled={busy} value={target?.connectionId ?? ''} onChange={e=>{const selected=shops.find(s=>s.id===e.target.value);if(selected)selectScope(selected.scope);}}><option value="">Chọn shop / kết nối mới</option>{shops.map(s=><option key={s.id} value={s.id}>{s.name} · {s.scope.shopId}</option>)}</select></label>
-        <label>Partner ID<input inputMode="numeric" value={partnerId} disabled={busy} onChange={e=>{++loadVersion.current;setTarget(null);setAttempt(null);setAuthorizationStatus(null);setPartnerId(e.target.value.trim());}}/></label>
-        <label>Shop ID<input inputMode="numeric" value={shopId} disabled={busy} onChange={e=>{++loadVersion.current;setTarget(null);setAttempt(null);setAuthorizationStatus(null);setShopId(e.target.value.trim());}}/></label>
-        <button type="button" disabled={busy||!/^\d+$/.test(partnerId)||!/^\d+$/.test(shopId)} onClick={()=>selectScope({partnerId,shopId})}>Chọn shop này</button>
+        <label>
+          Shop đã lưu
+          <select
+            disabled={busy}
+            value={target?.connectionId ?? ''}
+            onChange={(e) => {
+              const selected = shops.find((s) => s.id === e.target.value);
+              if (selected) selectScope(selected.scope);
+            }}
+          >
+            <option value="">Chọn shop / kết nối mới</option>
+            {shops.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} · {s.scope.shopId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Partner ID
+          <input
+            inputMode="numeric"
+            value={partnerId}
+            disabled={busy}
+            onChange={(e) => {
+              ++loadVersion.current;
+              setTarget(null);
+              setAttempt(null);
+              setAuthorizationStatus(null);
+              setPartnerId(e.target.value.trim());
+            }}
+          />
+        </label>
+        <label>
+          Shop ID
+          <input
+            inputMode="numeric"
+            value={shopId}
+            disabled={busy}
+            onChange={(e) => {
+              ++loadVersion.current;
+              setTarget(null);
+              setAttempt(null);
+              setAuthorizationStatus(null);
+              setShopId(e.target.value.trim());
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={busy || !/^\d+$/.test(partnerId) || !/^\d+$/.test(shopId)}
+          onClick={() => selectScope({ partnerId, shopId })}
+        >
+          Chọn shop này
+        </button>
       </div>
       <h2>{target?.expectedHandle ?? 'Kết nối production'}</h2>
+      {!target && !partnerId && !shopId && (
+        <p>
+          Chọn shop đã lưu hoặc nhập Partner ID và Shop ID để bắt đầu. Ứng dụng không tự chọn một
+          shop đích.
+        </p>
+      )}
       {target && (
         <>
           <p>
@@ -347,16 +550,69 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
           </p>
           <div className="notice" role="status">
             <strong>{healthText[target.state] ?? 'Cần kiểm tra kết nối'}</strong>
-            {target.tokenExpiresAt && <p>Thời hạn token: {new Date(target.tokenExpiresAt).toLocaleString('vi-VN')}</p>}
-            <p>{target.autoRefresh?'Tự gia hạn khi ứng dụng đang chạy. Sau khi tắt máy, hệ thống kiểm tra lại lúc mở ứng dụng.':'Tự gia hạn đang tắt.'}</p>
-            {target.refreshStatus==='waiting' && <p>Đang chờ điều kiện an toàn để gia hạn. Nếu có đợt đăng chưa rõ kết quả, mở đợt đó để xử lý.</p>}
-            {target.refreshStatus==='unknown' && <p>Ứng dụng giữ bằng chứng lần gia hạn. Bấm Gia hạn để phục hồi từ bằng chứng; nếu không thể phục hồi, cấp quyền lại.</p>}
-            {target.refreshStatus==='reauth_required' && <p>Cấp quyền lại cho đúng shop; kiểm tra Live Partner Key nếu đã thay đổi trên Shopee.</p>}
-            {target.connectionId && <div className="actions">
-              <button type="button" disabled={busy||waiting} onClick={()=>void maintain('check')}>Kiểm tra với Shopee</button>
-              <button type="button" disabled={busy||waiting} onClick={()=>void maintain('refresh')}>Gia hạn / phục hồi kết nối</button>
-              <button type="button" disabled={busy||waiting} onClick={async()=>{setBusy(true);try{await post(`/v1/connections/${target.connectionId}/auto-refresh`,{enabled:!target.autoRefresh,expectedRevision:target.connectionRevision});await load();}catch(error){setMessage(publicError(error));}finally{setBusy(false);}}}>{target.autoRefresh?'Tắt tự gia hạn':'Bật tự gia hạn'}</button>
-            </div>}
+            {target.tokenExpiresAt && (
+              <p>Thời hạn token: {new Date(target.tokenExpiresAt).toLocaleString('vi-VN')}</p>
+            )}
+            <p>
+              {target.autoRefresh
+                ? 'Tự gia hạn khi ứng dụng đang chạy. Sau khi tắt máy, hệ thống kiểm tra lại lúc mở ứng dụng.'
+                : 'Tự gia hạn đang tắt.'}
+            </p>
+            {target.refreshStatus === 'waiting' && (
+              <p>
+                Đang chờ điều kiện an toàn để gia hạn. Nếu có đợt đăng chưa rõ kết quả, mở đợt đó để
+                xử lý.
+              </p>
+            )}
+            {target.refreshStatus === 'unknown' && (
+              <p>
+                Ứng dụng giữ bằng chứng lần gia hạn. Bấm Gia hạn để phục hồi từ bằng chứng; nếu
+                không thể phục hồi, cấp quyền lại.
+              </p>
+            )}
+            {target.refreshStatus === 'reauth_required' && (
+              <p>
+                Cấp quyền lại cho đúng shop; kiểm tra Live Partner Key nếu đã thay đổi trên Shopee.
+              </p>
+            )}
+            {target.connectionId && (
+              <div className="actions">
+                <button
+                  type="button"
+                  disabled={busy || waiting}
+                  onClick={() => void maintain('check')}
+                >
+                  Kiểm tra với Shopee
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || waiting}
+                  onClick={() => void maintain('refresh')}
+                >
+                  Gia hạn / phục hồi kết nối
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || waiting}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await post(`/v1/connections/${target.connectionId}/auto-refresh`, {
+                        enabled: !target.autoRefresh,
+                        expectedRevision: target.connectionRevision,
+                      });
+                      await load();
+                    } catch (error) {
+                      setMessage(publicError(error));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {target.autoRefresh ? 'Tắt tự gia hạn' : 'Bật tự gia hạn'}
+                </button>
+              </div>
+            )}
           </div>
           {target.officialName && <p>Tên shop từ lần kiểm API đã lưu: {target.officialName}</p>}
           <p>
@@ -392,7 +648,41 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
           >
             {busy ? 'Đang xử lý…' : '2. Chuẩn bị kết nối Shopee'}
           </button>
-          {waiting && <button type="button" disabled={busy} onClick={async()=>{if(!attempt)return;setBusy(true);try{const result=await post<AuthorizationResult>(`/v1/connections/production-pilot/authorization/${attempt.attemptId}/cancel`,{});setAttempt(null);setAuthorizationStatus(null);sessionStorage.removeItem(attemptKey(attempt));await load(undefined,{partnerId:attempt.partnerId,shopId:attempt.shopId});setMessage(result.status==='verified'?'Kết nối đã hoàn tất trước khi hủy.':'Đã hủy phiên cấp quyền đang chờ. Bạn có thể chọn shop khác.');}catch(error){setMessage(publicError(error));}finally{setBusy(false);}}}>Hủy phiên cấp quyền</button>}
+          {waiting && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                if (!attempt) return;
+                setBusy(true);
+                try {
+                  const result = await post<AuthorizationResult>(
+                    `/v1/connections/production-pilot/authorization/${attempt.attemptId}/cancel`,
+                    {},
+                  );
+                  setAttempt(null);
+                  setAuthorizationStatus(null);
+                  try {
+                    sessionStorage.removeItem(attemptKey(attempt));
+                  } catch {
+                    /* The server cancellation receipt remains authoritative. */
+                  }
+                  await load(undefined, { partnerId: attempt.partnerId, shopId: attempt.shopId });
+                  setMessage(
+                    result.status === 'verified'
+                      ? 'Kết nối đã hoàn tất trước khi hủy.'
+                      : 'Đã hủy phiên cấp quyền đang chờ. Bạn có thể chọn shop khác.',
+                  );
+                } catch (error) {
+                  setMessage(publicError(error));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Hủy phiên cấp quyền
+            </button>
+          )}
           {attempt && waiting && (
             <div className="panel" aria-label="Cấp quyền trên Shopee">
               <h3>3. Mở Shopee và cấp quyền đúng shop</h3>
@@ -467,7 +757,10 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
                 onChange={(e) => setRefreshToken(e.target.value)}
               />
             </label>
-            <p>Để trống sẽ giữ token làm mới đã lưu. Nếu token này thuộc lần cấp quyền mới, hãy nhập cả Access Token và Refresh Token tương ứng; nên dùng luồng cấp quyền phía trên.</p>
+            <p>
+              Để trống sẽ giữ token làm mới đã lưu. Nếu token này thuộc lần cấp quyền mới, hãy nhập
+              cả Access Token và Refresh Token tương ứng; nên dùng luồng cấp quyền phía trên.
+            </p>
             <button
               type="button"
               disabled={
@@ -484,13 +777,7 @@ export function ProductionConnectionForm({ onConnected }: { onConnected: () => v
           </details>
         </>
       )}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() =>
-          void load().catch(() => setMessage('Chưa tải được kết nối. Kiểm tra lại API nội bộ.'))
-        }
-      >
+      <button type="button" disabled={busy} onClick={() => void reloadConnectionStatus()}>
         Tải lại trạng thái kết nối
       </button>
       {message && (

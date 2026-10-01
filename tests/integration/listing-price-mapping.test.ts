@@ -13,7 +13,12 @@ import { assertListingPriceMappingReceipt } from '../../apps/api/src/listing-pri
 import { importNext } from '../../apps/worker/src/imports.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(database.hostname) || database.port !== '5442')
+const localDatabase = ['localhost', '127.0.0.1'].includes(database.hostname);
+const legacyTestDatabase = process.env.INTERNAL_ISOLATED_MODE !== '1' && localDatabase && database.port === '5442';
+const internalTestDatabase = process.env.INTERNAL_ISOLATED_MODE === '1' && localDatabase && database.protocol === 'postgres:'
+  && database.port === '5443' && database.pathname === '/shopee_internal_test' && database.username === 'shopee_internal'
+  && !database.search && !database.hash;
+if (!legacyTestDatabase && !internalTestDatabase)
   throw Error('Mapping tests require isolated local PostgreSQL.');
 const schema = 'test_price_mapping_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: database.href });

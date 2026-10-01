@@ -1,3 +1,4 @@
+import type { ContentSelection } from '../../../packages/domain/src/content-workbook.js';
 import type { CatalogRow, SourceRef, WordImport } from '@shopee/domain';
 import type { ImportRecord } from './api.js';
 import type { EditorSeed } from './Editor.js';
@@ -29,6 +30,7 @@ export type FolderIssue = {
 };
 export type ParagraphRange = { start: number; end: number };
 export type FolderSourceRules = {
+  content?: ContentSelection;
   wordPath?: string;
   word?:
     | {
@@ -456,7 +458,12 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
   const chosenWords = rules.wordPath
     ? wordFiles.filter((file) => file.relativePath === rules.wordPath)
     : wordFiles;
-  if (chosenWords.length !== 1)
+  if (rules.content) {
+    candidates.title = rules.content.title;
+    candidates.headline = rules.content.headline;
+    candidates.body = rules.content.body;
+    provenance.push(...rules.content.sources);
+  } else if (chosenWords.length !== 1)
     issues.push(
       issue(
         'WORD_FILE_UNRESOLVED',
@@ -757,6 +764,7 @@ export async function assembleFolderListing(input: FolderAssemblyInput): Promise
     seed = {
       productKey,
       expectedRevision: 0,
+      ...(rules.content ? {contentBinding: rules.content.binding} : {}),
       title: candidates.title,
       headline: candidates.headline ?? '',
       body: candidates.body ?? '',

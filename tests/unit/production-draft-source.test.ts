@@ -226,6 +226,23 @@ async function fixture(
   };
   return { input, draft, records, bytes, repo, blobs, priceRecord, parsed };
 }
+it('accepts a server bulk-edit audit receipt without losing source checks and rejects malformed receipts', async () => {
+  const f = await fixture();
+  const receipt = { operationId: randomUUID(), digest: 'a'.repeat(64), previousRevision: 3, recordedAt: decision.observedAt };
+  Object.assign(f.draft, { localBulkEdit: receipt });
+  const ready = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+  expect(ready.kind).toBe('ready');
+  if (ready.kind === 'ready') {
+    expect((ready.sourceSnapshot.draft as any).localBulkEdit).toEqual(receipt);
+    expect(ready.document.models.map(model => model.sku)).toEqual(f.draft.variants.map(model => model.sku.value));
+  }
+  for (const bad of [{ ...receipt, previousRevision: 4 }, { ...receipt, digest: 'forged' }, { ...receipt, publish: true }]) {
+    Object.assign(f.draft, { localBulkEdit: bad });
+    const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+    expect(result.kind).toBe('blocked');
+    expect(result.issues.some(issue => issue.code === 'BULK_EDIT_RECEIPT_INVALID')).toBe(true);
+  }
+});
 it('resolves only the selected profile duplicate warning in new drafts and historical preview projections', async () => {
   const f = await fixture({ priceProfiles: true });
   const raw = structuredClone(f.parsed),
@@ -421,6 +438,15 @@ it('blocks the pending SKU marker even when a manual source workbook supplies a 
   expect(result.issues.some((issue) => issue.code === 'MISSING_VARIANT_SKU')).toBe(true);
   expect(f.draft).toEqual(before);
 });
+it.each([0,100,1000])('preserves the explicit SKU stock %i in document and source snapshot without editing the draft',async amount=>{
+  const f=await fixture(),original=structuredClone(f.draft);
+  for(const sku of Object.keys(f.input.stocks)) f.input.stocks[sku]=amount;
+  const result=await buildProductionDraftSource(f.repo,f.blobs,f.input,decision);
+  expect(result.kind,JSON.stringify(result)).toBe('ready');if(result.kind!=='ready')return;
+  expect(result.document.models.map(model=>model.stock)).toEqual([amount,amount]);
+  expect(result.sourceSnapshot.input.stocks).toEqual(f.input.stocks);expect(f.draft).toEqual(original);
+});
+
 it('keeps the selected text-only description and separate gallery roles while preserving variants, zero stock and source weights', async () => {
   const f = await fixture(),
     before = structuredClone(f.draft);
@@ -502,7 +528,7 @@ it('requires a fresh explicit review action before confirming an unbound mapping
     expectedRevision: review.revision,
     expectedFingerprint: review.fingerprint,
   });
-  expect(updated.sourceSelection!.mappingConfirmation?.fileSha256).toBe(review.fingerprint);
+  expect(updated.sourceSelection!.mappingConfirmation?.decisionFingerprint).toBe(review.fingerprint);
   expect(updated.sourceSelection!.mappingConfirmation?.kind).toBe('user_decision');
   expect({ ...updated, revision: before.revision, sourceSelection: {
     ...updated.sourceSelection, mappingConfirmation: undefined,
@@ -519,6 +545,42 @@ it('does not trust a folder binding without the original stored source proof', a
   const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
   expect(result.kind).toBe('blocked');
   expect(result.issues.some((issue) => issue.code === 'SOURCE_MAPPING_PROOF_REQUIRED')).toBe(true);
+});
+it('binds a new explicit mapping decision to source hashes and exactly one resulting revision',async()=>{
+  const f=await fixture();delete f.draft.sourceSelection!.mappingConfirmation;
+  Object.assign(f.draft,{localBulkEdit:{operationId:randomUUID(),digest:'a'.repeat(64),
+    previousRevision:f.draft.revision-1,recordedAt:decision.observedAt}});
+  let current=structuredClone(f.draft),saves=0;
+  const history=new Map([[current.revision,structuredClone(current)]]);
+  const repo={...f.repo,getProduct:async(_key:string,revision?:number)=>
+    revision===undefined ? structuredClone(current) : structuredClone(history.get(revision)??null),
+    saveProduct:async(updated:ListingDraft,expectedRevision:number)=>{
+      expect(expectedRevision).toBe(current.revision);saves++;current=structuredClone(updated);
+      history.set(current.revision,structuredClone(current));return current;
+    }};
+  const reviewed=await reviewProductMapping(repo,current.productKey);
+  expect(reviewed.requiresConfirmation).toBe(true);
+  expect(reviewed.sourceHashes).toHaveLength(4);
+  const updated=await confirmProductMapping(repo,current.productKey,{expectedRevision:reviewed.revision,expectedFingerprint:reviewed.fingerprint});
+  expect(updated.sourceSelection!.mappingConfirmation).toMatchObject({reviewedRevision:reviewed.revision,
+    confirmedRevision:updated.revision,sourceHashes:reviewed.sourceHashes,decisionFingerprint:reviewed.fingerprint});
+  expect((await reviewProductMapping(repo,current.productKey)).requiresConfirmation).toBe(false);
+  expect(await confirmProductMapping(repo,current.productKey,{expectedRevision:reviewed.revision,expectedFingerprint:reviewed.fingerprint})).toEqual(updated);
+  expect(saves).toBe(1);
+  const prepared=await buildProductionDraftSource(repo,f.blobs,{...f.input,sourceRevision:current.revision},decision);
+  expect(prepared.kind).toBe('ready');
+  expect((prepared as any).sourceSnapshot.draft.localBulkEdit).toEqual((f.draft as any).localBulkEdit);
+  current.revision++;
+  history.set(current.revision,structuredClone(current));
+  const stale=await buildProductionDraftSource(repo,f.blobs,{...f.input,sourceRevision:current.revision},decision);
+  expect(stale.kind).toBe('blocked');expect(stale.issues.some(issue=>issue.code==='SOURCE_MAPPING_DECISION_CHANGED')).toBe(true);
+});
+it('rejects changed source hashes between mapping review and confirmation',async()=>{
+  const f=await fixture(),repo={...f.repo,saveProduct:async()=>{throw Error('MUST_NOT_SAVE_CHANGED_PROOF');}};
+  const reviewed=await reviewProductMapping(repo,f.draft.productKey);
+  const record=f.records.get(f.input.priceSelection.importId)!;record.sha256='f'.repeat(64);
+  await expect(confirmProductMapping(repo,f.draft.productKey,{expectedRevision:reviewed.revision,
+    expectedFingerprint:reviewed.fingerprint})).rejects.toThrow('SOURCE_MAPPING_REVIEW_CHANGED');
 });
 it.each(['videoKeys', 'sizeChartKey', 'identifiers', 'compliance', 'fulfillment'])(
   'blocks unsupported %s instead of silently dropping it',
@@ -784,4 +846,17 @@ it('blocks an invalid effective category ID even when it was saved as a confirme
   const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
   expect(result.kind).toBe('blocked');
   expect(result.issues.some((i) => i.code === 'SOURCE_ID_INVALID')).toBe(true);
+});
+
+it('verifies raw Excel content before preparation regardless of price parser status and includes the source receipt', async () => {
+  const f=await fixture(),selection=f.draft.sourceSelection!,book=new ExcelJS.Workbook();
+  book.addWorksheet('Content').addRows([['STT','Title','Headline','Body'],[222,selection.title,selection.headline,selection.body]]);
+  const bytes=Buffer.from(await book.xlsx.writeBuffer()),id=randomUUID(),sha=digest(bytes);
+  const record:ImportRecord={id,sha256:sha,bytes:bytes.length,kind:'xlsx',filename:'content.xlsx',status:'failed',message:'No SKU in content book',body:{},createdAt:decision.observedAt};
+  f.records.set(id,record);f.bytes.set(sha,bytes);
+  selection.contentBinding={mapping:{importId:id,sha256:sha,sheet:'Content',headerRow:1,columns:{stt:'A',title:'B',headline:'C',body:'D'},headers:{stt:'STT',title:'Title',headline:'Headline',body:'Body'}},row:2,stt:'222'};
+  const result=await buildProductionDraftSource(f.repo,f.blobs,f.input,decision);
+  expect(result.kind).toBe('ready');if(result.kind==='ready')expect(result.sourceSnapshot.imports).toContainEqual({id,sha256:sha,bytes:bytes.length,kind:'xlsx',filename:'content.xlsx'});
+  selection.body='tampered';f.draft.description=compileDescription(selection.headline,selection.body,[]);
+  const changed=await buildProductionDraftSource(f.repo,f.blobs,f.input,decision);expect(changed.kind).toBe('blocked');expect(changed.issues.some(i=>i.code==='CONTENT_SELECTION_MISMATCH')).toBe(true);
 });

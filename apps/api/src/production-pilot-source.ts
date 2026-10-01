@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -25,8 +26,8 @@ export const productionPilotScope = {
 export const pilotProbeAuthorization =
   'User 2026-09-15: đã kết nối được rồi, giờ đăng thử hàng loạt đi; ok làm đi rồi nối luồng rồi chủ động thực thi việc đăng hàng loạt sản phẩm thực tế đi';
 const hash = (v: string | Uint8Array) => createHash('sha256').update(v).digest('hex');
-function fail(code: string): never {
-  throw Error('PRODUCTION_PILOT_' + code);
+function fail(code: string, field?: string): never {
+  throw Object.assign(Error('PRODUCTION_PILOT_' + code), field ? {field, scope:{...currentProductionScope()}} : {});
 }
 const object = (v: unknown): v is Record<string, any> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
@@ -91,8 +92,8 @@ export async function loadProductionPilotSource() {
   }
   const value = JSON.parse(bytes.toString('utf8'));
   if (
-    value.scope?.shopId !== productionPilotScope.shopId ||
-    value.scope?.partnerId !== productionPilotScope.partnerId ||
+    value.scope?.shopId !== currentProductionScope().shopId ||
+    value.scope?.partnerId !== currentProductionScope().partnerId ||
     value.scope?.environment !== 'production' ||
     value.listingCount !== 2 ||
     value.modelCount !== 15 ||
@@ -193,6 +194,8 @@ export type ProductionPilotCollectOptions = {
   transport?: typeof fetch;
   encryptionKey?: string;
   priorCapabilityEvidence?: ProductionPilotPreparedInput['capabilityEvidence'];
+  /** Server-only permission checked against the registered batch by the batch collector. */
+  capabilityProbe?: ProductionPilotPreparedInput['capabilityProbe'];
   allowExistingListings?: boolean;
   purpose?: 'create' | 'existing_readback' | 'publish';
   descriptionFallbackPolicy?: 'plain_text_when_unsupported';
@@ -212,7 +215,7 @@ export type ProductionPilotCollectOptions = {
     }>;
     sourceKeys: readonly string[];
     evidenceRoot: string;
-    shopName: string;
+    shopName?: string;
   };
 };
 
@@ -244,7 +247,7 @@ export async function collectProductionPilotInput(
   const rows = (
     await repo.pool.query(
       `SELECT * FROM connections WHERE environment=$1 AND partner_id=$2 AND shop_id=$3`,
-      ['production', productionPilotScope.partnerId, productionPilotScope.shopId],
+      ['production', currentProductionScope().partnerId, currentProductionScope().shopId],
     )
   ).rows;
   if (
@@ -254,7 +257,7 @@ export async function collectProductionPilotInput(
   )
     fail('AUTH_REQUIRED');
   const connection = rows[0],
-    owner = `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}`;
+    owner = `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}`;
   const purpose = options.purpose ?? 'create';
   if (!['create', 'existing_readback', 'publish'].includes(purpose))
     fail('COLLECTION_PURPOSE_INVALID');
@@ -306,7 +309,7 @@ export async function collectProductionPilotInput(
       op.source_fingerprint !==
         hash(
           canonicalJson({
-            scope: productionPilotScope,
+            scope: currentProductionScope(),
             sourceIdentity: source.sourceIdentity,
             sourceRevision: source.sourceRevision,
             sourcePayload: op.source_payload,
@@ -341,7 +344,7 @@ export async function collectProductionPilotInput(
   const key = box.open(connection.partner_key_ciphertext, owner) as { partnerKey: string };
   const token = box.open(connection.token_ciphertext, owner) as { accessToken: string };
   const client = new ProductionPilotTransport(
-    { ...productionPilotScope, partnerKey: key.partnerKey, accessToken: token.accessToken },
+    { ...currentProductionScope(), partnerKey: key.partnerKey, accessToken: token.accessToken },
     { transport: options.transport },
   );
   const preflightId = randomUUID(),
@@ -374,7 +377,7 @@ export async function collectProductionPilotInput(
             file,
             JSON.stringify(
               {
-                scope: productionPilotScope,
+                scope: currentProductionScope(),
                 connectionId: connection.id,
                 connectionRevision: connection.revision,
                 method: 'GET',
@@ -395,7 +398,7 @@ export async function collectProductionPilotInput(
     };
     const read = options.readSession
       ? await options.readSession.read(
-          { ...productionPilotScope, connectionRevision: connection.revision },
+          { ...currentProductionScope(), connectionRevision: connection.revision },
           path,
           query,
           load,
@@ -408,7 +411,7 @@ export async function collectProductionPilotInput(
         JSON.stringify(
           {
             kind: 'reused_metadata_read',
-            scope: productionPilotScope,
+            scope: currentProductionScope(),
             connectionRevision: connection.revision,
             path,
             query,
@@ -446,11 +449,16 @@ export async function collectProductionPilotInput(
   }
   const shop = await get('/api/v2/shop/get_shop_info', {}, 'shop');
   if (
-    shop.shop_name !== (options.trustedSource?.shopName ?? 'Vuatinhdau - Đại Lý Chính Hãng') ||
+    typeof shop.shop_name !== 'string' || !shop.shop_name.trim() ||
+    (options.trustedSource
+      ? !!(options.trustedSource.shopName ?? connection.name) && shop.shop_name !== (options.trustedSource.shopName ?? connection.name)
+      : shop.shop_name !== 'Vuatinhdau - Đại Lý Chính Hãng') ||
+    (shop.shop_id !== undefined && String(shop.shop_id) !== currentProductionScope().shopId) ||
     shop.region !== 'VN' ||
     shop.status !== 'NORMAL'
   )
     fail('SHOP_IDENTITY_MISMATCH');
+  const inventoryLimit = options.trustedSource ? 1000 : 200;
   const inventoryIds = new Set<string>();
   const existingMatches: { itemId: string; kind: string }[] = [];
   let stockObservation: (typeof evidence)[number] | undefined;
@@ -458,6 +466,8 @@ export async function collectProductionPilotInput(
     for (const status of ['NORMAL', 'UNLIST', 'BANNED', 'REVIEWING']) {
       let offset = 0,
         complete = false;
+      let expectedCount: number | undefined;
+      const statusIds = new Set<string>();
       for (let page = 0; page < 10; page++) {
         const pageData = await get(
           '/api/v2/product/get_item_list',
@@ -465,8 +475,15 @@ export async function collectProductionPilotInput(
           `inventory-${status}-${page}`,
         );
         const decoded = decodeProductionPilotInventoryPage(pageData, status, offset);
-        for (const itemId of decoded.ids) inventoryIds.add(itemId);
+        if (expectedCount !== undefined && expectedCount !== pageData.total_count) fail('INVENTORY_CHANGED');
+        expectedCount = pageData.total_count;
+        for (const itemId of decoded.ids) {
+          if (inventoryIds.has(itemId)) fail('INVENTORY_CHANGED');
+          statusIds.add(itemId); inventoryIds.add(itemId);
+        }
+        if (inventoryIds.size > inventoryLimit) fail('PILOT_INVENTORY_SCOPE_EXCEEDED');
         if (decoded.complete) {
+          if (statusIds.size !== expectedCount) fail('INVENTORY_INCOMPLETE');
           complete = true;
           break;
         }
@@ -474,7 +491,7 @@ export async function collectProductionPilotInput(
       }
       if (!complete) fail('INVENTORY_LIMIT_REACHED');
     }
-    if (inventoryIds.size > 200) fail('PILOT_INVENTORY_SCOPE_EXCEEDED');
+    if (inventoryIds.size > inventoryLimit) fail('PILOT_INVENTORY_SCOPE_EXCEEDED');
     const candidateSkus = new Set(source.document.models.map((m: any) => m.sku));
     const allItems: Record<string, any>[] = [];
     const ids = [...inventoryIds];
@@ -525,7 +542,7 @@ export async function collectProductionPilotInput(
     if (!Array.isArray(models.model)) fail('MODELS_INVENTORY_INCOMPLETE');
     stockObservation = evidence[evidence.length - 1];
   }
-  if (!stockObservation) fail('STOCK_LOCATION_REFERENCE_MISSING');
+  if (!stockObservation) fail('STOCK_LOCATION_REFERENCE_MISSING', 'stockLocation.referenceItemId');
   const category = await get('/api/v2/product/get_category', { language: 'vi' }, 'category');
   const leaves = category.category_list?.filter(
     (c: any) => String(c.category_id) === source.document.categoryId,
@@ -610,7 +627,7 @@ export async function collectProductionPilotInput(
     'warehouse.error_not_in_whitelist',
   );
   if (warehouse.confirmedError !== 'warehouse.error_not_in_whitelist')
-    fail('WAREHOUSE_MAPPING_REVIEW_REQUIRED');
+    fail('WAREHOUSE_MAPPING_REVIEW_REQUIRED', 'stockLocation');
   const evidenceTimes = evidence.map((entry) => Date.parse(entry.observedAt));
   // The aggregate must include its latest stock read. Its lifetime still starts at the
   // oldest receipt, including cached receipts whose original timestamp is preserved.
@@ -620,7 +637,7 @@ export async function collectProductionPilotInput(
   if (options.trustedSource && !options.priorCapabilityEvidence)
     fail('CAPABILITY_EVIDENCE_REQUIRED');
   const capabilityEvidence = options.priorCapabilityEvidence ?? {
-    ...productionPilotScope,
+    ...currentProductionScope(),
     connectionRevision: connection.revision,
     gallery34: { state: 'unknown' as const, observedAt, references: refs },
     extendedDescription: {
@@ -641,7 +658,7 @@ export async function collectProductionPilotInput(
     assets: loaded.value.assets,
     issues: [],
     metadata: {
-      ...productionPilotScope,
+      ...currentProductionScope(),
       connectionRevision: connection.revision,
       categoryId: source.document.categoryId,
       observedAt,
@@ -655,6 +672,7 @@ export async function collectProductionPilotInput(
     ...(source.supersedesOperationId
       ? { supersedesOperationId: source.supersedesOperationId }
       : {}),
+    ...(options.trustedSource && options.capabilityProbe ? { capabilityProbe: structuredClone(options.capabilityProbe) } : {}),
     ...(!options.trustedSource && sourceKey === 'row-2'
       ? {
           capabilityProbe: {
@@ -668,7 +686,7 @@ export async function collectProductionPilotInput(
         }
       : {}),
     stockLocationEvidence: {
-      ...productionPilotScope,
+      ...currentProductionScope(),
       connectionRevision: connection.revision,
       observedAt: stockObservation.observedAt,
       observations: [

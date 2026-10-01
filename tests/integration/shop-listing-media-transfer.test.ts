@@ -10,7 +10,12 @@ import {Pool,migrate} from '@shopee/persistence';
 import {ShopListingMediaTransferJournal,ShopListingVideoUploadJournal,transferArchivedImage} from '../../apps/api/src/shop-listing-media-transfer.js';
 const schema='test_clone_media_'+randomUUID().replaceAll('-','');
 const database=new URL(process.env.DATABASE_URL!);
-if(!['localhost','127.0.0.1'].includes(database.hostname)||database.port!=='5442') throw Error('Local PostgreSQL 5442 required');
+const localDatabase=['localhost','127.0.0.1'].includes(database.hostname);
+const legacyTestDatabase=process.env.INTERNAL_ISOLATED_MODE!=='1'&&localDatabase&&database.port==='5442';
+const internalTestDatabase=process.env.INTERNAL_ISOLATED_MODE==='1'&&localDatabase&&database.protocol==='postgres:'
+  &&database.port==='5443'&&database.pathname==='/shopee_internal_test'&&database.username==='shopee_internal'
+  &&!database.search&&!database.hash;
+if(!legacyTestDatabase&&!internalTestDatabase) throw Error('Isolated local PostgreSQL required');
 const admin=new Pool({connectionString:process.env.DATABASE_URL});
 const pool=new Pool({connectionString:process.env.DATABASE_URL,options:'-c search_path='+schema+',public'});
 const journal=new ShopListingMediaTransferJournal(pool);

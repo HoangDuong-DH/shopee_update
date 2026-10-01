@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, productionScopeSchema, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -145,7 +146,7 @@ export class ProductionBatchReviewService {
     try {
       await db.query('BEGIN');
       await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        'production-pilot:' + owner,
+        'production-pilot:' + productionOwner(),
       ]);
       const result = await work(db);
       await db.query('COMMIT');
@@ -166,6 +167,7 @@ export class ProductionBatchReviewService {
         batchId: uuid,
         manifestPath: z.string().min(1),
         expectedSha256: digest,
+        scope: productionScopeSchema.optional(),
         executionEnabled: z.boolean().default(true),
         holdReason: z.string().optional(),
       })
@@ -180,6 +182,7 @@ export class ProductionBatchReviewService {
     );
     if (loaded.sha256 !== registered.expectedSha256 || loaded.value.batchId !== batchId)
       fail('SOURCE_CHANGED');
+    assertProductionScope(loaded.value.scope);
     const matches = loaded.value.listings.filter((listing) => listing.sourceKey === sourceKey);
     if (matches.length !== 1) fail('SOURCE_NOT_ALLOWED');
     return { loaded, listing: matches[0]! };
@@ -193,7 +196,7 @@ export class ProductionBatchReviewService {
     COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY ordinal) FROM production_pilot_steps s WHERE s.operation_id=o.id),'[]'::jsonb) AS steps,
     (SELECT count(*)::int FROM production_pilot_publications p WHERE p.create_operation_id=o.id) AS publications
     FROM production_pilot_operations o JOIN connections c ON c.id=o.connection_id WHERE o.owner_key=$1 AND o.source_identity=$2 ORDER BY o.source_revision`,
-        [owner, listing.sourceIdentity],
+        [productionOwner(), listing.sourceIdentity],
       )
     ).rows;
     if (rows.length !== 1) fail('OPERATION_UNAVAILABLE');
@@ -204,8 +207,8 @@ export class ProductionBatchReviewService {
       !connection ||
       connection.state !== 'connected' ||
       connection.environment !== 'production' ||
-      connection.partner_id !== '2010476' ||
-      connection.shop_id !== '1423724897' ||
+      connection.partner_id !== currentProductionScope().partnerId ||
+      connection.shop_id !== currentProductionScope().shopId ||
       view.publications !== 0
     )
       fail('OPERATION_UNAVAILABLE');
@@ -292,7 +295,7 @@ export class ProductionBatchReviewService {
     if (promotion.image_ratio !== undefined && promotion.image_ratio !== '1:1')
       fail('COVER_UNVERIFIED');
     const binding = {
-      ...scope,
+      ...currentProductionScope(),
       itemId: op.item_id,
       operationId: op.id,
       role: 'cover',
@@ -637,7 +640,7 @@ export class ProductionBatchReviewService {
       const now = this.now(),
         review: ProductionPilotWeightReview = {
           version: 1,
-          scope,
+          scope: currentProductionScope(),
           operationId: op.id,
           itemId: op.item_id,
           sourceFingerprint: op.source_fingerprint,

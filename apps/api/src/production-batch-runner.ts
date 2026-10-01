@@ -1,3 +1,6 @@
+import { findProductionCapabilityProof, intendedHiddenCapabilityProbe, unknownProductionCapabilityEvidence } from './production-batch-capability.js';
+import { sourcePreflightFailure } from './production-batch-block.js';
+import { currentProductionScope, productionOwner, assertProductionScope, legacyProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -32,7 +35,7 @@ const fingerprint = (value: unknown) =>
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
 const owner = 'production:2010476:1423724897';
 // Read-only evidence from the completed pilot. This identity is never added to write allowlists.
-const capabilityOperationId = 'ec195c1c-b2e1-44d9-a866-e14a39988a9b';
+const legacyCapabilityOperationId = 'ec195c1c-b2e1-44d9-a866-e14a39988a9b';
 const sha = z.string().regex(/^[a-f0-9]{64}$/);
 const argumentSchema = z
   .object({
@@ -88,6 +91,8 @@ type Dependencies = {
   lockSource?:typeof lockProductionSourceSelection;
   /** Server-assessed orphan scope only; never a CLI/HTTP argument or ordinary QC retry. */
   deferredRecoveryProofs?: readonly DeferredRecoveryProof[];
+  /** Server-owned durable linkage, called after a new reservation and before any API write. */
+  bindSuccessor?: (sourceKey:string,operation:Record<string,any>)=>Promise<void>;
   inspectPlan?: (
     input: Awaited<ReturnType<typeof collectProductionBatchInput>>['input'],
   ) => unknown;
@@ -123,7 +128,7 @@ export function checkCreate(
     payload = op?.source_payload;
   if (
     !op ||
-    op.owner_key !== owner ||
+    op.owner_key !== productionOwner() ||
     op.source_identity !== source.sourceIdentity ||
     op.source_revision !== source.sourceRevision ||
     op.connection_id !== connectionId ||
@@ -148,11 +153,11 @@ export function checkCreate(
       source.stockLocation.expectedLocationBySku,
     ) ||
     payload.metadata?.environment !== 'production' ||
-    payload.metadata?.partnerId !== '2010476' ||
-    payload.metadata?.shopId !== '1423724897' ||
+    payload.metadata?.partnerId !== currentProductionScope().partnerId ||
+    payload.metadata?.shopId !== currentProductionScope().shopId ||
     op.source_fingerprint !==
       fingerprint({
-        scope: productionPilotScope,
+        scope: currentProductionScope(),
         sourceIdentity: source.sourceIdentity,
         sourceRevision: source.sourceRevision,
         sourcePayload: payload,
@@ -214,8 +219,8 @@ export function checkVerification(
       verification.readbacks.flatMap((read: any) => read.requestIds ?? []).length ||
     verification.readbacks.some(
       (read: any) =>
-        read.shopId !== '1423724897' ||
-        read.partnerId !== '2010476' ||
+        read.shopId !== currentProductionScope().shopId ||
+        read.partnerId !== currentProductionScope().partnerId ||
         read.itemId !== itemId ||
         !Array.isArray(read.requestIds) ||
         !read.requestIds.length ||
@@ -250,6 +255,7 @@ export async function runPass1ProductionBatch(
   const collect = dependencies.collect ?? collectProductionBatchInput;
   const loaded = await load(args.manifestPath, args.expectedSha256);
   if (loaded.sha256 !== args.expectedSha256) fail('MANIFEST_CHANGED');
+  assertProductionScope(loaded.value.scope);
   const policyService=new ProductionExecutionPolicyService(dependencies.repo);
   const executionPolicy=loaded.value.version===2 ? await policyService.getForBatch(loaded.value.batchId,loaded.sha256) : null;
   const hidden = !!executionPolicy || productionPublicationMode(loaded.value) === 'hidden_for_review';
@@ -304,6 +310,9 @@ export async function runPass1ProductionBatch(
       operationId?: string;
       itemId?: string;
       code?: string;
+      field?: string;
+      scope?: ProductionScope;
+      failureScope?: 'source_preflight';
     }[],
   };
   const recheckSource = async () => {
@@ -318,7 +327,7 @@ export async function runPass1ProductionBatch(
       await recheckSource();
       const excluded=(await readProductionBatchExclusions(lifecycleRoot,loaded)).some(receipt=>receipt.sourceKey===source.sourceKey);
       if(excluded) {
-        const existing=await dependencies.repo.pool.query('SELECT id FROM production_pilot_operations WHERE owner_key=$1 AND source_identity=$2',[owner,source.sourceIdentity]);
+        const existing=await dependencies.repo.pool.query('SELECT id FROM production_pilot_operations WHERE owner_key=$1 AND source_identity=$2',[productionOwner(),source.sourceIdentity]);
         if(existing.rows.length)fail('EXCLUSION_INVALID');
         if(args.mode==='publish')fail('SOURCE_NOT_SELECTED');
         result.listings.push({sourceKey:source.sourceKey,state:'excluded'});
@@ -326,6 +335,13 @@ export async function runPass1ProductionBatch(
       }
       const scopedPolicy=executionPolicy?.batches.some(b=>b.batchId===loaded.value.batchId && b.sources.some(s=>s.sourceIdentity===source.sourceIdentity)) ? executionPolicy : undefined;
       const sourceDefers=deferImages || !!scopedPolicy;
+      // A verified pilot from another shop never grants media capability here.
+      // Verification below still checks all source, step and readback fingerprints.
+      const capabilityOperationId = await findProductionCapabilityProof(dependencies.repo, source.document)
+        ?? (productionOwner()===productionOwner(legacyProductionScope) ? legacyCapabilityOperationId : undefined);
+      const probePermission = hidden ? intendedHiddenCapabilityProbe({hidden:true,
+        batchId:loaded.value.batchId, manifestSha256:loaded.sha256, authorizationReference:loaded.value.authorizationReference,
+        source, evidence:unknownProductionCapabilityEvidence(1,args.manifestPath) }) : undefined;
       const runner = (
         dependencies.createRunner ?? ((repo, options) => new ProductionPilotRunner(repo, options))
       )(dependencies.repo, {
@@ -333,9 +349,10 @@ export async function runPass1ProductionBatch(
           { sourceIdentity: source.sourceIdentity, sourceRevision: source.sourceRevision },
         ],
         ...{ batchAuthorization: authorization },
+        ...(probePermission ? { capabilityProbe: probePermission } : {}),
         deferImageQc: sourceDefers && args.mode==='execute',
         ...(scopedPolicy ? {executionPolicy:scopedPolicy} : {}),
-        ...{ capabilityProofOperationIds: [capabilityOperationId] },
+        ...{ capabilityProofOperationIds: capabilityOperationId ? [capabilityOperationId] : [] },
         assetRoot: productionBatchPass1Root,
         evidenceRoot: resolve(productionBatchPass1Root, 'wire-evidence', loaded.value.batchId),
         coverImageQc: productionPilotImageService(
@@ -352,7 +369,7 @@ export async function runPass1ProductionBatch(
         await dependencies.repo.pool.query(
           `SELECT id,revision,state,expires_at FROM connections
         WHERE environment='production' AND partner_id=$1 AND shop_id=$2`,
-          ['2010476', '1423724897'],
+          [currentProductionScope().partnerId, currentProductionScope().shopId],
         )
       ).rows;
       const connection = connections[0];
@@ -366,7 +383,7 @@ export async function runPass1ProductionBatch(
         await dependencies.repo.pool.query(
           `SELECT id,source_revision,EXISTS(SELECT 1 FROM production_pilot_publications p WHERE p.create_operation_id=o.id) AS has_publication
            FROM production_pilot_operations o WHERE owner_key=$1 AND source_identity=$2 ORDER BY source_revision`,
-          [owner, source.sourceIdentity],
+          [productionOwner(), source.sourceIdentity],
         )
       ).rows;
       if (rows.length > 1 || (rows.length && rows[0].source_revision !== source.sourceRevision))
@@ -430,7 +447,7 @@ export async function runPass1ProductionBatch(
           const pub = publication.operation;
           if (
             view.operation.state !== 'verified' ||
-            pub.owner_key !== owner ||
+            pub.owner_key !== productionOwner() ||
             pub.create_operation_id !== view.operation.id ||
             pub.source_fingerprint !== view.operation.source_fingerprint ||
             pub.create_verification_id !== view.verification?.id ||
@@ -487,7 +504,23 @@ export async function runPass1ProductionBatch(
           if(args.sourceKey)break;
           continue;
         }
-        releaseSource=await (dependencies.lockSource ?? lockProductionSourceSelection)(dependencies.repo,source);
+        try {
+          releaseSource=await (dependencies.lockSource ?? lockProductionSourceSelection)(dependencies.repo,source);
+        } catch(error) {
+          const code=errorCode(error);
+          if(view || !['PRODUCTION_BATCH_SOURCE_CHANGED','PRODUCTION_BATCH_SOURCE_ARCHIVED'].includes(code))throw error;
+          // A save may have won the lock after the earlier revision check. Hold
+          // that unchanged manifest entry, never silently substitute its new source.
+          const reserved=await dependencies.repo.pool.query(
+            'SELECT id FROM production_pilot_operations WHERE owner_key=$1 AND source_identity=$2',
+            [productionOwner(),source.sourceIdentity]);
+          if(reserved.rows.length)throw error;
+          await recheckSource();
+          result.listings.push({sourceKey:source.sourceKey,state:'blocked',code});result.stopped=true;
+          await save('source-changed-before-dispatch',{sourceKey:source.sourceKey,code});
+          if(args.sourceKey)break;
+          continue;
+        }
         if((await readProductionBatchExclusions(lifecycleRoot,loaded)).some(receipt=>receipt.sourceKey===source.sourceKey)) {
           if(view)fail('EXCLUSION_INVALID');
           result.listings.push({sourceKey:source.sourceKey,state:'excluded'});
@@ -523,12 +556,14 @@ export async function runPass1ProductionBatch(
         continue;
       }
       if (hidden && publication && args.mode === 'execute') fail('PUBLICATION_RECONCILIATION_REQUIRED');
-      const capability = await runner.capabilityEvidenceFromVerified(
-        capabilityOperationId,
-        connection.revision,
-        new Date().toISOString(),
-        [resolve(productionPilotSourceRoot, 'wire-evidence', capabilityOperationId)],
-      );
+      if(!capabilityOperationId && !hidden) fail('CAPABILITY_SETUP_REQUIRED');
+      const capability = capabilityOperationId ? await runner.capabilityEvidenceFromVerified(
+        capabilityOperationId, connection.revision, new Date().toISOString(),
+        ['verified-operation:' + capabilityOperationId],
+      ) : unknownProductionCapabilityEvidence(connection.revision, args.manifestPath);
+      const capabilityProbe = intendedHiddenCapabilityProbe({hidden,
+        batchId:loaded.value.batchId, manifestSha256:loaded.sha256,
+        authorizationReference:loaded.value.authorizationReference,source,evidence:capability });
       const preflight = await collect(
         dependencies.repo,
         {
@@ -538,6 +573,7 @@ export async function runPass1ProductionBatch(
         },
         {
           priorCapabilityEvidence: capability,
+          ...(capabilityProbe ? { capabilityProbe } : {}),
           readSession,
           purpose: view && !undispatched ? 'existing_readback' : 'create',
           ...(view && !undispatched ? { trustedExistingOperation: {
@@ -548,7 +584,24 @@ export async function runPass1ProductionBatch(
           // Existing operation reconciliation may see its own SKU; creation retains duplicate blocking.
           allowExistingListings: Boolean(view) && !undispatched,
         },
-      );
+      ).catch(async(error: unknown) => {
+        const code = errorCode(error);
+        if (!['execute','inspect'].includes(args.mode) || view || !sourcePreflightFailure(code)) throw error;
+        // No prepare/write has been called. Recheck the durable journal under the
+        // source lock before classifying this as independent of sibling listings.
+        const reserved = await dependencies.repo.pool.query(
+          'SELECT id FROM production_pilot_operations WHERE owner_key=$1 AND source_identity=$2',
+          [productionOwner(),source.sourceIdentity],
+        );
+        if (reserved.rows.length) throw error;
+        await recheckSource();
+        result.stopped = true;
+        const held = {sourceKey:source.sourceKey,state:'blocked',code,failureScope:'source_preflight' as const};
+        result.listings.push(held);
+        await save('source-preflight-blocked',held);
+        return null;
+      });
+      if (!preflight) continue;
       if (preflight.sourceReceiptSha256 !== loaded.sha256) fail('MANIFEST_CHANGED');
       await recheckSource();
       if (args.mode === 'inspect') {
@@ -582,10 +635,15 @@ export async function runPass1ProductionBatch(
         const prepared = await runner.prepare(preflight.input);
         if (prepared.kind !== 'ready') {
           await save('plan-blocked', prepared);
-          fail('PLAN_BLOCKED');
+          // prepare validates before reserving any operation. A rejected source
+          // can be held without occupying the shop's write lane.
+          result.listings.push({sourceKey:source.sourceKey,state:'blocked',code:'PASS1_PLAN_BLOCKED'});
+          result.stopped=true;
+          continue;
         }
         view = await runner.journal.get(prepared.operationId);
         checkCreate(view, source, loaded, authorization, connection.id, connection.revision);
+        await dependencies.bindSuccessor?.(source.sourceKey,view.operation);
         await mkdir(checkpointRoot, { recursive: true });
         await writeFile(
           checkpointPath,
@@ -667,8 +725,12 @@ export async function runPass1ProductionBatch(
     } catch (error) {
       const code = errorCode(error);
       result.stopped = true;
-      result.listings.push({ sourceKey: source.sourceKey, state: 'blocked', code });
-      await save('stopped', { sourceKey: source.sourceKey, code });
+      const details = code === 'PRODUCTION_PILOT_STOCK_LOCATION_REFERENCE_MISSING'
+        ? {field:'stockLocation.referenceItemId',scope:currentProductionScope()}
+        : code === 'PRODUCTION_PILOT_WAREHOUSE_MAPPING_REVIEW_REQUIRED'
+          ? {field:'stockLocation',scope:currentProductionScope()} : {};
+      result.listings.push({ sourceKey: source.sourceKey, state: 'blocked', code, ...details });
+      await save('stopped', { sourceKey: source.sourceKey, code, ...details });
       break;
     } finally {
       if(releaseSource)await releaseSource();

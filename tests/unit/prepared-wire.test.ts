@@ -150,6 +150,17 @@ function ready(plan: ReturnType<typeof planPreparedWireCreate>) {
   if (plan.kind !== 'ready') throw new Error(JSON.stringify(plan));
   return plan;
 }
+it.each([0,100,1000])('encodes exact stock %i and blocks a value outside the independent decision', amount => {
+  const {document,context}=fixture(0);
+  document.models[0]!.stock=amount;context.limits.stock_limit={min_limit:0,max_limit:1000000};
+  context.sourceContract={tierNames:[],optionLabelsBySku:{'SKU-0':[]},originalPriceBySku:{'SKU-0':'10000'},
+    approvedMediaSha256:[document.cover.sha256,...document.gallery.map(image=>image.sha256)],stockBySku:{'SKU-0':amount}} as any;
+  expect(ready(planPreparedWireCreate(document,context)).steps[0]!.payload.seller_stock).toEqual([{stock:amount}]);
+  document.models[0]!.stock=amount+1;
+  expect(planPreparedWireCreate(document,context)).toEqual({kind:'blocked',
+    issues:[{code:'PREPARED_WIRE_SOURCE_STOCK_MISMATCH',field:'models.stock'}]});
+});
+
 it('blocks a source two-tier product flattened into one tier, even when all SKUs remain', () => {
   const { document, context } = fixture(2);
   context.sourceContract = {

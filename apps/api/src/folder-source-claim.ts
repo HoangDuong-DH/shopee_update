@@ -1,3 +1,4 @@
+import {resolveContentFolderClaim} from './content-folder-claim.js';
 import { createHash } from 'node:crypto';
 import {
   canonicalJson,
@@ -25,6 +26,8 @@ export async function resolveFolderSourceClaim(repo: Repository, input: ProductI
   const pending = batch.state.pendingMappings?.[binding.groupKey];
   if (pending && !batch.state.manifests?.[binding.groupKey])
     return resolvePendingSourceClaim(repo, input, batch, pending);
+  if (batch.state.contentSelections?.[binding.groupKey] && !batch.state.manifests?.[binding.groupKey])
+    return resolveContentFolderClaim(repo,input,batch);
   const stored = batch.state.manifests?.[binding.groupKey];
   if (!stored) return fail('FOLDER_SOURCE_BINDING_INVALID');
   const manifest = folderManifestSchema.parse(stored.document);

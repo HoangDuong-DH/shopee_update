@@ -1,9 +1,11 @@
+import { contentBindingSchema } from '../../../packages/domain/src/content-workbook.js';
 import type { InputBatchRecord, ListingDraft } from '@shopee/domain';
 import { z } from 'zod';
 import { RequestError } from './api.js';
 import type { FolderAssembly } from './folder-source.js';
 
 const requestSchema = z.object({
+  contentBinding: contentBindingSchema.optional(),
   productKey: z.string().min(1), expectedRevision: z.literal(0),
   folderBinding: z.object({ batchId: z.string().uuid(), revision: z.number().int().positive(), groupKey: z.string().min(1) }),
   sourceListingId: z.string().nullable().optional(),
@@ -39,7 +41,7 @@ export function readyFolderBulkEntries(assemblies: FolderAssembly[], batch: Inpu
   const counts = new Map<string, number>();
   for (const assembly of assemblies) counts.set(assembly.productKey, (counts.get(assembly.productKey) ?? 0) + 1);
   return assemblies.flatMap(assembly => {
-    if (!assembly.seed || assembly.manifest?.product.sourceRevision !== 0 || assembly.seed.expectedRevision !== 0
+    if (!assembly.seed || (assembly.manifest?.product.sourceRevision !== 0 && !assembly.seed.contentBinding) || assembly.seed.expectedRevision !== 0
       || assembly.issues.some(issue => issue.severity === 'block') || existing.has(assembly.productKey)
       || counts.get(assembly.productKey) !== 1) return [];
     const request = requestSchema.safeParse({ ...assembly.seed, productKey: assembly.productKey,

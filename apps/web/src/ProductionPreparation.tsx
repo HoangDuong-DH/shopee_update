@@ -7,6 +7,7 @@ import './production-preparation.css';
 import { DraftKnowledgeSuggestions } from './DraftKnowledgeSuggestions.js';
 import { autofillResultSchema, mergeMissingChoices, type AutofillResult } from './preparation-autofill.js';
 import { pendingRead } from './pending-read.js';
+import { initialPreparationSelection } from './editor-source-scope.js';
 
 type Summary = {
   productKey: string;
@@ -100,6 +101,7 @@ type Preview = {
   imageQcPolicy?: ImageQcPolicy;
   entries: {
     productKey: string;
+    sourceRevision?: number;
     title: string;
     kind: 'ready' | 'blocked';
     issues: { field: string; message: string; code?: string }[];
@@ -120,6 +122,15 @@ type Context = {
   preparations: Preview[];
 };
 type PreparationRequest = { generation: number; controller: AbortController; kind?: 'autofill' };
+const sourceComparisonSchema = z.object({
+  preparationId: z.string(), scope: z.object({ partnerId: z.string(), shopId: z.string() }),
+  entries: z.array(z.object({
+    productKey: z.string(), title: z.string(), sourceRevision: z.number().int().positive(),
+    currentRevision: z.number().int().positive().nullable(), state: z.enum(['current', 'changed', 'missing', 'archived']),
+    changedFields: z.array(z.string()), changes: z.array(z.object({ field: z.string(), label: z.string(), before: z.unknown(), after: z.unknown() })),
+  })),
+});
+function comparisonText(value: unknown) { return typeof value === 'string' ? value : value == null ? 'Chưa có' : JSON.stringify(value, null, 2); }
 
 function AutofillWait({ onCancel }: { onCancel: () => void }) {
   const [seconds, setSeconds] = useState(0);
@@ -328,12 +339,14 @@ function groupedIssues(issues: Preview['entries'][number]['issues']) {
 function message(error: unknown) {
   return error instanceof Error ? error.message : 'Chưa đọc được dữ liệu. Vui lòng đọc lại.';
 }
-function PreparationRun({ prepared, onChanged,targetScope }: { prepared: Preview; onChanged: () => void;targetScope:{environment:'production';partnerId:string;shopId:string} }) {
+function PreparationRun({ prepared, onChanged, onWorking, targetScope, sourceChanged = false }: { prepared: Preview; onChanged: () => void; onWorking?: () => void; targetScope:{environment:'production';partnerId:string;shopId:string}; sourceChanged?: boolean }) {
   const scoped=(path:string)=>path+(path.includes('?')?'&':'?')+new URLSearchParams({partnerId:targetScope.partnerId,shopId:targetScope.shopId});
   type Run = {
     state: 'running' | 'paused' | 'completed' | 'completed_with_exclusions';
     completedBatches: string[];
     totalBatches: number;
+    heldBatches?: { batchId: string; code: string }[];
+    canResume?: boolean;
     code?: string | null;
     publicationMode?: PublicationMode;
     imageQcPolicy?: ImageQcPolicy;
@@ -389,7 +402,7 @@ function PreparationRun({ prepared, onChanged,targetScope }: { prepared: Preview
   }, [run?.state, prepared.id]);
   async function start() {
     if (
-      !readReady ||
+      !readReady || (sourceChanged && !run) ||
       locked.current ||
       run?.state === 'running' ||
       ['completed', 'completed_with_exclusions'].includes(run?.state ?? '') ||
@@ -425,7 +438,7 @@ function PreparationRun({ prepared, onChanged,targetScope }: { prepared: Preview
   return (
     <div className="preparation-run" aria-label="Thực hiện các đợt đã chuẩn bị">
       <h4>
-        Đăng{hidden ? ' ẩn' : ''} {prepared.readyCount} listing đã chuẩn bị vào vuatinhdau.vn
+        {hidden ? 'Tạo link ẩn cho' : 'Đăng'} {prepared.readyCount} listing đã chuẩn bị · Shop {targetScope.shopId}
       </h4>
       {run?.executionPolicyFingerprint && (
         <p className="notice">Đã chuyển phần còn lại sang đăng ẩn và mở bán thủ công.</p>
@@ -454,16 +467,30 @@ function PreparationRun({ prepared, onChanged,targetScope }: { prepared: Preview
                   ? 'Đã xử lý xong các đợt đăng ẩn; kiểm tra mục Ảnh chưa QC trước khi mở bán'
                   : 'Đã tạo và đối chiếu xong; listing vẫn ẩn chờ bạn kiểm tra'
                 : 'Đã hoàn tất các đợt'
-              : 'Đang tạm dừng để kiểm tra'}{' '}
+              : run.code === 'PREPARATION_PARTIAL_REVIEW_REQUIRED'
+                ? 'Đã xử lý phần độc lập đủ điều kiện; phần còn lại cần kiểm tra riêng'
+                : 'Đang tạm dừng để kiểm tra'}{' '}
           · {run.completedBatches.length}/{run.totalBatches} đợt hoàn tất.
+          {!!run.heldBatches?.length && ` ${run.heldBatches.length} đợt cần xử lý riêng, chưa tính hoàn tất.`}
           {run.state === 'paused' ? ' Xem kết quả từng listing ở tab “Đợt đang làm”.' : ''}
         </p>
       )}
+      {!!run?.heldBatches?.length && <section aria-label="Các đợt cần xử lý riêng" className="notice warning">
+        <p>Các đợt bên dưới còn việc cần xử lý. Đợt khác chỉ tiếp tục khi backend xác nhận độc lập; lỗi quyền shop hoặc kết quả gửi chưa rõ vẫn có thể tạm dừng công việc.</p>
+        <ul>{run.heldBatches.map((held, index) => <li key={held.batchId}>
+          <strong>Đợt cần xử lý {index + 1}:</strong>{' '}
+          {held.code === 'PREPARATION_CHILD_QC_REVIEW_REQUIRED'
+            ? 'Đã có lần tạo link đang chờ đối chiếu. Mở kết quả để kiểm tra; không tạo lại link.'
+            : 'Mở Đợt đang làm, xem lý do của từng sản phẩm rồi sửa nguồn hoặc đọc đối chiếu.'}
+          <details><summary>Mã hồ sơ để tra cứu</summary>{held.batchId} · {held.code}</details>
+        </li>)}</ul>
+        {onWorking && <button type="button" className="secondary" onClick={onWorking}>Mở Đợt đang làm để xử lý</button>}
+      </section>}
       {!['completed', 'completed_with_exclusions'].includes(run?.state ?? '') && (
         <button
           type="button"
           className="primary"
-          disabled={!readReady || busy || uncertain || run?.state === 'running'}
+          disabled={!readReady || busy || uncertain || (sourceChanged && !run) || run?.state === 'running' || run?.canResume === false}
           onClick={() => void start()}
         >
           {run?.state === 'paused'
@@ -672,14 +699,22 @@ function AttributeFields({
 /** All authoring decisions stay local to this preparation. Source documents are read-only. */
 export function ProductionPreparation({
   targetScope,
+  targetShopName,
   onSource,
   onFolders,
   onRegistered,
+  onWorking,
+  initialProductKey,
+  initialSourceRevision,
 }: {
   targetScope:{environment:'production';partnerId:string;shopId:string};
-  onSource: (productKey: string) => void;
+  targetShopName?: string;
+  onSource: (productKey: string, section?: 'content' | 'images' | 'structure') => void;
   onFolders: () => void;
   onRegistered: () => void;
+  onWorking?: () => void;
+  initialProductKey?: string;
+  initialSourceRevision?: number;
 }) {
   const scoped=(path:string)=>path+(path.includes('?')?'&':'?')+new URLSearchParams({partnerId:targetScope.partnerId,shopId:targetScope.shopId});
   const workingCopyKey='production-preparation-working-copy-v1:'+targetScope.partnerId+':'+targetScope.shopId;
@@ -705,6 +740,7 @@ export function ProductionPreparation({
     [announcement, setAnnouncement] = useState(''),
     [busyLabel, setBusyLabel] = useState(''),
     [workingCopyNotice, setWorkingCopyNotice] = useState(''),
+    [initialSelectionNotice, setInitialSelectionNotice] = useState(''),
     [autofillResult, setAutofillResult] = useState<AutofillResult | null>(null),
     [sharedCondition, setSharedCondition] = useState<'NEW' | 'USED' | ''>('NEW'),
     [attributeMode, setAttributeMode] = useState<'minimum_required' | 'source_supported'>('minimum_required'),
@@ -713,7 +749,9 @@ export function ProductionPreparation({
     [useTestDimensions, setUseTestDimensions] = useState(false),
     [allowSharedSkus, setAllowSharedSkus] = useState(false),
     [testDimensions, setTestDimensions] = useState({length:'12',width:'12',height:'28'}),
-    [restoringWorkingCopy, setRestoringWorkingCopy] = useState(false);
+    [restoringWorkingCopy, setRestoringWorkingCopy] = useState(false),
+    [sourceComparison, setSourceComparison] = useState<{ key: string; data?: z.infer<typeof sourceComparisonSchema>; error?: string } | null>(null),
+    [comparisonVersion, setComparisonVersion] = useState(0);
   const alive = useRef(true),
     lock = useRef(false),
     generation = useRef(0),
@@ -735,6 +773,35 @@ export function ProductionPreparation({
     workingCopyInitialized = useRef(false),
     restoringSession = useRef(false),
     restoringInputs = useRef(new Map<string, WorkingEntry>());
+  const initialSelectionApplied = useRef('');
+  const shopName = targetShopName || Object.values(editing).find(entry => entry.metadata?.shop.id === targetScope.shopId)?.metadata?.shop.name || 'Shop đã chọn';
+  const comparisonKey = preview ? preview.id + ':' + preview.entries.map(entry => context?.products.find(product => product.productKey === entry.productKey)?.revision ?? 'missing').join(',') : '';
+  const comparison = sourceComparison?.key === comparisonKey ? sourceComparison : null;
+  const sourceChanges = comparison?.data ? comparison.data.entries.filter(entry => entry.state !== 'current') : context && preview ? preview.entries.flatMap(entry => {
+    const current = context.products.find(product => product.productKey === entry.productKey);
+    if (entry.sourceRevision !== undefined && (!current || current.revision !== entry.sourceRevision))
+      return [{ ...entry, currentRevision: current?.revision ?? null, state: current ? 'changed' : 'missing', changes: [] as z.infer<typeof sourceComparisonSchema>['entries'][number]['changes'] }];
+    return [];
+  }) : [];
+  const allReadySourcesChanged = !!preview?.readyCount && preview.entries.filter(entry => entry.kind === 'ready').every(entry => sourceChanges.some(changed => changed.productKey === entry.productKey));
+  useEffect(() => {
+    if (!preview) return;
+    const controller = new AbortController();
+    setSourceComparison({ key: comparisonKey });
+    void api<unknown>(scoped('/v1/production-preparations/' + encodeURIComponent(preview.id) + '/source-changes'), { signal: controller.signal, timeoutMs: 30_000 })
+      .then(raw => {
+        const data = sourceComparisonSchema.parse(raw);
+        if (data.preparationId !== preview.id || data.scope.shopId !== targetScope.shopId || data.scope.partnerId !== targetScope.partnerId)
+          throw Error('Bản đối chiếu không khớp shop hoặc đợt đang xem. Đọc lại để kiểm tra.');
+        if (data.entries.length !== preview.entries.length || new Set(data.entries.map(entry => entry.productKey)).size !== data.entries.length ||
+          data.entries.some(entry => !preview.entries.some(source => source.productKey === entry.productKey && (source.sourceRevision === undefined || source.sourceRevision === entry.sourceRevision))))
+          throw Error('Bản đối chiếu chưa đủ đúng các bộ nguồn của đợt. Đọc lại để kiểm tra.');
+        if (!controller.signal.aborted) setSourceComparison({ key: comparisonKey, data });
+      }).catch(reason => {
+        if (!controller.signal.aborted) setSourceComparison({ key: comparisonKey, error: reason instanceof z.ZodError ? 'Chưa đọc được đầy đủ khác biệt của nguồn. Bấm đối chiếu lại; bản chuẩn bị cũ vẫn giữ nguyên.' : message(reason) });
+      });
+    return () => controller.abort();
+  }, [comparisonKey, comparisonVersion]);
   useEffect(() => {
     if (!context || workingCopyInitialized.current) return;
     workingCopyInitialized.current = true;
@@ -806,6 +873,24 @@ export function ProductionPreparation({
       }
     });
   }, [context]);
+  useEffect(() => {
+    if (!context || !initialProductKey) return;
+    const requestKey = initialProductKey + ':' + initialSourceRevision;
+    if (initialSelectionApplied.current === requestKey) return;
+    initialSelectionApplied.current = requestKey;
+    const result = initialPreparationSelection(context.products, initialProductKey, initialSourceRevision,
+      !!pending.current || !!preview || selected.length > 0 || restoringSession.current || restoringInputs.current.size > 0);
+    if (result.state !== 'ready') {
+      setInitialSelectionNotice(result.state === 'held' ? 'Đang giữ phần chuẩn bị hoặc lần kiểm tra cần phục hồi của shop này. Bộ vừa mở chưa được thêm vào; đối chiếu phần đang làm trước khi chuyển sang bộ khác.' :
+        result.state === 'changed' ? 'Bộ vừa mở đã đổi phiên bản nguồn. Chưa tự chọn bản mới; mở nguồn mới nhất để đối chiếu rồi tiếp tục.' : 'Chưa tìm thấy đúng bộ nguồn vừa mở trong kho hiện tại. Kiểm tra bộ đã lưu trước khi chuẩn bị.');
+      return;
+    }
+    setInitialSelectionNotice('');
+    const row = context.products.find(product => product.productKey === result.productKey)!;
+    setSelected([row.productKey]); setOpened(row.productKey); setSearch(''); setSourceGroup(''); setNeedsRecheck(true);
+    setWorkingCopyNotice(`Tiếp tục “${row.title}” · bản nguồn ${row.revision} · ${shopName}. Chưa kiểm tra hoặc gửi lên Shopee.`);
+    void ensure(row);
+  }, [context, initialProductKey, initialSourceRevision, selected, preview]);
   useEffect(() => {
     if (
       !context ||
@@ -906,9 +991,10 @@ export function ProductionPreparation({
     (control ?? field).focus({ preventScroll: true });
     setFocusField(null);
   }, [focusField, opened, editing]);
-  async function fixIssue(productKey: string, target: IssueTarget | null) {
+  async function fixIssue(productKey: string, target: IssueTarget | null, field?: string) {
     if (!target || (target === 'priceSelection' && editing[productKey]?.priceSelection)) {
-      onSource(productKey);
+      const sourceField = field ?? target ?? '';
+      onSource(productKey, /variants|sku|price/i.test(sourceField) ? 'structure' : /image|cover|gallery/i.test(sourceField) ? 'images' : 'content');
       return;
     }
     const row = context?.products.find((item) => item.productKey === productKey);
@@ -970,6 +1056,7 @@ export function ProductionPreparation({
         setContext(value);
         setError('');
       }
+      return value;
     } catch (error) {
       if (alive.current) setError(message(error));
     } finally {
@@ -1083,6 +1170,7 @@ export function ProductionPreparation({
       const result = await pendingRead(pendingMetadata.current,scope+':'+url,()=>api<Metadata>(url));
       if (
         !result ||
+        result.shop?.id !== targetScope.shopId ||
         !Array.isArray(result.categories) ||
         !Array.isArray(result.channels) ||
         typeof result.shop?.name !== 'string'
@@ -1195,7 +1283,7 @@ export function ProductionPreparation({
     }
   }
   async function ensure(row: Summary) {
-    if (editing[row.productKey] || loading.current.has(row.productKey)) return;
+    if (editing[row.productKey]?.draft.revision === row.revision || loading.current.has(row.productKey)) return;
     loading.current.add(row.productKey);
     setSourceErrors((previous) => {
       const next = { ...previous };
@@ -1308,6 +1396,10 @@ export function ProductionPreparation({
     }
   }
   function toggle(row: Summary, checked: boolean) {
+    if (checked && !selected.includes(row.productKey) && selected.length >= 80) {
+      setError('Mỗi lần chuẩn bị tối đa 80 listing. Bỏ chọn một bộ hoặc tạo đợt tiếp theo.');
+      return;
+    }
     changed();
     setSelected((previous) =>
       checked
@@ -1320,9 +1412,9 @@ export function ProductionPreparation({
     }
   }
   async function selectVisible() {
-    const rows = visible.slice(0, 80);
+    const rows = visible.filter(row => !selected.includes(row.productKey)).slice(0, Math.max(0, 80 - selected.length));
     changed();
-    setSelected(rows.map((row) => row.productKey));
+    setSelected(previous => [...new Set([...previous, ...rows.map((row) => row.productKey)])].slice(0, 80));
     if (rows[0]) setOpened(rows[0].productKey);
     // Bound local source reads; each listing retains its own mapping and exceptions.
     let cursor = 0;
@@ -1336,6 +1428,7 @@ export function ProductionPreparation({
     );
   }
   function applyStock() {
+    if (busy || !selected.length || selected.some(key => !editing[key])) return;
     if (!/^(0|[1-9]\d*)$/.test(stock) || !Number.isSafeInteger(Number(stock))) {
       setError('Nhập tồn đăng bán là số nguyên từ 0 trở lên.');
       return;
@@ -1355,6 +1448,7 @@ export function ProductionPreparation({
       ),
     );
     setError('');
+    setAnnouncement(`Đã áp dụng tồn ${stock} cho ${selected.reduce((count, key) => count + (editing[key]?.draft.variants.length ?? 0), 0)} dòng SKU trong ${selected.length} listing của ${shopName}. Chưa gửi lên Shopee.`);
   }
   async function autofill() {
     if(lock.current || !selected.length || selected.some(key=>!editing[key] || editing[key]?.metadataBusy)) return;
@@ -1373,7 +1467,7 @@ export function ProductionPreparation({
     }));
     try {
       const result=autofillResultSchema.parse(await api<unknown>(scoped('/v1/production-preparations/autofill'),{
-        method:'POST',signal:request.controller.signal,
+        method:'POST',signal:request.controller.signal,timeoutMs:360_000,
         body:JSON.stringify({entries,attributeMode,logisticsMode,shared:{
           ...(sharedCondition ? {condition:sharedCondition} : {}),
           ...(sharedPreOrder==='no' ? {preOrder:{is_pre_order:false}} : {}),
@@ -1463,6 +1557,7 @@ export function ProductionPreparation({
       sessionStorage.setItem(pendingKey, JSON.stringify(pending.current));
       const result = await api<Preview>(scoped('/v1/production-preparations/preview'), {
         method: 'POST',
+        timeoutMs: 360_000,
         body: JSON.stringify(pending.current),
         signal: request.controller.signal,
       });
@@ -1496,6 +1591,7 @@ export function ProductionPreparation({
     try {
       const result = await api<Preview>(scoped('/v1/production-preparations/preview'), {
         method: 'POST',
+        timeoutMs: 360_000,
         body: JSON.stringify(pending.current),
         signal: request.controller.signal,
       });
@@ -1514,7 +1610,7 @@ export function ProductionPreparation({
   }
   async function register() {
     if (
-      !preview ||
+      !preview || sourceChanges.length > 0 ||
       previewGeneration.current !== generation.current ||
       lock.current ||
       saved ||
@@ -1574,6 +1670,7 @@ export function ProductionPreparation({
         <div>
           <span className="production-pilot-eyebrow">CHUẨN BỊ NGUỒN</span>
           <h2>Từ listing đã lưu đến đợt đăng</h2>
+          <p><strong>Shop đích: {shopName} · ID {targetScope.shopId}</strong> · Ứng dụng {targetScope.partnerId}</p>
           <p>Dùng lại Word, ảnh, phân loại và dòng giá đã ghép. Chỉ bổ sung phần còn thiếu.</p>
         </div>
         <div className="production-batch-actions">
@@ -1597,7 +1694,7 @@ export function ProductionPreparation({
           [
             'Kiểm tra nguồn',
             preview
-              ? preview.readyCount + ' đủ nguồn · ' + preview.blockedCount + ' cần bổ sung'
+              ? sourceChanges.length ? sourceChanges.length + ' nguồn đã đổi · cần đối chiếu' : preview.readyCount + ' đủ nguồn · ' + preview.blockedCount + ' cần bổ sung'
               : 'Ứng dụng chỉ rõ phần cần sửa',
           ],
           ['Đăng qua API', 'Chuẩn bị đợt rồi tự bấm đăng'],
@@ -1629,6 +1726,7 @@ export function ProductionPreparation({
           {error}
         </p>
       )}
+      {initialSelectionNotice && <p role="status" className="notice warning">{initialSelectionNotice}</p>}
       {!context && contextLoading && <p role="status">Đang đọc kho listing…</p>}
       {needsRecheck && (
         <p role="status" className="notice warning">
@@ -1674,7 +1772,7 @@ export function ProductionPreparation({
       {context && (
         <>
           <p className="preparation-target">
-            Shop đích: <strong>vuatinhdau.vn</strong> · Chuẩn bị tại ứng dụng, chưa đăng Shopee.
+            Shop đích: <strong>{shopName}</strong> · ID {targetScope.shopId} · Chuẩn bị tại ứng dụng, chưa đăng Shopee.
           </p>
           <details className="preparation-history">
             <summary>Bản kiểm tra đã lưu ({context.preparations.length})</summary>
@@ -1697,6 +1795,7 @@ export function ProductionPreparation({
             ))}
           </details>
           <h3>1. Chọn các listing cần chuẩn bị</h3>
+          <p>{selected.length}/80 listing đã chọn{selected.some(key => !visible.some(row => row.productKey === key)) ? ` · ${selected.filter(key => !visible.some(row => row.productKey === key)).length} listing đã chọn đang ngoài bộ lọc` : ''}. Thay đổi bộ lọc giữ các lựa chọn trước.</p>
           {!!sourceGroups.length && <label>Lọc theo đợt nhập<select value={sourceGroup} disabled={busy} onChange={event=>setSourceGroup(event.target.value)}><option value="">Tất cả bộ đã lưu</option><option value="__folders">Các bộ từ thư mục đã nhập</option>{sourceGroups.map(group=><option key={group} value={group}>{group}</option>)}</select></label>}
           <label>
             Tìm theo tên hoặc SKU
@@ -1714,7 +1813,7 @@ export function ProductionPreparation({
             <button
               type="button"
               className="secondary"
-              disabled={busy}
+              disabled={busy || selected.length >= 80 || visible.every(row => selected.includes(row.productKey))}
               onClick={() => void selectVisible()}
             >
               Chọn {Math.min(visible.length, 80)} listing trong kết quả
@@ -1727,7 +1826,7 @@ export function ProductionPreparation({
                   <input
                     type="checkbox"
                     checked={selected.includes(row.productKey)}
-                    disabled={busy}
+                    disabled={busy || (!selected.includes(row.productKey) && selected.length >= 80)}
                     onChange={(e) => toggle(row, e.target.checked)}
                   />
                   <span>
@@ -1807,7 +1906,7 @@ export function ProductionPreparation({
               )}
               <div className="preparation-stock">
                 <label>
-                  Tồn đăng bán chung cho các SKU đã chọn
+                  Tồn áp dụng cho {selected.reduce((count, key) => count + (editing[key]?.draft.variants.length ?? 0), 0)} dòng SKU trong {selected.length} listing đã chọn
                   <input
                     inputMode="numeric"
                     value={stock}
@@ -1818,12 +1917,13 @@ export function ProductionPreparation({
                 <button
                   type="button"
                   className="secondary"
-                  disabled={busy || selected.some((key) => !editing[key])}
+                  disabled={busy || !stock || !selected.length || selected.some((key) => !editing[key])}
                   onClick={applyStock}
                 >
-                  Áp dụng tồn cho SKU đã chọn
+                  Áp dụng {stock || 'mức tồn'} cho các dòng SKU đã chọn
                 </button>
               </div>
+              <p className="caption">Chỉ áp dụng sau khi bạn bấm nút trên, theo từng SKU của đúng {shopName}. Có thể sửa riêng từng dòng bên dưới; chưa gửi tồn lên Shopee.</p>
               {selectedRows.map((row) => {
                 const e = editing[row.productKey],
                   key = row.productKey,
@@ -2446,11 +2546,38 @@ export function ProductionPreparation({
             >
               <span className="production-pilot-eyebrow">BƯỚC 3 · KẾT QUẢ KIỂM TRA</span>
               <h3>
-                {preview.readyCount} listing đủ nguồn · {preview.blockedCount} cần bổ sung
+                {sourceChanges.length > 0 && 'Bản kiểm tra cũ · '}{preview.readyCount} listing đủ nguồn · {preview.blockedCount} cần bổ sung
               </h3>
+              <div className="production-batch-actions">
+                <button type="button" className="secondary" disabled={busy || (!!comparison && !comparison.data && !comparison.error)} onClick={() => setComparisonVersion(value => value + 1)}>Đối chiếu bản nguồn hiện tại</button>
+                <small>Chỉ đọc khác biệt. Nội dung của bản chuẩn bị và đợt đã đăng không tự thay đổi.</small>
+              </div>
+              {comparison && !comparison.data && !comparison.error && <p role="status">Đang đối chiếu với bản nguồn hiện tại…</p>}
+              {comparison?.error && <p role="alert" className="notice warning">{comparison.error}</p>}
+              {sourceChanges.length > 0 && <section className="notice warning preparation-source-changes" aria-label="Nguồn đã thay đổi">
+                <p role="alert">{sourceChanges.length} bộ nguồn đã khác bản kiểm tra này. {saved && !allReadySourcesChanged ? 'Phần độc lập còn khớp nguồn có thể tiếp tục sau kiểm tra của ứng dụng; phần đã đổi được giữ lại.' : 'Chưa thể chuẩn bị hoặc gửi tiếp từ bản cũ.'}</p>
+                <ul>{sourceChanges.map(entry => <li key={entry.productKey}>
+                  <strong>{entry.title}</strong> · bản đã kiểm tra {entry.sourceRevision} → {entry.state === 'archived' ? 'nguồn đã được lưu trữ' : entry.currentRevision ? `bản hiện tại ${entry.currentRevision}` : 'nguồn không còn trong kho đang dùng'}
+                  {entry.currentRevision && <button type="button" className="secondary" onClick={() => onSource(entry.productKey)}>Mở nguồn hiện tại của {entry.title}</button>}
+                  {entry.changes.length > 0 && <details><summary>Xem {entry.changes.length} mục đã thay đổi của {entry.title}</summary>
+                    {entry.changes.map(change => <div key={change.field} className="preparation-source-difference"><strong>{change.label}</strong>
+                      <p>Trong bản đã kiểm tra</p><pre>{comparisonText(change.before)}</pre>
+                      <p>Trong nguồn hiện tại</p><pre>{comparisonText(change.after)}</pre>
+                    </div>)}
+                  </details>}
+                </li>)}</ul>
+                <p>{saved ? 'Mở Đợt đang làm để đối chiếu link đã tạo và loại phần chưa gửi trước khi chuẩn bị lại. Không tạo lại listing đã có.' : 'Chọn lại nguồn hiện tại và kiểm tra lại để tạo bản chuẩn bị mới.'}</p>
+                {saved && onWorking ? <button type="button" className="secondary" onClick={onWorking}>Mở Đợt đang làm để xử lý nguồn đổi</button> : <button type="button" className="secondary" disabled={busy || contextLoading} onClick={async () => {
+                  const latest = await reload(); if (!latest) return;
+                  const rows = preview.entries.flatMap(entry => { const row = latest.products.find(product => product.productKey === entry.productKey); return row ? [row] : []; });
+                  changed(); setSelected(rows.map(row => row.productKey));
+                  setEditing(previous => Object.fromEntries(Object.entries(previous).filter(([key, entry]) => rows.some(row => row.productKey === key && row.revision === entry.draft.revision))));
+                  void Promise.all(rows.map(row => ensure(row)));
+                }}>Dùng nguồn hiện tại để kiểm tra lại</button>}
+              </section>}
               {!saved && preview.readyCount > 0 && <div className="preparation-next-step">
-                <p>Kiểm tra xong. Bấm chuẩn bị đợt bên dưới; nút đăng ẩn qua API sẽ hiện ngay tại đây. Chưa gửi Shopee.</p>
-                <button type="button" className="primary" disabled={busy} onClick={() => void register()}>
+                <p>{sourceChanges.length ? 'Nguồn đã đổi sau lần kiểm tra này. Kiểm tra lại nguồn hiện tại trước khi chuẩn bị đợt; chưa gửi Shopee.' : 'Kiểm tra xong. Bấm chuẩn bị đợt bên dưới; nút đăng ẩn qua API sẽ hiện ngay tại đây. Chưa gửi Shopee.'}</p>
+                <button type="button" className="primary" disabled={busy || sourceChanges.length > 0} onClick={() => void register()}>
                   Chuẩn bị đợt cho {preview.readyCount} listing đủ nguồn
                 </button>
               </div>}
@@ -2477,7 +2604,7 @@ export function ProductionPreparation({
                           type="button"
                           className="primary"
                           disabled={busy}
-                          onClick={() => void fixIssue(first.productKey, guidance.target)}
+                          onClick={() => void fixIssue(first.productKey, guidance.target, guidance.field)}
                         >
                           Xử lý phần thiếu đầu tiên
                         </button>
@@ -2516,7 +2643,7 @@ export function ProductionPreparation({
                 >
                   <summary>
                     {entry.title} ·{' '}
-                    {entry.kind === 'ready'
+                    {sourceChanges.some(changed => changed.productKey === entry.productKey) ? 'Nguồn đã đổi · cần đối chiếu' : entry.kind === 'ready'
                       ? 'Đủ nguồn để chuẩn bị đợt'
                       : 'Cần bổ sung · ' + groupedIssues(entry.issues).length + ' mục'}
                   </summary>
@@ -2537,7 +2664,7 @@ export function ProductionPreparation({
                             type="button"
                             className="secondary"
                             disabled={busy}
-                            onClick={() => void fixIssue(entry.productKey, issue.target)}
+                            onClick={() => void fixIssue(entry.productKey, issue.target, issue.field)}
                           >
                             {issue.target
                               ? 'Bổ sung ' + issue.label.toLocaleLowerCase('vi-VN')
@@ -2605,8 +2732,7 @@ export function ProductionPreparation({
               ))}
               {saved ? (
                 <p role="status" className="notice">
-                  Đã chuẩn bị đợt. Bấm nút đăng qua API ngay bên dưới để gửi các listing đủ nguồn.
-                  Bạn cũng có thể theo dõi lại tại “Đợt đang làm”. Chưa gửi Shopee.
+                  {sourceChanges.length ? 'Đợt đã lưu dùng bản nguồn cũ. Mở “Đợt đang làm” để xử lý phần chưa gửi và giữ link đã tạo để đối chiếu.' : 'Đã chuẩn bị đợt. Bấm nút đăng qua API ngay bên dưới để gửi các listing đủ nguồn. Bạn cũng có thể theo dõi lại tại “Đợt đang làm”. Chưa gửi Shopee.'}
                 </p>
               ) : (
                 <div className="preparation-result-actions">
@@ -2625,7 +2751,7 @@ export function ProductionPreparation({
                 </div>
               )}
               {saved && (
-                <PreparationRun key={preview.id} prepared={preview} targetScope={targetScope} onChanged={onRegistered} />
+                <PreparationRun key={preview.id} prepared={preview} targetScope={targetScope} sourceChanged={allReadySourcesChanged} onChanged={onRegistered} onWorking={onWorking} />
               )}
             </section>
           )}

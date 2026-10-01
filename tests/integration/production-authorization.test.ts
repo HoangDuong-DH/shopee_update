@@ -98,7 +98,7 @@ it('prepares a fixed shop authorization with encrypted key, hashed state and no 
   expect(url.origin + url.pathname).toBe('https://open.shopee.com/auth');
   expect(url.searchParams.get('partner_id')).toBe('2010476');
   expect(url.searchParams.get('redirect_uri')).toBe(
-    'http://127.0.0.1:4310/v1/connections/production-pilot/callback',
+    `http://127.0.0.1:${process.env.API_PORT??'4310'}/v1/connections/production-pilot/callback`,
   );
   expect(url.searchParams.get('state')).toHaveLength(64);
   const row = (await pool.query('SELECT * FROM production_authorization_attempts')).rows[0];

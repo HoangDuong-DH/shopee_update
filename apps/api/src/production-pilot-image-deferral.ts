@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '@shopee/domain';
 import type { FieldSnapshot } from '../../../packages/shopee/src/field-client.js';
@@ -34,7 +35,7 @@ export function assertDeferredImageVerification(receipt:any,operation:any,policy
     !Array.isArray(reads)||reads.length!==2||receipt.evidence_fingerprint!==fp(reads)||
     !(Date.parse(reads[0]?.observedAt)<Date.parse(reads[1]?.observedAt))||
     new Set(reads.flatMap((r:any)=>r.requestIds ?? [])).size!==reads.flatMap((r:any)=>r.requestIds ?? []).length||
-    reads.some((r:any)=>r.shopId!=='1423724897'||r.partnerId!=='2010476'||r.itemId!==operation.item_id||
+    reads.some((r:any)=>r.shopId!==currentProductionScope().shopId||r.partnerId!==currentProductionScope().partnerId||r.itemId!==operation.item_id||
       !Array.isArray(r.requestIds)||!r.requestIds.length||r.rawSha256!==fp(r.raw)||r.projectionSha256!==fp(r.projection)||
       canonicalJson(r.projection)!==canonicalJson(projection)))throw Error('PRODUCTION_PILOT_DEFERRED_IMAGE_PROOF_INVALID');
 }

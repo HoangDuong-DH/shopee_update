@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { beforeAll, afterAll, expect, it, vi } from 'vitest';
@@ -7,8 +8,7 @@ import { SellerKnowledgeService } from '../../apps/api/src/seller-knowledge-serv
 import { createApp } from '../../apps/api/src/app.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['127.0.0.1', 'localhost'].includes(database.hostname) || database.port !== '5442')
-  throw Error('Isolated local PG required');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_knowledge_http_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: database.href }),
   pool = new Pool({ connectionString: database.href, options: `-c search_path=${schema}` }),

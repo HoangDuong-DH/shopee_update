@@ -54,3 +54,18 @@ it('does not invent a contract when the approved source or image identity is mis
   wrongImage.sourceSelection!.variants[0]!.imageId = 'from-another-listing';
   expect(() => sourceContractFromApprovedDraft(wrongImage)).toThrow('PRODUCTION_SOURCE_MEDIA_REQUIRED');
 });
+
+it.each([0,100,1000])('preserves explicit stock %i from a separate operating decision', amount => {
+  const stocks={'CHAIR-RED-S':amount,'CHAIR-RED-M':0};
+  const contract=sourceContractFromApprovedDraft(draft(),stocks);
+  expect(contract.stockBySku).toEqual(stocks);
+  stocks['CHAIR-RED-S']=999;
+  expect(contract.stockBySku?.['CHAIR-RED-S']).toBe(amount);
+});
+
+const invalidStockDecisions:Record<string,number>[]=[{}, {'CHAIR-RED-S':100}, {'CHAIR-RED-S':100,'CHAIR-RED-M':0,OTHER:1},
+  {'CHAIR-RED-S':-1,'CHAIR-RED-M':0}, {'CHAIR-RED-S':1.5,'CHAIR-RED-M':0}];
+it.each(invalidStockDecisions)
+ ('rejects incomplete, extra or invalid stock decisions without defaults', stocks => {
+  expect(()=>sourceContractFromApprovedDraft(draft(),stocks)).toThrow('PRODUCTION_SOURCE_STOCK_DECISION_REQUIRED');
+});

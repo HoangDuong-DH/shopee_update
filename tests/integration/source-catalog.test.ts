@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -30,8 +31,7 @@ import {
 } from '../fixtures/source-catalog.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(database.hostname) || database.port !== '5442')
-  throw new Error('Source catalog tests require isolated local PG 5442');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_source_catalog_' + randomUUID().replaceAll('-', '');
 const directory = resolve('.local/input-catalog/vina-tuoi-20260914/source-catalog-tests', schema);
 const admin = new Pool({ connectionString: database.href });

@@ -66,9 +66,17 @@ export type DraftField =
   | 'fulfillment'
   | 'publication';
 export type SourceSelection = {
+  contentBinding?: import('./content-workbook.js').ContentBinding;
   folderBinding?: import('./folder-source-identity.js').FolderSourceBinding;
   /** Explicit approval of this exact listing structure and image-role mapping. */
-  mappingConfirmation?: SourceRef & { kind: 'user_decision' };
+  mappingConfirmation?: SourceRef & {
+    kind: 'user_decision';
+    /** New decisions bind exact source bytes, the reviewed revision and resulting revision. */
+    reviewedRevision?: number;
+    confirmedRevision?: number;
+    sourceHashes?: { importId: string; sha256: string; kind: 'xlsx' | 'docx' | 'image' }[];
+    decisionFingerprint?: string;
+  };
   /** Exact ID from the source; null/blank means create, a supplied ID means update. */
   sourceListingId?: string | null;
   title: string;

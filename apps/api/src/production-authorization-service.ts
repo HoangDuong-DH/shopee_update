@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Repository, transaction } from '@shopee/persistence';
 import { SecretBox, exchangeProductionAuthorization } from '@shopee/gateway';
+import { productionAuthorizationLocation, productionApplicationLocation } from './production-authorization-location.js';
 import {
   connectProductionPilot, connectionIdentity, savedProductionPartnerKey,
   productionPilotTarget as target,
@@ -62,6 +63,8 @@ export async function prepareProductionAuthorization(
 ) {
   const input = prepareSchema.parse(raw),
     box = boxFor(options);
+  const callbackUrl = productionAuthorizationLocation();
+  productionApplicationLocation();
   if(!options.allowOtherShops && (input.partnerId!==target.partnerId || input.shopId!==target.shopId)) throw Error("PRODUCTION_CONNECTION_SCOPE_INVALID");
   const scope=`production:${input.partnerId}:${input.shopId}`;
   await expireStaged(repo);
@@ -129,7 +132,7 @@ export async function prepareProductionAuthorization(
   for (const [key, value] of Object.entries({
     partner_id: input.partnerId,
     auth_type: 'seller',
-    redirect_uri: productionCallbackUrl,
+    redirect_uri: callbackUrl,
     response_type: 'code',
     state,
   }))
@@ -138,7 +141,7 @@ export async function prepareProductionAuthorization(
   return {
     attemptId,
     authorizationUrl: url.href,
-    callbackUrl: productionCallbackUrl,
+    callbackUrl,
     expiresAt: expiresAt.toISOString(),
     browserSecret,
   };

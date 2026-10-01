@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -75,7 +76,7 @@ export type PreparationAutofillEntry = {
 };
 export type ProductionPreparationAutofillResult = {
   attributeMode: 'minimum_required' | 'source_supported';
-  scope: typeof productionPilotScope;
+  scope: ProductionScope;
   connectionRevision: number;
   observedAt: string;
   fingerprint: string;
@@ -235,7 +236,7 @@ function checkedHistory(row: any, connection: any) {
       !supportedId(op.item_id) ||
       op.connection_id !== connection.id ||
       op.owner_key !==
-        `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}` ||
+        `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}` ||
       !Number.isInteger(op.connection_revision) ||
       op.connection_revision < 1 ||
       op.connection_revision > connection.revision ||
@@ -246,7 +247,7 @@ function checkedHistory(row: any, connection: any) {
       !Array.isArray(payload?.document?.logistics) ||
       op.source_fingerprint !==
         hash({
-          scope: productionPilotScope,
+          scope: currentProductionScope(),
           sourceIdentity: op.source_identity,
           sourceRevision: op.source_revision,
           sourcePayload: payload,
@@ -287,7 +288,7 @@ export class ProductionPreparationAutofillService {
       const rows = (
         await this.repo.pool.query(
           'SELECT id,revision,environment,partner_id,shop_id,state,expires_at FROM connections WHERE environment=$1 AND partner_id=$2 AND shop_id=$3',
-          ['production', productionPilotScope.partnerId, productionPilotScope.shopId],
+          ['production', currentProductionScope().partnerId, currentProductionScope().shopId],
         )
       ).rows;
       const c = rows[0];
@@ -314,7 +315,7 @@ export class ProductionPreparationAutofillService {
           key,
           (this.options.metadata ? this.options.metadata(q) : metadataService.get(q, signal)).then((m) => {
             signal?.throwIfAborted();
-            if (m.connectionRevision !== connected.revision || !same(m.scope, productionPilotScope))
+            if (m.connectionRevision !== connected.revision || !same(m.scope, currentProductionScope()))
               fail('CONNECTION_CHANGED');
             return m;
           }),
@@ -327,7 +328,7 @@ export class ProductionPreparationAutofillService {
         `SELECT to_jsonb(o) AS operation,(SELECT to_jsonb(v) FROM production_pilot_verifications v WHERE v.operation_id=o.id) AS verification FROM production_pilot_operations o WHERE o.connection_id=$1 AND o.owner_key=$2 AND o.state='verified' ORDER BY o.created_at DESC LIMIT 100`,
         [
           connected.id,
-          `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}`,
+          `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}`,
         ],
       )
     ).rows.filter((r) => checkedHistory(r, connected));
@@ -467,7 +468,7 @@ export class ProductionPreparationAutofillService {
               observedAt:
                 r.observed_at instanceof Date ? r.observed_at.toISOString() : r.observed_at,
             });
-            return same(o.scope, productionPilotScope) ? [o] : [];
+            return same(o.scope, currentProductionScope()) ? [o] : [];
           } catch {
             return [];
           }
@@ -800,7 +801,7 @@ export class ProductionPreparationAutofillService {
             }));
             const knowledge = recommendSellerKnowledge(
               {
-                scope: productionPilotScope,
+                scope: currentProductionScope(),
                 categoryId: Number(category),
                 brandId: Number(result.choices.brandId),
                 skus,
@@ -810,7 +811,7 @@ export class ProductionPreparationAutofillService {
               },
               canonicalObservations,
               {
-                scope: productionPilotScope,
+                scope: currentProductionScope(),
                 categoryId: Number(category),
                 observedAt: m.observedAt,
                 attributes: currentAttributes,
@@ -982,7 +983,7 @@ export class ProductionPreparationAutofillService {
     const observedAt = new Date(now()).toISOString();
     const result: ProductionPreparationAutofillResult = {
       attributeMode,
-      scope: productionPilotScope,
+      scope: currentProductionScope(),
       connectionRevision: connected.revision,
       observedAt,
       fingerprint: hash({ request, entries, connectionRevision: connected.revision }),

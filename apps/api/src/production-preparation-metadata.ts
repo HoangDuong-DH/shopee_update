@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -141,7 +142,7 @@ export type PreparationStockWriteMapping = {
   warehouseRequestId: string;
 };
 export type ProductionPreparationMetadata = {
-  scope: typeof productionPilotScope;
+  scope: ProductionScope;
   connectionRevision: number;
   observedAt: string;
   shop: { id: string; name: string };
@@ -491,7 +492,7 @@ function verifiedStockMapping(
       op.state !== 'verified' ||
       !op.item_id ||
       op.owner_key !==
-        `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}` ||
+        `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}` ||
       op.connection_id !== connection.id ||
       !Number.isSafeInteger(op.connection_revision) ||
       op.connection_revision < 1 ||
@@ -506,15 +507,15 @@ function verifiedStockMapping(
       !Array.isArray(document.tierNames) ||
       op.source_fingerprint !==
         fingerprint({
-          scope: productionPilotScope,
+          scope: currentProductionScope(),
           sourceIdentity: op.source_identity,
           sourceRevision: op.source_revision,
           sourcePayload: payload,
           expectedProjection: op.expected_projection,
         }) ||
       proof?.environment !== 'production' ||
-      proof?.partnerId !== productionPilotScope.partnerId ||
-      proof?.shopId !== productionPilotScope.shopId ||
+      proof?.partnerId !== currentProductionScope().partnerId ||
+      proof?.shopId !== currentProductionScope().shopId ||
       proof?.connectionRevision !== op.connection_revision
     )
       return;
@@ -638,15 +639,15 @@ export class ProductionPreparationMetadataService {
     const rows = (
       await this.repo.pool.query(
         'SELECT * FROM connections WHERE environment=$1 AND partner_id=$2 AND shop_id=$3',
-        ['production', productionPilotScope.partnerId, productionPilotScope.shopId],
+        ['production', currentProductionScope().partnerId, currentProductionScope().shopId],
       )
     ).rows;
     const connection = rows[0];
     const valid = (row: any) =>
       row &&
       row.environment === 'production' &&
-      String(row.partner_id) === productionPilotScope.partnerId &&
-      String(row.shop_id) === productionPilotScope.shopId &&
+      String(row.partner_id) === currentProductionScope().partnerId &&
+      String(row.shop_id) === currentProductionScope().shopId &&
       row.state === 'connected' &&
       Number.isSafeInteger(row.revision) &&
       row.revision > 0 &&
@@ -657,7 +658,7 @@ export class ProductionPreparationMetadataService {
       const current = (
         await this.repo.pool.query(
           'SELECT * FROM connections WHERE environment=$1 AND partner_id=$2 AND shop_id=$3',
-          ['production', productionPilotScope.partnerId, productionPilotScope.shopId],
+          ['production', currentProductionScope().partnerId, currentProductionScope().shopId],
         )
       ).rows;
       if (
@@ -671,7 +672,7 @@ export class ProductionPreparationMetadataService {
     let partnerKey: string, accessToken: string;
     try {
       const box = new SecretBox(this.options.encryptionKey ?? process.env.APP_ENCRYPTION_KEY ?? ''),
-        owner = `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}`;
+        owner = `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}`;
       partnerKey = (box.open(connection.partner_key_ciphertext, owner) as { partnerKey: string })
         .partnerKey;
       accessToken = (box.open(connection.token_ciphertext, owner) as { accessToken: string })
@@ -680,7 +681,7 @@ export class ProductionPreparationMetadataService {
       return fail('AUTH_REQUIRED');
     }
     const client = new ProductionPilotTransport(
-      { ...productionPilotScope, partnerKey, accessToken },
+      { ...currentProductionScope(), partnerKey, accessToken },
       { transport: this.options.transport },
     );
     const directory = resolve(
@@ -696,7 +697,7 @@ export class ProductionPreparationMetadataService {
     ): Promise<Record<string, any>> => {
       await stillCurrent();
       const key = canonicalJson({
-        scope: productionPilotScope,
+        scope: currentProductionScope(),
         connectionId: connection.id,
         connectionRevision: connection.revision,
         path,
@@ -725,7 +726,7 @@ export class ProductionPreparationMetadataService {
               JSON.stringify(
                 {
                   id: receiptId,
-                  scope: productionPilotScope,
+                  scope: currentProductionScope(),
                   connectionId: connection.id,
                   connectionRevision: connection.revision,
                   method: 'GET',
@@ -804,17 +805,17 @@ export class ProductionPreparationMetadataService {
       shop.status !== 'NORMAL' ||
       typeof shop.shop_name !== 'string' ||
       !shop.shop_name.length ||
-      (shop.shop_id !== undefined && String(shop.shop_id) !== productionPilotScope.shopId)
+      (shop.shop_id !== undefined && String(shop.shop_id) !== currentProductionScope().shopId)
     )
       fail('SHOP_IDENTITY_MISMATCH');
     const choices = categories(await get('/api/v2/product/get_category', { language: 'vi' }));
     if (query.categoryId && !choices.some((category) => category.id === query.categoryId))
       fail('CATEGORY_NOT_SELECTABLE');
     const result: ProductionPreparationMetadata = {
-      scope: { ...productionPilotScope },
+      scope: { ...currentProductionScope() },
       connectionRevision: connection.revision,
       observedAt: new Date(this.now()).toISOString(),
-      shop: { id: productionPilotScope.shopId, name: shop.shop_name },
+      shop: { id: currentProductionScope().shopId, name: shop.shop_name },
       categoryAuthorizationVerified: false,
       categories: choices,
       channels: [],
@@ -924,7 +925,7 @@ export class ProductionPreparationMetadataService {
       )
         fail('REFERENCE_INVALID');
       const item = base.item_list[0];
-      if (item.shop_id !== undefined && String(item.shop_id) !== productionPilotScope.shopId)
+      if (item.shop_id !== undefined && String(item.shop_id) !== currentProductionScope().shopId)
         fail('REFERENCE_INVALID');
       const models = await get('/api/v2/product/get_model_list', {
         item_id: query.referenceItemId,
@@ -991,7 +992,7 @@ export class ProductionPreparationMetadataService {
             FROM production_pilot_operations o WHERE o.connection_id=$1 AND o.owner_key=$2 AND o.state='verified' ORDER BY o.created_at DESC LIMIT 100`,
               [
                 connection.id,
-                `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}`,
+                `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}`,
               ],
             )
           ).rows;
@@ -1014,7 +1015,7 @@ export class ProductionPreparationMetadataService {
             await writeFile(
               resolve(directory, 'stock-mapping-proof.json'),
               canonicalJson({
-                scope: productionPilotScope,
+                scope: currentProductionScope(),
                 connectionId: connection.id,
                 connectionRevision: connection.revision,
                 referenceItemId: query.referenceItemId,

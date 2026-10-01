@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -11,8 +12,7 @@ import type { ImageQcBinding } from '../../packages/shopee/src/image-qc.js';
 import { technicalImage } from '../fixtures/image-qc/technical-images.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['127.0.0.1', 'localhost'].includes(database.hostname) || database.port !== '5442')
-  throw new Error('Image QC tests require isolated local PostgreSQL 5442');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_image_qc_' + randomUUID().replaceAll('-', '');
 const directory = resolve('.local/acceptance-20260914/image-qc-service', schema);
 const admin = new Pool({ connectionString: database.href });

@@ -26,6 +26,8 @@ export type PreparedWireContext = {
     tierNames: string[];
     optionLabelsBySku: Record<string, string[]>;
     originalPriceBySku: Record<string, string>;
+    /** Exact independently recorded operating decision; omitted by historical contracts. */
+    stockBySku?: Record<string,number>;
     approvedMediaSha256: string[];
     /** Independently observed image.image_ratio from the source item. */
     galleryRatio?: '3:4';
@@ -294,6 +296,11 @@ function sourceContract(document: PreparedDocument, context: PreparedWireContext
     )
   )
     fail('SOURCE_PRICE_MISMATCH', 'models.originalPrice');
+  if(contract.stockBySku!==undefined && (Object.keys(contract.stockBySku).length!==document.models.length
+    || document.models.some(model=>!Object.hasOwn(contract.stockBySku!,model.sku)
+      || !Number.isSafeInteger(contract.stockBySku![model.sku]) || contract.stockBySku![model.sku]!<0
+      || contract.stockBySku![model.sku]!==model.stock)))
+    fail('SOURCE_STOCK_MISMATCH','models.stock');
   const approved = new Set(contract.approvedMediaSha256);
   if (!approved.size || [...approved].some((hash) => !/^[a-f0-9]{64}$/.test(hash)))
     fail('SOURCE_MEDIA_INVALID', 'sourceContract.approvedMediaSha256');

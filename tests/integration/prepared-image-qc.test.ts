@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -15,8 +16,7 @@ import type { FieldSnapshot } from '../../packages/shopee/src/field-client.js';
 import { technicalImage } from '../fixtures/image-qc/technical-images.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['127.0.0.1', 'localhost'].includes(database.hostname) || database.port !== '5442')
-  throw new Error('Bridge test requires local isolated PostgreSQL');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_prepared_image_qc_' + randomUUID().replaceAll('-', '');
 const directory = resolve('.local/acceptance-20260914/prepared-image-qc', schema);
 const admin = new Pool({ connectionString: database.href });

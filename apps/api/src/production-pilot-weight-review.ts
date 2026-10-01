@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -18,8 +19,8 @@ const reviewSchema = z
     scope: z
       .object({
         environment: z.literal('production'),
-        partnerId: z.literal('2010476'),
-        shopId: z.literal('1423724897'),
+        partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+        shopId: z.string().refine(value => value === currentProductionScope().shopId),
       })
       .strict(),
     operationId: z.string().uuid(),
@@ -187,7 +188,7 @@ export async function reconcileProductionPilotWeights(
     row.weight = mappings.find((entry) => entry.modelId === numericId(row.model_id))!.sourceKg;
   const proof = {
     version: 1 as const,
-    scope,
+    scope: currentProductionScope(),
     operationId: input.operationId,
     itemId: input.itemId,
     sourceFingerprint: input.sourceFingerprint,

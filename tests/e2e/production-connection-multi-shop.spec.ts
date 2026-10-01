@@ -22,6 +22,7 @@ test('switching shops keeps the authorization attempt bound to its own shop and 
         tokenExpiresAt: null, refreshStatus: 'idle', refreshReason: null,
         autoRefresh: true, state: shopId === vina ? 'connected' : 'disconnected',
         officialName: shopId === vina ? 'VINA TƯƠI' : null, hasSavedKey: true,
+        authorizationCallbackUrl: 'http://127.0.0.1:4310/v1/connections/production-pilot/callback',
       } });
     }
     if (path === '/v1/connections/production/authorize' && request.method() === 'POST') {

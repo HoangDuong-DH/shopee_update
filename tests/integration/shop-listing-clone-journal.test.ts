@@ -1,23 +1,31 @@
 import 'dotenv/config';
 import { randomUUID, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import { canonicalJson, type CloneQcInput } from '@shopee/domain';
 import { Pool, migrate } from '@shopee/persistence';
 import { ShopListingCloneJournal } from '../../apps/api/src/shop-listing-clone-journal.js';
-import type { ArchiveManifest } from '../../packages/domain/src/archive-clone.js';
+import { syntheticArchiveManifest } from '../fixtures/archive-clone.js';
 
 const schema='test_clone_journal_'+randomUUID().replaceAll('-','');
 const database=new URL(process.env.DATABASE_URL!);
-if (!['localhost','127.0.0.1'].includes(database.hostname) || database.port!=='5442')
-  throw Error('Clone journal integration requires local PostgreSQL 5442.');
+const localDatabase=['localhost','127.0.0.1'].includes(database.hostname);
+const legacyTestDatabase=process.env.INTERNAL_ISOLATED_MODE!=='1'&&localDatabase&&database.port==='5442';
+const internalTestDatabase=process.env.INTERNAL_ISOLATED_MODE==='1'&&localDatabase&&database.protocol==='postgres:'
+  &&database.port==='5443'&&database.pathname==='/shopee_internal_test'&&database.username==='shopee_internal'
+  &&!database.search&&!database.hash;
+if (!legacyTestDatabase&&!internalTestDatabase)
+  throw Error('Clone journal integration requires isolated local PostgreSQL.');
 const admin=new Pool({connectionString:process.env.DATABASE_URL});
 const pool=new Pool({connectionString:process.env.DATABASE_URL,options:'-c search_path='+schema+',public'});
 const journal=new ShopListingCloneJournal(pool);
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex');
 const sourceHash='a'.repeat(64),policyHash='b'.repeat(64),payloadHash='c'.repeat(64);
-const archive=JSON.parse(readFileSync('.local/haby-archive-20260930/clone-manifest-9411abc005e25b4185bbd41ea3a07d126fda2a4e624376f18bd4ddeef817c306.json','utf8')) as ArchiveManifest;
-const fixture=archive.items.find(i=>i.sourceItemId==='49517062898')!;
+const archive=syntheticArchiveManifest();
+// This journal suite exercises parent price QC. Video upload is covered separately.
+const fixture=archive.items.find(item=>item.tierProjection.length===0)!;
+fixture.rawItem.video_info=[];
+fixture.media=fixture.media.filter(media=>media.role!=='video'&&media.role!=='video-thumbnail');
+fixture.observationHash=createHash('sha256').update(JSON.stringify({rawItem:fixture.rawItem,rawModels:fixture.rawModels})).digest('hex');
 const sourceItemId=fixture.sourceItemId;
 const ids={sourceConnection:randomUUID(),sourceEvidence:randomUUID(),archive:randomUUID(),
   targetConnection:randomUUID(),secondTarget:randomUUID(),thirdTarget:randomUUID(),fourthTarget:randomUUID(),fifthTarget:randomUUID()};
@@ -39,8 +47,9 @@ beforeAll(async()=>{
     "VALUES($1,$2,'111','test','{}')",[ids.archive,ids.sourceConnection]);
   await pool.query('INSERT INTO shop_listing_archive_items '+
     '(archive_id,item_id,evidence_id,content_hash,item_status,title,brand_id,model_count,gallery_count,video_count) '+
-    "VALUES($1,$2,$3,$4,'NORMAL',$5,$6,0,9,0)",
-    [ids.archive,sourceItemId,ids.sourceEvidence,sourceHash,fixture.title,String(fixture.brandId)]);
+    "VALUES($1,$2,$3,$4,'NORMAL',$5,$6,$7,$8,$9)",
+    [ids.archive,sourceItemId,ids.sourceEvidence,sourceHash,fixture.title,String(fixture.brandId),
+      fixture.modelProjection.length,fixture.media.filter(media=>media.role==='gallery').length,fixture.media.filter(media=>media.role==='video').length]);
   for (const m of fixture.media) {
     await pool.query('INSERT INTO shop_listing_media_blobs(sha256,byte_count,mime,storage_path) '+
       'VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[m.sha256,1,m.mime,'test/'+m.sha256]);
@@ -59,7 +68,7 @@ function input(targetConnectionId:string,targetShopId:string) {
     plannedPayloadHash:payloadHash,targetConnectionId,targetConnectionRevision:1,targetPartnerId:'777',targetShopId};
 }
 function evidence(targetShopId:string, targetItemId='12345'):CloneQcInput {
-  const remote=clone(fixture.rawItem), models=clone(fixture.rawModels!);
+  const remote:Record<string,any>=clone(fixture.rawItem), models=clone(fixture.rawModels??{model:[],tier_variation:[]});
   const images=fixture.media.filter(m=>['cover','gallery','description','variation-0'].includes(m.role))
     .map(m=>({role:m.role as 'cover'|'gallery'|'description'|'variation-0',ordinal:m.ordinal,
       sourceSha256:m.sha256,uploadedId:'target-'+m.role+'-'+m.sha256.slice(0,12)}));

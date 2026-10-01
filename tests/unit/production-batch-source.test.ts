@@ -1,3 +1,5 @@
+import { intendedHiddenCapabilityProbe, unknownProductionCapabilityEvidence } from '../../apps/api/src/production-batch-capability.js';
+import { withProductionScope } from '../../apps/api/src/production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -128,7 +130,7 @@ it('keeps immutable source status readable after an original asset changes while
   expect((await readProductionBatchManifest(f.path,sha)).value).toEqual(f.value);
   await expect(loadProductionBatchSource(f.path,sha)).rejects.toThrow('PRODUCTION_BATCH_ASSET_CHANGED');
 });
-async function savedDraftFixture() {
+async function savedDraftFixture(amount=0) {
   const f = await fixture();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Sheet1');
@@ -139,9 +141,21 @@ async function savedDraftFixture() {
   value.version = 2;
   value.sourceFiles[0].role = 'listing-snapshot';
   value.sourceFiles[1].sha256 = sha(await readFile(f.prices));
-  value.listings[0].document.models[0].stock = 0;
+  value.listings[0].document.models[0].stock = amount;
   value.listings[0].priceProof[0].priceSet = 'SHOP THƯỜNG';
   value.preparation = { id: randomUUID(), fingerprint: 'c'.repeat(64) };
+  // The fixture declares the source independently before testing any request mutations.
+  const mediaId=value.listings[0].document.cover.importId;
+  const snapshot={version:1,draft:{productKey:'pass1:test-a',revision:1,
+    title:{value:'Title\nwith source spaces',sources:[],confirmed:true},
+    sourceSelection:{title:'Title\nwith source spaces',headline:'',body:' Exact text\n\nunchanged ',
+      coverId:mediaId,galleryIds:[mediaId],descriptionImageIds:[],tierNames:[],
+      variants:[{importId:'independent-price-source',rowKey:'A2',optionLabels:[]}]},
+    variants:[{sku:{value:'SKU-A'},originalPrice:{value:'125000'}}],
+    assets:[{key:mediaId,sha256:sha('original image bytes')}]},
+    input:{stocks:{'SKU-A':amount}},decisionSource:{kind:'user_decision',fileSha256:'d'.repeat(64),
+      locator:'fixture-explicit-stock-decision',observedAt:new Date().toISOString()}};
+  await writeFile(f.md,JSON.stringify(snapshot));value.sourceFiles[0].sha256=sha(await readFile(f.md));
   return { ...f, value };
 }
 it('version 2 preserves explicitly supplied zero stock and the selected regular price set', async () => {
@@ -150,6 +164,19 @@ it('version 2 preserves explicitly supplied zero stock and the selected regular 
   expect(loaded.value.version).toBe(2);
   expect(loaded.value.listings[0]!.document.models[0]!.stock).toBe(0);
   expect(loaded.value.listings[0]!.priceProof[0]!.priceSet).toBe('SHOP THƯỜNG');
+});
+it.each([0,100,1000])('version 2 accepts explicit stock %i and NoBrand0 while legacy stock contract stays frozen',async amount=>{
+  const f=await savedDraftFixture(amount);
+  f.value.listings[0].document.brandId='0';f.value.listings[0].brandName='NoBrand';
+  const loaded=await loadProductionBatchSource(f.path,await f.save());
+  expect(loaded.value.listings[0]!.document).toMatchObject({brandId:'0',models:[{stock:amount}]});
+});
+
+it('accepts NoBrand0 only when exact category metadata confirms its original name',async()=>{
+  const metadata=()=>vi.fn(async()=>({brand_list:[{brand_id:0,original_brand_name:'NoBrand'}],has_next_page:false}));
+  expect(await findProductionSourceBrand(metadata(),'900','0','NoBrand')).toEqual({brand_id:0,original_brand_name:'NoBrand'});
+  await expect(findProductionSourceBrand(metadata(),'900','0','Different')).rejects.toThrow('BRAND_REVALIDATION_REQUIRED');
+  await expect(findProductionSourceBrand(metadata(),'900','123','Unknown')).rejects.toThrow('BRAND_REVALIDATION_REQUIRED');
 });
 it('loads an already frozen historical test declaration without recompiling its existing-ID source or changing bytes',async()=>{
  const f=await savedDraftFixture();
@@ -319,7 +346,7 @@ it('refuses collector work without verified capability evidence before touching 
   ).rejects.toThrow('PRODUCTION_BATCH_CAPABILITY_EVIDENCE_REQUIRED');
 });
 
-function readerFixture(alter?: (path: string, response: any) => void | Promise<void>) {
+function readerFixture(alter?: (path: string, response: any, query: URLSearchParams) => void | Promise<void>) {
   const encryptionKey = '91'.repeat(32),
     box = new SecretBox(encryptionKey),
     owner = 'production:2010476:1423724897';
@@ -397,7 +424,7 @@ function readerFixture(alter?: (path: string, response: any) => void | Promise<v
     else if (path.endsWith('get_warehouse_detail')) raw.error = 'warehouse.error_not_in_whitelist';
     else throw Error('Unexpected endpoint');
     if (response) raw.response = response;
-    await alter?.(path, raw);
+    await alter?.(path, raw, url.searchParams);
     return new Response(JSON.stringify(raw), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -420,7 +447,7 @@ function readerFixture(alter?: (path: string, response: any) => void | Promise<v
       references: ['Explicit earlier denial'],
     },
   };
-  return { repo, calls, options: { encryptionKey, transport, priorCapabilityEvidence } };
+  return { repo, calls, connection, options: { encryptionKey, transport, priorCapabilityEvidence } };
 }
 it('collects isolated fresh GET evidence with manifest-bound stock, brand and preserved source values', async () => {
   const f = await fixture(),
@@ -686,3 +713,51 @@ it.each(['missing', 'duplicate', 'parent'])(
     ).toBe(false);
   },
 );
+it('collects a first intended hidden source in another shop with unknown media access and exact manifest permission', async () => {
+  const f=await savedDraftFixture(), scope={environment:'production' as const,partnerId:'2010476',shopId:'1126307464'};
+  f.value.scope=scope;f.value.publicationMode='hidden_for_review';
+  const digest=await f.save();
+  const reader=readerFixture((path,raw)=>{if(path.endsWith('get_shop_info'))Object.assign(raw,{shop_name:'vinatuoi.vn',shop_id:1126307464});});
+  Object.assign(reader.connection,{name:'vinatuoi.vn',display_name:'Operator friendly alias',partner_key_ciphertext:new SecretBox(reader.options.encryptionKey).seal({partnerKey:'FIXTURE-KEY'},'production:2010476:1126307464'),token_ciphertext:new SecretBox(reader.options.encryptionKey).seal({accessToken:'FIXTURE-TOKEN'},'production:2010476:1126307464')});
+  await withProductionScope(scope,async()=>{
+    const evidence=unknownProductionCapabilityEvidence(1,'fixture-intended-source');
+    const capabilityProbe=intendedHiddenCapabilityProbe({hidden:true,batchId:f.value.batchId,manifestSha256:digest,authorizationReference:f.value.authorizationReference,source:f.value.listings[0],evidence});
+    const result=await collectProductionBatchInput(reader.repo,{manifestPath:f.path,expectedSha256:digest,sourceKey:'prepared-a'},{...reader.options,priorCapabilityEvidence:evidence,capabilityProbe});
+    expect(result.input.capabilityProbe).toEqual(capabilityProbe);
+    expect(result.input.capabilityEvidence.gallery34.state).toBe('unknown');
+    expect(result.input.context.capabilities.gallery34).toBe(false);
+    expect(reader.calls.every(c=>c.method==='GET' && c.query.shop_id==='1126307464')).toBe(true);
+    for(const changed of [{...capabilityProbe,authorizationReference:'forged'}, {...capabilityProbe,sourceRevision:2}]){
+      const before=reader.calls.length;
+      await expect(collectProductionBatchInput(reader.repo,{manifestPath:f.path,expectedSha256:digest,sourceKey:'prepared-a'},{...reader.options,priorCapabilityEvidence:evidence,capabilityProbe:changed as any})).rejects.toThrow('CAPABILITY_PROBE_FORBIDDEN');
+      expect(reader.calls).toHaveLength(before);
+    }
+  });
+});
+it.each([201,1000,1001])('trusted inventory scans %i items completely or blocks its explicit bound before base reads', async(count)=>{
+  const f=await fixture(), reader=readerFixture((path,raw,query)=>{
+    if(path.endsWith('get_item_list') && query.get('item_status')==='UNLIST'){
+      const offset=Number(query.get('offset')),end=Math.min(offset+100,count);
+      raw.response={total_count:count,has_next_page:end<count,next_offset:end,item:Array.from({length:end-offset},(_,i)=>({item_id:99+offset+i,item_status:'UNLIST'}))};
+    } else if(path.endsWith('get_item_base_info')) raw.response={item_list:query.get('item_id_list')!.split(',').map(id=>({item_id:Number(id),item_sku:'REFERENCE-'+id,item_name:'Reference '+id,has_model:true}))};
+  });
+  const call=collectProductionBatchInput(reader.repo,{manifestPath:f.path,expectedSha256:await f.save(),sourceKey:'prepared-a'},reader.options);
+  if(count>1000){await expect(call).rejects.toThrow('INVENTORY_LIMIT_REACHED');expect(reader.calls.some(c=>c.path.endsWith('get_item_base_info'))).toBe(false);}
+  else {await call;expect(reader.calls.filter(c=>c.path.endsWith('get_model_list'))).toHaveLength(count);}
+});
+it('reports the scoped missing stock reference field and never invents a warehouse',async()=>{
+  const f=await fixture(),reader=readerFixture((path,raw)=>{if(path.endsWith('get_item_list'))raw.response={total_count:0,has_next_page:false};});
+  await expect(collectProductionBatchInput(reader.repo,{manifestPath:f.path,expectedSha256:await f.save(),sourceKey:'prepared-a'},reader.options))
+    .rejects.toMatchObject({message:'PRODUCTION_PILOT_STOCK_LOCATION_REFERENCE_MISSING',field:'stockLocation.referenceItemId',scope:f.value.scope});
+  expect(reader.calls.some(c=>c.method==='POST')).toBe(false);
+});
+it.each(['repeated page','skipped cursor','changed total'])('does not accept an apparently final inventory with %s',async(fault)=>{
+  const f=await fixture(),reader=readerFixture((path,raw,query)=>{
+    if(!path.endsWith('get_item_list') || query.get('item_status')!=='UNLIST')return;
+    const offset=Number(query.get('offset'));
+    raw.response=offset===0?{total_count:3,has_next_page:true,next_offset:fault==='skipped cursor'?2:1,item:[{item_id:99,item_status:'UNLIST'}]}:
+      {total_count:fault==='changed total'?4:3,has_next_page:false,item:Array.from({length:(fault==='changed total'?4:3)-offset},(_,i)=>({item_id:fault==='repeated page'?99+i:100+i,item_status:'UNLIST'}))};
+  });
+  await expect(collectProductionBatchInput(reader.repo,{manifestPath:f.path,expectedSha256:await f.save(),sourceKey:'prepared-a'},reader.options)).rejects.toThrow('INVENTORY_');
+  expect(reader.calls.some(c=>c.path.endsWith('get_item_base_info'))).toBe(false);
+});

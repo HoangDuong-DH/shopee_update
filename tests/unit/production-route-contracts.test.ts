@@ -75,8 +75,9 @@ it('preserves a real execution-policy validation error returned through executio
       return { rows: [{ id, preparation_id: id, body, fingerprint: '0'.repeat(64) }] };
     throw Error('Unexpected isolated fixture query');
   });
+  const preparation = { get: vi.fn(async () => ({ id, scope: body.scope })) };
   const execution = new ProductionPreparationExecution(
-    new Repository({ query } as any), {} as any, {} as any,
+    new Repository({ query } as any), preparation as any, {} as any,
   );
   // Execute both real service get() and policy validated(); only persistence is an in-memory fixture.
   vi.spyOn(app.get(ProductionPreparationExecution), 'get').mockImplementation((key) => execution.get(key));
@@ -84,6 +85,7 @@ it('preserves a real execution-policy validation error returned through executio
   expect(result.statusCode).toBe(409);
   expect(result.json().code).toBe('PRODUCTION_EXECUTION_POLICY_RECEIPT_INVALID');
   expect(result.json().message).toContain('Đọc lại');
+  expect(preparation.get).toHaveBeenCalledExactlyOnceWith(id);
   expect(query).toHaveBeenCalledTimes(2);
 });
 

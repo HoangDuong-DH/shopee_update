@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -28,8 +29,7 @@ import { confirmListingPriceMapping, reviewListingPriceMapping } from '../../app
 
 const schema = 'test_draft_preparation_' + randomUUID().replaceAll('-', '');
 const database = new URL(process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(database.hostname) || database.port !== '5442')
-  throw Error('This acceptance requires isolated schemas on local PostgreSQL 5442.');
+assertLocalIntegrationDatabase(database);
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -243,7 +243,12 @@ it('imports eighty original Word/image source sets and a shared pricebook throug
   for (const [i, listing] of listings.entries()) {
     const before = f.drafts[i]!;
     expect(listing.document.title).toBe(before.title.value);
-    expect(listing.document.description).toEqual(before.description);
+    // This source explicitly selected no description images. Gallery membership
+    // cannot authorize adding the same image to a different role.
+    expect(listing.document.description).toEqual([
+      { type:'text', text:`Mở đầu ${i}\n\n` },
+      { type:'text', text:'\n\n\nGiữ nguyên nội dung đã chuẩn bị.\nKhông tự thay đặc tính.' },
+    ]);
     expect(
       listing.document.models.map((m) => [
         m.sku,

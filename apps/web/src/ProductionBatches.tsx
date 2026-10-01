@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { z } from 'zod';
 import { api, RequestError } from './api.js';
+import { downloadWorkbook } from './download.js';
+import { belongsToOperationShop, batchOperationMarker, listingOperationView } from './batch-operation-view.js';
 import './production-pilot.css';
 import './production-batches.css';
 
@@ -378,11 +380,12 @@ function batchRowCounts(item: Batch) {
   return counts;
 }
 type ProductionTargetScope={environment:'production';partnerId:string;shopId:string};
-export function ProductionBatches({ targetScope, onImageQc, onSource, active = true }: { targetScope:ProductionTargetScope;onImageQc?: () => void; onSource?: (key: string) => void; active?: boolean }) {
+export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSource, active = true }: { targetScope:ProductionTargetScope;targetShopName?:string;onImageQc?: () => void; onSource?: (key: string) => void; active?: boolean }) {
   const [batches, setBatches] = useState<Batch[]>([]),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [loaded, setLoaded] = useState(false),
+    [unscopedCount, setUnscopedCount] = useState(0),
     [pending, setPending] = useState<string | null>(null),
     [held, setHeld] = useState<Record<string, string>>({}),
     [publicationConfirmations, setPublicationConfirmations] = useState<Record<string, string>>({}),
@@ -390,35 +393,66 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
     [search, setSearch] = useState(''),
     [selectedId, setSelectedId] = useState<string | null>(null),
     [hidePublished, setHidePublished] = useState(false),
-    [reviewing, setReviewing] = useState<string | null>(null);
+    [reviewing, setReviewing] = useState<string | null>(null),
+    [exporting, setExporting] = useState<string | null>(null),
+    [exportError, setExportError] = useState<{ batchId: string; message: string } | null>(null);
+  const exportRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => exportRequest.current?.abort(), []);
   const mounted = useRef(true),
     posting = useRef(false),
     reading = useRef(false),
     controller = useRef<AbortController | null>(null);
   const recoveryBatchIds = useRef(new Set<string>());
-  const scoped=(path:string)=>path+(path.includes('?')?'&':'?')+new URLSearchParams({partnerId:targetScope.partnerId,shopId:targetScope.shopId});
+  const scoped=useCallback((path:string)=>path+(path.includes('?')?'&':'?')+new URLSearchParams({partnerId:targetScope.partnerId,shopId:targetScope.shopId}), [targetScope.partnerId, targetScope.shopId]);
+  const markerKey = useCallback((id: string) => batchOperationMarker(targetScope, id), [targetScope.partnerId, targetScope.shopId]);
+  async function exportReport(item: Batch) {
+    if (exportRequest.current) return;
+    const request = new AbortController(); exportRequest.current = request;
+    setExporting(item.batchId); setExportError(null);
+    try {
+      const workbook = await downloadWorkbook(scoped('/v1/production-batches/' + encodeURIComponent(item.batchId) + '/report.xlsx'), request.signal);
+      if (request.signal.aborted) return;
+      const url = URL.createObjectURL(workbook), link = document.createElement('a');
+      link.href = url; link.download = `Bao-cao-shop-${targetScope.shopId}-dot-${item.batchId}.xlsx`;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (reason) {
+      if (!request.signal.aborted) setExportError({ batchId: item.batchId, message: reason instanceof Error ? reason.message : 'Chưa tải được báo cáo. Thử xuất lại.' });
+    } finally {
+      if (exportRequest.current === request) exportRequest.current = null;
+      if (!request.signal.aborted) setExporting(null);
+    }
+  }
   const refresh = useCallback(async () => {
     if (reading.current) return;
     reading.current = true;
     const abort = new AbortController();
     controller.current = abort;
     try {
-      const value = await api<unknown>(scoped('/v1/production-batches'), { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]) });
+      const value = await api<unknown>(scoped('/v1/production-batches'), { signal: abort.signal, timeoutMs: 30_000 });
       const parsed = z.object({ batches: z.array(batch) }).parse(value);
       for (const id of recoveryBatchIds.current) {
         if (!parsed.batches.some(item => item.batchId === id)) parsed.batches.push(batch.parse(await api(scoped('/v1/production-batches/' + encodeURIComponent(id)), { signal: abort.signal })));
-      parsed.batches=parsed.batches.filter(item=>item.shopId===targetScope.shopId && (!item.partnerId || item.partnerId===targetScope.partnerId));
       }
-      if (mounted.current) {
+      const missingScope = parsed.batches.filter(item => !item.partnerId || !item.shopId).length;
+      parsed.batches=parsed.batches.filter(item=>belongsToOperationShop(item, targetScope));
+      if (mounted.current && !abort.signal.aborted) {
+        setUnscopedCount(missingScope);
         if (!posting.current)
           for (const item of parsed.batches) {
-            const marker = sessionStorage.getItem('production-batch:' + item.batchId);
+            // Adopt pre-upgrade markers only after the server supplied this exact shop scope.
+            const legacyMarker = sessionStorage.getItem('production-batch:' + item.batchId);
+            if (legacyMarker && !sessionStorage.getItem(markerKey(item.batchId))) {
+              sessionStorage.setItem(markerKey(item.batchId), legacyMarker);
+              sessionStorage.removeItem('production-batch:' + item.batchId);
+            }
+            const marker = sessionStorage.getItem(markerKey(item.batchId));
             if (
               marker &&
               item.acceptedStatusFingerprints &&
               !item.acceptedStatusFingerprints.includes(marker)
             )
-              sessionStorage.removeItem('production-batch:' + item.batchId);
+              sessionStorage.removeItem(markerKey(item.batchId));
           }
         setBatches(parsed.batches);
         setPublicationConfirmations((previous) =>
@@ -442,7 +476,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
           Object.fromEntries(
             parsed.batches.map((item) => [
               item.batchId,
-              sessionStorage.getItem('production-batch:' + item.batchId) ?? '',
+              sessionStorage.getItem(markerKey(item.batchId)) ?? '',
             ]),
           ),
         );
@@ -455,7 +489,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
     } finally {
       reading.current = false;
     }
-  }, []);
+  }, [scoped, markerKey, targetScope.partnerId, targetScope.shopId]);
   useEffect(() => {
     if (!active) return;
     mounted.current = true;
@@ -509,7 +543,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
         item.busy ||
         !item.enabled ||
         item.executionEnabled === false ||
-        sessionStorage.getItem('production-batch:' + item.batchId) === key ||
+        sessionStorage.getItem(markerKey(item.batchId)) === key ||
         !item.listings.some(
           (row) =>
             row.sourceKey === sourceKey &&
@@ -523,7 +557,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
       setPublicationConfirmations({});
     }
     posting.current = true;
-    sessionStorage.setItem('production-batch:' + item.batchId, key);
+    sessionStorage.setItem(markerKey(item.batchId), key);
     setHeld((previous) => ({ ...previous, [item.batchId]: key }));
     setPending(item.batchId);
     setError('');
@@ -547,7 +581,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
       if (reason instanceof RequestError && ['PRODUCTION_BATCH_STATUS_CHANGED', 'PRODUCTION_BATCH_IN_PROGRESS',
         'PRODUCTION_BATCH_EXECUTION_DISABLED', 'PRODUCTION_BATCH_SOURCE_CHANGED', 'PRODUCTION_BATCH_SOURCE_ARCHIVED',
         'PRODUCTION_BATCH_EXECUTION_HELD', 'PRODUCTION_BATCH_RECONCILIATION_REQUIRED'].includes(reason.code)) {
-        sessionStorage.removeItem('production-batch:' + item.batchId);
+        sessionStorage.removeItem(markerKey(item.batchId));
         setHeld(previous => ({ ...previous, [item.batchId]: '' }));
       }
       if (mounted.current)
@@ -571,7 +605,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
       ].includes(row.state),
     );
   const filters = [
-    { key: 'active', label: 'Chưa hoàn tất', accept: (item: Batch) => !['completed', 'completed_with_exclusions'].includes(item.state) },
+    { key: 'active', label: 'Chưa hoàn tất', accept: (item: Batch) => !['completed', 'completed_with_exclusions'].includes(item.state) || needsQc(item) },
     { key: 'all', label: 'Tất cả', accept: (_item: Batch) => true },
     {
       key: 'ready',
@@ -605,6 +639,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
       <div className="production-pilot-heading">
         <div>
           <h2>Đăng theo đợt</h2>
+          <p><strong>Shop đích: {targetShopName || batches.find(item => item.shopName)?.shopName || 'Shop đã chọn'} · ID {targetScope.shopId}</strong> · Ứng dụng {targetScope.partnerId}</p>
           <p>Mỗi đợt giữ bản nguồn đã chốt lúc chuẩn bị. Loại mục chưa gửi nếu cần sửa, rồi chuẩn bị lại từ nguồn mới. Các link đã tạo được giữ để QC.</p>
         </div>
         <button type="button" className="secondary batch-refresh" onClick={() => void refresh()}>
@@ -617,7 +652,8 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
           {error}
         </p>
       )}
-      {pending && <p role="status" className="notice">Đang xử lý yêu cầu. Giữ nguyên màn hình này; kết quả sẽ cập nhật tại đúng đợt bạn đã chọn.</p>}
+      {unscopedCount > 0 && <p role="alert" className="notice warning">Có {unscopedCount} đợt chưa đọc được đầy đủ shop đích nên chưa hiển thị trong shop này. Đọc lại trạng thái hoặc nhờ người phụ trách kiểm tra hồ sơ đợt; không tạo lại để thay thế.</p>}
+      {pending && <p role="status" className="notice">Đang chờ xác nhận tiếp nhận yêu cầu. Kết quả được theo dõi trong đợt này; nếu mất kết nối, đọc lại trước khi gửi tiếp.</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
       {!loaded && !error && <p role="status">Đang đọc các đợt đã tiếp nhận…</p>}
       {loaded && !error && !batches.length && (
@@ -710,7 +746,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                         Gồm: {item.name ?? item.listings[0]?.title ?? 'Bộ nguồn đã tiếp nhận'}
                       </span>
                       <span className="batch-selector-shop">
-                        {item.shopName ?? 'Shop đã chỉ định'}
+                        {targetShopName || item.shopName || 'Shop đã chỉ định'}
                       </span>
                       <span
                         className={
@@ -804,7 +840,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                           <div>
                             <p className="batch-detail-eyebrow">
                               ĐỢT {batches.indexOf(item) + 1} ·{' '}
-                              {item.shopName ?? 'Shop đã chỉ định'}
+                              {targetShopName || item.shopName || 'Shop đã chỉ định'} · ID {item.shopId}
                             </p>
                             <h3>
                               {unavailable
@@ -823,6 +859,13 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                                   : 'Lô cũ · Tự mở bán sau đối chiếu'}
                           </span>
                         </header>
+                        <div className="production-batch-actions">
+                          <button type="button" className="secondary" disabled={!!exporting} onClick={() => void exportReport(item)}>
+                            {exporting === item.batchId ? 'Đang tải báo cáo…' : 'Xuất báo cáo Excel'}
+                          </button>
+                          <small>Báo cáo lấy trạng thái đã lưu và việc cần làm; không gửi lại listing.</small>
+                        </div>
+                        {exportError?.batchId === item.batchId && <p role="alert" className="notice warning">{exportError.message}</p>}
                         {!unavailable && (
                           <div
                             className="batch-progress-overview"
@@ -977,6 +1020,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                         )}
                         <ol className="production-batch-rows">
                           {shownRows.map((row) => {
+                            const operationView = listingOperationView(row);
                             const code = item.lastResult?.listings.find(
                               (result) => result.sourceKey === row.sourceKey,
                             )?.code;
@@ -999,6 +1043,11 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                                   <div className="batch-product-identity">
                                     <strong>{row.title}</strong>
                                     <span>{row.modelCount} phân loại</span>
+                                    <div className="batch-operation-summary">
+                                      <p><strong>Tiến độ:</strong> {operationView.progress}</p>
+                                      <p><strong>Trên shop:</strong> {operationView.shop}</p>
+                                      <p><strong>Việc tiếp theo:</strong> {operationView.next}</p>
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="production-batch-row-status">
@@ -1183,7 +1232,7 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                           <div>
                             <p>{item.name ?? item.listings[0]?.title}</p>
                             <p className="production-batch-help">
-                              {item.listings.length} listing · {item.shopName ?? 'Shop đã chỉ định'}
+                              {item.listings.length} listing · {targetShopName || item.shopName || 'Shop đã chỉ định'}
                               {item.shopId ? ' · Shop ' + item.shopId : ''}
                             </p>
                             <p className="production-batch-help">

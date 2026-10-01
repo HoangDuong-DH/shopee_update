@@ -1,4 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { contentBindingSchema } from '../../../packages/domain/src/content-workbook.js';
+import { ContentWorkbookService } from './content-workbook-service.js';
+import type { BlobStore } from '@shopee/persistence';
 import { z } from 'zod';
 import {
   compileDescription,
@@ -13,6 +16,9 @@ import {
 import { Repository } from '@shopee/persistence';
 import { resolveFolderSourceClaim } from './folder-source-claim.js';
 import { folderDraftSelection } from '../../../packages/domain/src/folder-source-identity.js';
+import { readMappingSourceHashes, productMappingFingerprint, productMappingDecisionFingerprint,
+  currentProductMappingDecision, legacyProductMappingDecision, hasStructuredMappingDecision,
+  storedFolderMappingMatches } from './product-mapping-decision.js';
 import {
   projectResolvedPriceIssues,
   resolvedDuplicatePriceIssueKeys,
@@ -21,6 +27,7 @@ export const productInput = z.object({
   // Confirmation is issued only by confirmProductMapping after a revision-bound review.
   // Reject it explicitly here instead of allowing a generic draft save to forge the proof.
   mappingConfirmation: z.unknown().optional(),
+  contentBinding: contentBindingSchema.optional(),
   folderBinding: z
     .object({
       batchId: z.string().uuid(),
@@ -57,17 +64,23 @@ export const productInput = z.object({
 export type ProductInput = z.infer<typeof productInput>;
 
 /** Readable, revision-bound review of the exact mapping the operator will approve. */
-export async function reviewProductMapping(repo: Pick<Repository, 'getProduct'>, productKey: string) {
+export async function reviewProductMapping(repo: Pick<Repository, 'getProduct' | 'getImport'> & Partial<Pick<Repository,'pool'>>, productKey: string) {
   const draft = await repo.getProduct(productKey);
   if (!draft?.sourceSelection) throw Error('SOURCE_MAPPING_UNAVAILABLE');
   const mapping = folderDraftSelection(draft);
-  const fingerprint = createHash('sha256')
-    .update(canonicalJson({ productKey: draft.productKey, mapping }))
-    .digest('hex');
+  const sourceHashes=await readMappingSourceHashes(repo,draft);
+  const fingerprint=productMappingDecisionFingerprint(draft,sourceHashes);
+  let approvalBasis:'current_decision'|'stored_folder'|'unconfirmed'='unconfirmed';
+  if(currentProductMappingDecision(draft,sourceHashes)
+    || (!draft.sourceSelection.folderBinding && legacyProductMappingDecision(draft))) approvalBasis='current_decision';
+  else if(!hasStructuredMappingDecision(draft) && await storedFolderMappingMatches(repo,draft)) approvalBasis='stored_folder';
   return {
     productKey: draft.productKey,
     revision: draft.revision,
     fingerprint,
+    sourceHashes,
+    requiresConfirmation:approvalBasis==='unconfirmed',
+    approvalBasis,
     mapping,
     imageRoles: {
       cover: draft.assets.find((asset) => asset.key === draft.coverKey)?.source.locator ?? null,
@@ -81,11 +94,15 @@ export async function reviewProductMapping(repo: Pick<Repository, 'getProduct'>,
 
 /** Explicit operator action only. Saving a draft never calls this function. */
 export async function confirmProductMapping(
-  repo: Pick<Repository, 'getProduct' | 'saveProduct'>,
+  repo: Pick<Repository, 'getProduct' | 'getImport' | 'saveProduct'> & Partial<Pick<Repository,'pool'>>,
   productKey: string,
   raw: unknown,
 ) {
   const input = z.object({ expectedRevision: z.number().int().positive(), expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(raw);
+  const latest=await repo.getProduct(productKey);
+  if(latest?.revision===input.expectedRevision+1 && latest.sourceSelection?.mappingConfirmation?.decisionFingerprint===input.expectedFingerprint
+    && latest.sourceSelection.mappingConfirmation.reviewedRevision===input.expectedRevision
+    && currentProductMappingDecision(latest,await readMappingSourceHashes(repo,latest))) return latest;
   const reviewed = await reviewProductMapping(repo, productKey);
   if (reviewed.revision !== input.expectedRevision || reviewed.fingerprint !== input.expectedFingerprint)
     throw Error('SOURCE_MAPPING_REVIEW_CHANGED');
@@ -95,9 +112,13 @@ export async function confirmProductMapping(
   updated.revision += 1;
   updated.sourceSelection!.mappingConfirmation = {
     kind: 'user_decision',
-    fileSha256: reviewed.fingerprint,
+    fileSha256: productMappingFingerprint(current),
     locator: `listing-mapping-confirmation:${productKey}`,
     observedAt: new Date().toISOString(),
+    reviewedRevision:input.expectedRevision,
+    confirmedRevision:updated.revision,
+    sourceHashes:reviewed.sourceHashes,
+    decisionFingerprint:reviewed.fingerprint,
   };
   return repo.saveProduct(updated, input.expectedRevision);
 }
@@ -153,11 +174,18 @@ export async function projectProductPriceIssues(
 export async function assembleProduct(
   repo: Repository,
   input: ProductInput,
+  blobs?: Pick<BlobStore, 'read'>,
 ): Promise<ListingDraft> {
   const previous =
     input.expectedRevision > 0 && input.productKey ? await repo.getProduct(input.productKey) : null;
   if (input.expectedRevision > 0 && previous?.revision !== input.expectedRevision)
     throw new Error('PRODUCT_REVISION_CONFLICT');
+  const content = input.contentBinding
+    ? blobs ? await new ContentWorkbookService(repo, blobs).resolve(input.contentBinding)
+      : (() => {throw Error('CONTENT_READER_UNAVAILABLE');})()
+    : undefined;
+  if (content && (content.title !== input.title || content.headline !== input.headline || content.body !== input.body))
+    throw Error('CONTENT_SELECTION_MISMATCH');
   const source = {
     kind: 'user_decision' as const,
     fileSha256: 'user-selection',
@@ -247,7 +275,7 @@ export async function assembleProduct(
       : input.sourceListingId !== undefined
         ? { sourceListingId: fact(input.sourceListingId) }
         : {}),
-    title: fact(input.title),
+    title: content ? {value: input.title, confirmed: true, sources: content.sources.filter(s=>s.locator.endsWith('!'+content.binding.mapping.columns.title+content.binding.row))} : fact(input.title),
     description: compileDescription(input.headline, input.body, input.descriptionImageIds),
     coverKey: input.coverId ?? '',
     galleryKeys: input.galleryIds,
@@ -269,6 +297,7 @@ export async function assembleProduct(
     issues,
   };
   draft.sourceSelection = {
+    ...(input.contentBinding ? {contentBinding: input.contentBinding} : {}),
     ...(input.folderBinding ? { folderBinding: input.folderBinding } : {}),
     ...(draft.sourceListingId ? { sourceListingId: draft.sourceListingId.value } : {}),
     title: input.title,
@@ -287,6 +316,7 @@ export async function assembleProduct(
 export async function saveAssembledProduct(
   repo: Repository,
   input: ProductInput,
+  blobs?: Pick<BlobStore, 'read'>,
 ): Promise<ListingDraft> {
   const claim =
     input.expectedRevision === 0 && input.folderBinding
@@ -298,7 +328,7 @@ export async function saveAssembledProduct(
       `SELECT 1 FROM input_batch_products p
       JOIN input_batch_revisions r ON r.batch_id=p.batch_id
       WHERE p.product_key=$1 AND (r.state->'manifests'->p.group_key->'document'->'product'->>'sourceRevision'='0'
-        OR r.state->'pendingMappings'->p.group_key IS NOT NULL) LIMIT 1`,
+        OR r.state->'pendingMappings'->p.group_key IS NOT NULL OR r.state->'contentSelections'->p.group_key IS NOT NULL) LIMIT 1`,
       [input.productKey],
     );
     if (reserved.rowCount) throw new Error('FOLDER_SOURCE_BINDING_REQUIRED');
@@ -310,7 +340,7 @@ export async function saveAssembledProduct(
     );
     if (portable.rowCount) throw new Error('FOLDER_SOURCE_BINDING_REQUIRED');
   }
-  const draft = await assembleProduct(repo, input);
+  const draft = await assembleProduct(repo, input, blobs);
   if (claim) draft.folderSource = { productKey: draft.productKey, fingerprint: claim.fingerprint };
   return repo.saveProduct(draft, input.expectedRevision, claim);
 }

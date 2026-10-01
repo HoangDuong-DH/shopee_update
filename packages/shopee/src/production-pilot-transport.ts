@@ -211,7 +211,15 @@ const logisticsAndParentSkuUpdateSchema = z
     if (new Set(value.logistic_info.map((entry) => entry.logistic_id)).size !== value.logistic_info.length)
       context.addIssue({ code: 'custom', path: ['logistic_info'], message: 'Duplicate channel' });
   });
-const itemUpdateSchema = z.union([descriptionUpdateSchema, logisticsAndParentSkuUpdateSchema]);
+// Cover-only updates never carry the gallery, content, stock, or publication
+// state. The operation planner must first verify the existing gallery is 3:4.
+const promotionCoverUpdateSchema = z.object({
+  item_id: z.number().int().positive(),
+  promotion_images: z.object({
+    image_id_list: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,512}$/)).length(1),
+  }).strict(),
+}).strict();
+const itemUpdateSchema = z.union([descriptionUpdateSchema, logisticsAndParentSkuUpdateSchema, promotionCoverUpdateSchema]);
 const credentialSchema = z
   .object({
     ...scopeSchema.shape,

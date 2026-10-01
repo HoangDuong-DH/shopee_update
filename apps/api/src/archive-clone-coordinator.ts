@@ -23,15 +23,19 @@ import type { CloneQcInput } from '../../../packages/domain/src/archive-clone-qc
 const hash = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const videoAddItemDocument = 'knowledge-base/shopee-open-platform/documents/api/en/v2.product.add_item.md';
 const pinnedVideoAddItemSha256 = '2f66e33928a76f35bfdd71d9e16b95553da15c513794fe1c6f9b5933ab53e8d6';
+/** Pure byte/content verification, not production permission. The production wrapper fixes its pin and path. */
+export function verifyArchiveVideoAddItemDocumentation(bytes: Uint8Array, expectedSha256: string): boolean {
+  if (createHash('sha256').update(bytes).digest('hex') !== expectedSha256) return false;
+  const document = Buffer.from(bytes).toString('utf8');
+  return document.includes('id: "api:v2.product.add_item:en"') &&
+    document.includes('| video_upload_id | string[] | False |') &&
+    document.includes('Only accept one video_upload_id.');
+}
 export async function documentedVideoPilotAllowed(declaredSha256: string | undefined): Promise<boolean> {
   if (declaredSha256 !== pinnedVideoAddItemSha256) return false;
   try {
     const bytes = await readFile(resolve(process.cwd(), videoAddItemDocument));
-    if (createHash('sha256').update(bytes).digest('hex') !== pinnedVideoAddItemSha256) return false;
-    const document = bytes.toString('utf8');
-    return document.includes('id: "api:v2.product.add_item:en"') &&
-      document.includes('| video_upload_id | string[] | False |') &&
-      document.includes('Only accept one video_upload_id.');
+    return verifyArchiveVideoAddItemDocumentation(bytes, pinnedVideoAddItemSha256);
   } catch { return false; }
 }
 const fresh = (observedAt: string, now: number, maxAgeMs: number) => {
