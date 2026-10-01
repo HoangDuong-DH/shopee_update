@@ -164,21 +164,24 @@ it('stops an autofill cancelled during metadata lookup instead of continuing the
     .rejects.toThrow('operator-cancelled');
   expect(requests).toHaveLength(1);
 });
-it('proposes only source-grounded fields; dimensions/NEW/preorder remain unknown', async () => {
+it('keeps category and category attributes pending when only the product title suggests them', async () => {
   const r = await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] });
   const e = r.entries[0]!;
   expect(e.choices).toMatchObject({
-    categoryId: '101213',
-    brandId: '1252097',
     brandName: 'VINA TƯƠI',
     weightGrams: 503.8,
-    attributeList: [{ attribute_id: 100752, attribute_value_list: [{ value_id: 4021 }] }],
   });
+  expect(e.choices.categoryId).toBeUndefined();
+  expect(e.choices.brandId).toBeUndefined();
+  expect(e.choices.attributeList).toBeUndefined();
+  expect(e.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'categoryId',value:'101213',confidence:'unconfirmed'}),
+  ]));
   expect(e.choices).not.toHaveProperty('dimensionCm');
   expect(e.choices).not.toHaveProperty('condition');
   expect(e.choices).not.toHaveProperty('preOrder');
   expect(e.unresolved.map((v) => v.field)).toEqual(
-    expect.arrayContaining(['dimensionCm', 'condition', 'preOrder', 'stockLocation', 'logistics']),
+    expect.arrayContaining(['categoryId','dimensionCm', 'condition', 'preOrder', 'stockLocation', 'logistics']),
   );
   expect(e.metadata?.categoryAuthorizationVerified).toBe(false);
 });
@@ -186,8 +189,8 @@ it('shares exact-name metadata once per category and preserves supplied category
   drafts.q = draft('q');
   await service().recommend({
     entries: [
-      { productKey: 'p', sourceRevision: 1 },
-      { productKey: 'q', sourceRevision: 1 },
+      { productKey: 'p', sourceRevision: 1, categoryId: '101213' },
+      { productKey: 'q', sourceRevision: 1, categoryId: '101213' },
     ],
     shared: {
       condition: 'NEW',
@@ -235,6 +238,25 @@ it('does not infer category from partial SKU overlap or a historical cross-produ
       .choices.categoryId,
   ).toBeUndefined();
 });
+it('keeps an exact-SKU historical category as review evidence instead of filling it', async () => {
+  drafts.p.title = fact('Xịt khử mùi giày da nam VINA TƯƠI');
+  observations = [{
+    evidence_id: 'shoe-history', scope, observed_at: new Date().toISOString(),
+    body: {
+      itemId: '123', title: 'Xịt khử mùi giày da nam VINA TƯƠI',
+      categoryId: '101127', brandId: '1252097', itemStatus: 'NORMAL',
+      models: [{model_sku:'SKU1',model_id:1}], attributes: [],
+    },
+  }];
+  const entry = (await service().recommend({entries:[{productKey:'p',sourceRevision:1}]})).entries[0]!;
+  expect(entry.choices.categoryId).toBeUndefined();
+  expect(entry.unresolved).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'categoryId',message:expect.stringContaining('cần chọn ngành')}),
+  ]));
+  expect(entry.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'categoryId',value:'101127',source:expect.stringContaining('shoe-history')}),
+  ]));
+});
 it('rejects stale revision/archive and does not carry partial or mismatched weight/brand rows', async () => {
   expect(
     (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 2 }] })).entries[0]!
@@ -256,14 +278,14 @@ it('invalidates source changed during metadata reads instead of applying old pro
     if (q.brandName) drafts.p.revision = 2;
     return m;
   });
-  const e = (await s.recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!;
+  const e = (await s.recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] })).entries[0]!;
   expect(e.choices).toEqual({});
   expect(e.issues[0]?.code).toBe('SOURCE_REVISION_CHANGED');
 });
 it('rejects changed connection across shared metadata reads', async () => {
   await expect(
     service((q, m) => ({ ...m, connectionRevision: q.categoryId ? 6 : 5 })).recommend({
-      entries: [{ productKey: 'p', sourceRevision: 1 }],
+      entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }],
     }),
   ).rejects.toThrow('PRODUCTION_PREPARATION_CONNECTION_CHANGED');
 });
@@ -367,7 +389,10 @@ it('maps every current SKU only from fresh verified warehouse proof and filters 
     expectedLocationBySku: { SKU1: 'VNZ' },
     writeLocationBySku: { SKU1: null },
   });
-  expect(e.choices.logistics).toEqual([{ channelId: '10', enabled: true }]);
+  expect(e.choices.logistics).toBeUndefined();
+  expect(e.unresolved).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'logistics'}),
+  ]));
   meta.reference.writeMappingVerified = false;
   const rejected = (
     await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })
@@ -396,7 +421,7 @@ it('does not copy historical attributes or use a truncated brand search', async 
   expect(e.choices.brandId).toBeUndefined();
   expect(e.choices.attributeList).toBeUndefined();
 });
-it('accepts zero limit sentinels but rejects positive package limits and wrong logistics proof', async () => {
+it('accepts zero limit sentinels only for an explicit all-eligible choice and rejects positive package limits', async () => {
   history = [verifiedHistory()];
   meta.reference = {
     itemId: '777',
@@ -426,6 +451,7 @@ it('accepts zero limit sentinels but rejects positive package limits and wrong l
   const request = {
     entries: [{ productKey: 'p', sourceRevision: 1 }],
     shared: { dimensionCm: { length: 12, width: 12, height: 28 } },
+    logisticsMode: 'all_eligible' as const,
   };
   meta.channels = [channel];
   expect((await service().recommend(request)).entries[0]!.choices.logistics).toEqual([
@@ -442,9 +468,11 @@ it('accepts zero limit sentinels but rejects positive package limits and wrong l
   }
   meta.channels = [channel];
   meta.reference.writeMapping.verificationFingerprint = '0'.repeat(64);
-  expect((await service().recommend(request)).entries[0]!.choices.logistics).toBeUndefined();
+  expect((await service().recommend(request)).entries[0]!.choices.logistics).toEqual([
+    { channelId: '10', enabled: true },
+  ]);
 });
-it('uses real same-shop exact-SKU evidence for safe packaging and shows sensitive facts unapplied', async () => {
+it('shows same-shop exact-SKU packaging as unapplied reference alongside sensitive facts', async () => {
   const attr = (id: string, label: string, valueId: string, valueLabel: string) => ({
     id,
     label,
@@ -480,11 +508,10 @@ it('uses real same-shop exact-SKU evidence for safe packaging and shows sensitiv
       },
     },
   ];
-  const e = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] }))
+  const e = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] }))
     .entries[0]!;
-  expect(e.choices.attributeList).toEqual([
-    { attribute_id: 100016, attribute_value_list: [{ value_id: 394, original_value_name: 'Đơn' }] },
-  ]);
+  expect(e.choices.attributeList).toBeUndefined();
+  expect(e.knowledgeSuggestions?.find((s) => s.attributeId === 100016)?.applied).toBe(false);
   expect(e.knowledgeSuggestions?.find((s) => s.attributeId === 100037)).toMatchObject({
     applied: false,
     confidence: 'reference',
@@ -516,14 +543,13 @@ it('does not choose one volume for mixed-size models and derives common volume w
       values: [],
     },
   ];
-  const first = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] }))
+  const first = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] }))
     .entries[0]!;
-  expect(first.choices.attributeList).toEqual([
-    {
-      attribute_id: 100248,
-      attribute_value_list: [{ value_id: 0, original_value_name: '1000', value_unit: 'ml' }],
-    },
-  ]);
+  expect(first.choices.attributeList).toBeUndefined();
+  expect(first.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'attributes.100248',confidence:'unconfirmed',
+      value:{attribute_id:100248,attribute_value_list:[{value_id:0,original_value_name:'1000',value_unit:'ml'}]}}),
+  ]));
   drafts.p.variants.push({
     ...drafts.p.variants[0],
     key: 'v2',
@@ -537,7 +563,7 @@ it('does not choose one volume for mixed-size models and derives common volume w
   });
   rows.push({ ...rows[0], key: 'mall2', sku: fact('SKU2') });
   expect(
-    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!
+    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] })).entries[0]!
       .choices.attributeList,
   ).toBeUndefined();
 });
@@ -568,10 +594,11 @@ it('does not let a different-use car listing override or block the source room c
       },
     },
   ];
-  expect(
-    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!
-      .choices.categoryId,
-  ).toBe('101127');
+  const room = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!;
+  expect(room.choices.categoryId).toBeUndefined();
+  expect(room.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'categoryId',value:'101127',confidence:'unconfirmed'}),
+  ]));
 });
 it('maps an explicit liquid declaration without treating a plastic bottle as pack quantity', async () => {
   meta.attributes = [
@@ -603,17 +630,36 @@ it('maps an explicit liquid declaration without treating a plastic bottle as pac
   drafts.p.description = [
     { type: 'text', text: '📦 THÔNG TIN\nDạng dung dịch pha loãng, chai nhựa 1 lít có nắp vặn.' },
   ];
-  expect(
-    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!
-      .choices.attributeList,
-  ).toEqual([{ attribute_id: 100036, attribute_value_list: [{ value_id: 708 }] }]);
+  const liquid = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] })).entries[0]!;
+  expect(liquid.choices.attributeList).toBeUndefined();
+  expect(liquid.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'attributes.100036',confidence:'unconfirmed',
+      value:{attribute_id:100036,attribute_value_list:[{value_id:708}]}}),
+  ]));
   drafts.p.description = [
     { type: 'text', text: 'Không phải dạng dung dịch; chai được bán riêng.' },
   ];
   expect(
-    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!
-      .choices.attributeList,
-  ).toBeUndefined();
+    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] })).entries[0]!
+      .explanations.filter((x)=>x.field==='attributes.100036'),
+  ).toEqual([]);
+});
+it('does not put title-derived cleaner or spray attributes into postable choices', async () => {
+  const cleaner = (await service().recommend({entries:[{productKey:'p',sourceRevision:1,categoryId:'101213'}]})).entries[0]!;
+  expect(cleaner.choices.attributeList).toBeUndefined();
+  expect(cleaner.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'attributes.100752',confidence:'unconfirmed',
+      value:{attribute_id:100752,attribute_value_list:[{value_id:4021}]}}),
+  ]));
+  drafts.p.title = fact('Xịt thơm phòng ngủ VINA TƯƠI');
+  meta.attributes = [{id:'100036',label:'Công Thức',mandatory:false,inputType:'single_dropdown',
+    values:[{id:'708',label:'Dạng Xịt',unit:null,children:[]}],maxValueCount:1}];
+  const spray = (await service().recommend({entries:[{productKey:'p',sourceRevision:1,categoryId:'101127'}]})).entries[0]!;
+  expect(spray.choices.attributeList).toBeUndefined();
+  expect(spray.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'attributes.100036',confidence:'unconfirmed',
+      value:{attribute_id:100036,attribute_value_list:[{value_id:708}]}}),
+  ]));
 });
 it('canonicalizes known positive historical value IDs without mutating raw labels, and exposes rejected evidence', async () => {
   const attr = (id: string, label: string, valueId: string, valueLabel: string) => ({
@@ -663,9 +709,10 @@ it('canonicalizes known positive historical value IDs without mutating raw label
     },
   ];
   const before = JSON.stringify(observations);
-  const e = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] }))
+  const e = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101127' }] }))
     .entries[0]!;
-  expect(e.choices.attributeList?.map((a) => a.attribute_id)).toEqual([100016, 101050]);
+  expect(e.choices.attributeList).toBeUndefined();
+  expect(e.knowledgeSuggestions?.every((s) => !s.applied)).toBe(true);
   expect(e.knowledgeIssues).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ code: 'UNKNOWN_ATTRIBUTE', attributeId: 777777 }),
@@ -698,9 +745,12 @@ it('uses literal per-choice bottle count and ordinary storage text, not a volume
       text: 'Chọn cỡ theo nhu cầu; mỗi lựa chọn gồm 1 chai.\nCất nơi khô thoáng, tránh nắng chiếu thẳng.',
     },
   ];
-  const e = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] }))
+  const e = (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] }))
     .entries[0]!;
-  expect(e.choices.attributeList?.map((a) => a.attribute_id)).toEqual([100016, 101306, 101050]);
+  expect(e.choices.attributeList).toBeUndefined();
+  expect(e.explanations.filter((x)=>x.confidence==='unconfirmed').map((x)=>x.field)).toEqual([
+    'attributes.100016','attributes.101306','attributes.101050',
+  ]);
   drafts.p.description = [
     {
       type: 'text',
@@ -708,9 +758,9 @@ it('uses literal per-choice bottle count and ordinary storage text, not a volume
     },
   ];
   expect(
-    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!
-      .choices.attributeList,
-  ).toBeUndefined();
+    (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1, categoryId:'101213' }] })).entries[0]!
+      .explanations.filter((x)=>x.confidence==='unconfirmed'),
+  ).toEqual([]);
 });
 it('recognizes alternate room-spray title positions only with matching instructions and all source SKU names', async () => {
   rows[0].name = fact('Tinh dầu xịt cao cấp Hoa hồng VNT 100ml');
@@ -729,10 +779,11 @@ it('recognizes alternate room-spray title positions only with matching instructi
     'Xịt Phòng Khử Mùi Khách Sạn VINA TƯƠI',
   ]) {
     drafts.p.title = fact(title);
-    expect(
-      (await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!
-        .choices.categoryId,
-    ).toBe('101127');
+    const entry=(await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] })).entries[0]!;
+    expect(entry.choices.categoryId).toBeUndefined();
+    expect(entry.explanations).toEqual(expect.arrayContaining([
+      expect.objectContaining({field:'categoryId',value:'101127',confidence:'unconfirmed'}),
+    ]));
   }
 });
 it('does not extend room classification from title alone, missing SKU proof, or another product use', async () => {
@@ -783,6 +834,8 @@ it('minimum mode skips optional inference and KB attributes, retaining mandatory
     },
   ];
   drafts.p.description = [{ type: 'text', text: 'Dạng dung dịch pha loãng.' }];
+  drafts.p.categoryId = fact('101213');
+  drafts.p.attributes['100752'] = fact(['4021']);
   const r = await service().recommend({
     entries: [{ productKey: 'p', sourceRevision: 1 }],
     attributeMode: 'minimum_required',
@@ -796,8 +849,11 @@ it('minimum mode skips optional inference and KB attributes, retaining mandatory
   const legacy = await service().recommend({ entries: [{ productKey: 'p', sourceRevision: 1 }] });
   expect(legacy.attributeMode).toBe('source_supported');
   expect(legacy.entries[0]!.choices.attributeList?.map((a) => a.attribute_id)).toEqual([
-    100752, 100036,
+    100752,
   ]);
+  expect(legacy.entries[0]!.explanations).toEqual(expect.arrayContaining([
+    expect.objectContaining({field:'attributes.100036',confidence:'unconfirmed'}),
+  ]));
 });
 it('uses corroborated closet, vehicle and surface-cleaner purposes with current category labels, never footwear fallback', async () => {
   meta.categories.push({
@@ -830,14 +886,13 @@ it('uses corroborated closet, vehicle and surface-cleaner purposes with current 
     drafts.p.title = fact(title!);
     drafts.p.description = [{ type: 'text', text: body }];
     rows[0].name = fact(name!);
-    expect(
-      (
-        await service().recommend({
-          entries: [{ productKey: 'p', sourceRevision: 1 }],
-          attributeMode: 'minimum_required',
-        })
-      ).entries[0]!.choices.categoryId,
-    ).toBe(category);
+    const entry=(await service().recommend({
+      entries: [{ productKey: 'p', sourceRevision: 1 }],attributeMode: 'minimum_required',
+    })).entries[0]!;
+    expect(entry.choices.categoryId).toBeUndefined();
+    expect(entry.explanations).toEqual(expect.arrayContaining([
+      expect.objectContaining({field:'categoryId',value:category,confidence:'unconfirmed'}),
+    ]));
   }
   drafts.p.title = fact('Xịt Khử Mùi Giày Da Nam');
   drafts.p.description = [{ type: 'text', text: 'Xịt vào lòng giày. Có thể cất cạnh hộc tủ.' }];

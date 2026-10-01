@@ -150,6 +150,82 @@ function ready(plan: ReturnType<typeof planPreparedWireCreate>) {
   if (plan.kind !== 'ready') throw new Error(JSON.stringify(plan));
   return plan;
 }
+it('blocks a source two-tier product flattened into one tier, even when all SKUs remain', () => {
+  const { document, context } = fixture(2);
+  context.sourceContract = {
+    tierNames: [...document.tierNames],
+    optionLabelsBySku: Object.fromEntries(
+      document.models.map((model) => [model.sku, [...model.optionLabels]]),
+    ),
+    originalPriceBySku: Object.fromEntries(
+      document.models.map((model) => [model.sku, model.originalPrice]),
+    ),
+    approvedMediaSha256: [document.cover.sha256],
+  };
+  ready(planPreparedWireCreate(document, context));
+  document.tierNames = ['Mùi và cỡ'];
+  document.models.forEach((model, index) => {
+    model.tierIndex = [index];
+    model.optionLabels = [model.optionLabels.join(' ')];
+  });
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_SOURCE_TIER_MISMATCH', field: 'tierNames' }],
+  });
+});
+it('blocks a model mapping or image outside its independently approved source', () => {
+  const { document, context } = fixture(2);
+  context.sourceContract = {
+    tierNames: [...document.tierNames],
+    optionLabelsBySku: Object.fromEntries(
+      document.models.map((model) => [model.sku, [...model.optionLabels]]),
+    ),
+    originalPriceBySku: Object.fromEntries(
+      document.models.map((model) => [model.sku, model.originalPrice]),
+    ),
+    approvedMediaSha256: [document.cover.sha256],
+  };
+  context.sourceContract.optionLabelsBySku['SKU-0'] = ['wrong', '0'];
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_SOURCE_MODEL_MISMATCH', field: 'models' }],
+  });
+  context.sourceContract.optionLabelsBySku['SKU-0'] = [...document.models[0]!.optionLabels];
+  document.models[0]!.originalPrice = '12345';
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_SOURCE_PRICE_MISMATCH', field: 'models.originalPrice' }],
+  });
+  document.models[0]!.originalPrice = context.sourceContract.originalPriceBySku['SKU-0']!;
+  document.cover.sha256 = 'b'.repeat(64);
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_SOURCE_MEDIA_OUT_OF_SCOPE', field: 'images' }],
+  });
+});
+it('rejects an image reused under a role not approved by the source', () => {
+  const { document, context } = fixture(2);
+  context.sourceContract = {
+    tierNames: [...document.tierNames],
+    optionLabelsBySku: Object.fromEntries(
+      document.models.map((model) => [model.sku, [...model.optionLabels]]),
+    ),
+    originalPriceBySku: Object.fromEntries(
+      document.models.map((model) => [model.sku, model.originalPrice]),
+    ),
+    approvedMediaSha256: [document.cover.sha256],
+    approvedMediaByRole: {
+      cover: [document.cover.sha256],
+      gallery: [],
+      description: [],
+      variation: [document.models[0]!.image!.sha256],
+    },
+  };
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_SOURCE_MEDIA_OUT_OF_SCOPE', field: 'images' }],
+  });
+});
 it.each(['CHƯA CÓ SKU', 'chua_co_sku', '  '])(
   'produces no wire steps for missing model SKU %j, including a directly supplied document',
   (sku) => {
@@ -196,6 +272,15 @@ describe('prepared source to Shopee wire codec', () => {
       }
     },
   );
+  it('omits package dimensions when the approved source has none', () => {
+    const { document, context } = fixture(1);
+    delete document.dimensionCm;
+    const plan = ready(planPreparedWireCreate(document, context));
+    expect(plan.steps[0]!.payload).not.toHaveProperty('dimension');
+    expect(plan.steps[1]!.payload.model).toEqual(expect.arrayContaining([
+      expect.not.objectContaining({ dimension: expect.anything() }),
+    ]));
+  });
   it('blocks conflicting two-tier images rather than dropping per-SKU source images', () => {
     const { document, context } = fixture(2);
     document.models[1]!.image = document.gallery[0];
@@ -263,6 +348,15 @@ describe('prepared source to Shopee wire codec', () => {
     delete context.brandName;
     expect(planPreparedWireCreate(document, context).kind).toBe('blocked');
   });
+  it('blocks a write when remote option labels drift while model indices still match', () => {
+    const { remote, context } = fixture();
+    const expected = structuredClone(remote);
+    expected.document.title = 'New title';
+    const options = context.baseline!.models.tier_variation[0]!.option_list as { option: string }[];
+    [options[0]!.option, options[1]!.option] = [options[1]!.option, options[0]!.option];
+    const plan = planPreparedWireUpdate(remote, expected, ['title'], [], context);
+    expect(plan).toMatchObject({ kind: 'blocked', issues: [{ code: 'PREPARED_WIRE_MODEL_OPTION_LABEL_DRIFT' }] });
+  });
   it('targets only selected model price and refuses hidden changes to unselected content', () => {
     const { remote, context } = fixture();
     const expected = structuredClone(remote);
@@ -291,7 +385,7 @@ describe('prepared source to Shopee wire codec', () => {
       }
       if (field === 'logistics') {
         expected.document.weightGrams = 200;
-        expected.document.dimensionCm.length = 20;
+        expected.document.dimensionCm!.length = 20;
       }
       if (field === 'cover' || field === 'gallery') {
         const media = structuredClone(
@@ -407,7 +501,7 @@ describe('prepared source to Shopee wire codec', () => {
         d.attributes = { '10': ['0'] };
       },
       (d: PreparedDocument) => {
-        d.dimensionCm.width = 1.5;
+        d.dimensionCm!.width = 1.5;
       },
       (_d: PreparedDocument, c: PreparedWireContext) => {
         c.limits.gtin_limit.gtin_validation_rule = 'Mandatory';
@@ -586,5 +680,47 @@ describe('prepared source to Shopee wire codec', () => {
     expect(normalizePreparedWireSnapshot(afterRaw)).not.toEqual(before);
     afterRaw.item.create_time = 2;
     expect(normalizePreparedWireSnapshot(afterRaw)).not.toEqual(before);
+  });
+});
+
+it('blocks an incomplete gallery even when every sent image belongs to the approved source', () => {
+  const { document, context } = fixture();
+  const expectedSecond = 'd'.repeat(64);
+  context.sourceContract = {
+    tierNames: [...document.tierNames],
+    optionLabelsBySku: Object.fromEntries(document.models.map((model) => [model.sku, [...model.optionLabels]])),
+    originalPriceBySku: Object.fromEntries(document.models.map((model) => [model.sku, model.originalPrice])),
+    approvedMediaSha256: [document.cover.sha256, document.gallery[0]!.sha256, expectedSecond, document.models[0]!.image!.sha256],
+    approvedMediaByRole: {
+      cover: [document.cover.sha256],
+      gallery: [document.gallery[0]!.sha256, expectedSecond],
+      description: [],
+      variation: [document.models[0]!.image!.sha256],
+    },
+    approvedMediaSequenceByRole: {
+      cover: [document.cover.sha256],
+      gallery: [document.gallery[0]!.sha256, expectedSecond],
+      description: [],
+    },
+  };
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_SOURCE_MEDIA_SEQUENCE_MISMATCH', field: 'gallery' }],
+  });
+});
+
+it('blocks whitespace-only content blocks between images', () => {
+  const { document, context } = fixture();
+  const image = document.gallery[0]!;
+  document.description = [
+    { type: 'text', text: 'Product details' },
+    { type: 'image', image },
+    { type: 'text', text: '\n\n' },
+    { type: 'image', image },
+    { type: 'text', text: 'How to use' },
+  ];
+  expect(planPreparedWireCreate(document, context)).toEqual({
+    kind: 'blocked',
+    issues: [{ code: 'PREPARED_WIRE_DESCRIPTION_EMPTY_GAP', field: 'description.2' }],
   });
 });

@@ -9,7 +9,7 @@ import {
 
 export const productionCallbackUrl =
   'http://127.0.0.1:4310/v1/connections/production-pilot/callback';
-export const productionAuthorizationCookie = 'shopee_production_authorization';
+export const productionAuthorizationCookie = 'shopee_production_authorization_v2';
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const nonce = z.string().regex(/^[a-f0-9]{64}$/);
@@ -36,12 +36,14 @@ const callbackSchema = z
     error_description: z.string().max(1024).optional(),
   })
   .strict();
-type Options = { encryptionKey?: string; transport?: typeof fetch; allowOtherShops?: boolean };
+type Options = { encryptionKey?: string; transport?: typeof fetch; allowOtherShops?: boolean; browserSecret?: string };
 const boxFor = (options: Options) =>
   new SecretBox(options.encryptionKey ?? process.env.APP_ENCRYPTION_KEY ?? '');
 function publicStatus(row: any) {
   return {
     attemptId: row.id,
+    partnerId: row.partner_id,
+    shopId: row.shop_id,
     status: row.status,
     connectionRevision: row.connection_revision ?? undefined,
     reason:row.reason ?? undefined,
@@ -65,8 +67,10 @@ export async function prepareProductionAuthorization(
   await expireStaged(repo);
   const attemptId = randomUUID(),
     state = randomBytes(32).toString('hex'),
-    browserSecret = randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    // A browser can have simultaneous shop authorizations; keep its cookie stable.
+    browserSecret = options.browserSecret && nonce.safeParse(options.browserSecret).success
+      ? options.browserSecret : randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
   await transaction(repo.pool, async (c) => {
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
       'connection-enrollment:' + scope,
@@ -180,7 +184,6 @@ export async function finishProductionAuthorization(
   if(!staged)throw Error('PRODUCTION_AUTHORIZATION_INVALID_CALLBACK');
   const input={partnerId:staged.partner_id as string,shopId:staged.shop_id as string};
   const scope=`production:${input.partnerId}:${input.shopId}`;
-  if(query.shop_id && query.shop_id!==input.shopId)throw Error('PRODUCTION_AUTHORIZATION_WRONG_SHOP');
   const row = await transaction(repo.pool, async (c) => {
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
       'connection-enrollment:' + scope,
@@ -201,13 +204,15 @@ export async function finishProductionAuthorization(
         [input.partnerId, input.shopId],
       )
     ).rows[0];
-    if (query.error || (current?.revision ?? 0) !== row.expected_revision) {
+    if (query.error || (current?.revision ?? 0) !== row.expected_revision ||
+      (query.shop_id && query.shop_id !== input.shopId)) {
       await c.query(
         `UPDATE production_authorization_attempts SET status='rejected',key_ciphertext=NULL,
         reason=$2,updated_at=now() WHERE id=$1`,
-        [row.id, query.error ? 'SELLER_DECLINED' : 'REVISION_CHANGED'],
+        [row.id, query.error ? 'SELLER_DECLINED' :
+          query.shop_id && query.shop_id !== input.shopId ? 'WRONG_SHOP' : 'REVISION_CHANGED'],
       );
-      return { ...row, status: 'rejected', claimed: false };
+      return { ...row, status: 'rejected', reason: query.error ? 'SELLER_DECLINED' : query.shop_id && query.shop_id !== input.shopId ? 'WRONG_SHOP' : 'REVISION_CHANGED', claimed: false };
     }
     const claimed = await c.query(
       "UPDATE production_authorization_attempts SET status='exchanging',updated_at=now() WHERE id=$1 AND expires_at>clock_timestamp() RETURNING id",
@@ -246,7 +251,9 @@ export async function finishProductionAuthorization(
     if (token.kind !== 'success')
       return end(
         token.kind === 'rejected' ? 'rejected' : 'unknown',
-        'TOKEN_EXCHANGE_' + token.kind.toUpperCase(),
+        token.kind === 'rejected'
+          ? 'TOKEN_EXCHANGE_REJECTED'
+          : 'TOKEN_EXCHANGE_' + token.reason.toUpperCase(),
       );
     if (
       (query.main_account_id && !token.shopIdList) ||

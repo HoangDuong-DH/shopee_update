@@ -12,6 +12,7 @@ import {
 } from './production-pilot-source.js';
 import type { ProductionPilotPreparedInput } from './production-pilot-runner.js';
 import { verifyProductionPriceCells } from './production-batch-price-proof.js';
+import { sourceContractFromApprovedDraft } from './production-source-contract.js';
 
 export const productionBatchPass1Root = resolve('.local/production-batch-pass1-20260915');
 export const productionPublicationModeSchema = z.enum([
@@ -386,7 +387,7 @@ export async function collectProductionBatchInput(
         !evidence.extendedDescription.verifiedOperationId))
   )
     fail('DESCRIPTION_CAPABILITY_UNVERIFIED');
-  return collectProductionPilotInput(repo, input.sourceKey, {
+  const collected = await collectProductionPilotInput(repo, input.sourceKey, {
     transport: options.transport,
     encryptionKey: options.encryptionKey,
     purpose: options.purpose,
@@ -406,4 +407,19 @@ export async function collectProductionBatchInput(
       shopName: options.shopName ?? 'Vuatinhdau - Đại Lý Chính Hãng',
     },
   });
+  if (loaded.value.version === 2) {
+    const sourceFile = loaded.value.sourceFiles.find((file) =>
+      file.id === selected.sourceFileId && file.role === 'listing-snapshot');
+    if (!sourceFile) fail('SOURCE_CONTRACT_REQUIRED');
+    const bytes = await readFile(sourceFile.path);
+    if (hash(bytes) !== sourceFile.sha256) fail('SOURCE_FILE_CHANGED');
+    let snapshot: any;
+    try { snapshot = JSON.parse(bytes.toString('utf8')); }
+    catch { fail('SOURCE_CONTRACT_INVALID'); }
+    if (snapshot?.draft?.productKey !== selected.sourceIdentity ||
+      snapshot.draft.revision !== selected.sourceRevision)
+      fail('SOURCE_CONTRACT_INVALID');
+    collected.input.context.sourceContract = sourceContractFromApprovedDraft(snapshot.draft);
+  }
+  return collected;
 }

@@ -13,6 +13,7 @@ import { registerProductionBatch } from './production-batch-service.js';
 import { productionPilotScope } from './production-pilot-source.js';
 import { validateDraftKnowledgeAcceptance } from './seller-knowledge-draft-service.js';
 import { projectProductPriceIssues } from './product-service.js';
+import { assertListingPriceMappingReceipt } from './listing-price-mapping.js';
 
 const sha = (v: Uint8Array | string) => createHash('sha256').update(v).digest('hex');
 const fingerprint = (v: unknown) => sha(canonicalJson(v));
@@ -25,6 +26,7 @@ function fail(code: string): never { throw Error('PREPARATION_' + code); }
 type Options = {
   root?: string;
   build?: typeof buildProductionDraftSource;
+  assertPriceMapping?: typeof assertListingPriceMappingReceipt;
   register?: typeof registerProductionBatch;
   readSource?: (key: string) => Promise<unknown>;
   verifyStock?: (referenceId:string) => Promise<{expectedLocationId:string;writeLocationId:string|null}|null>;
@@ -129,6 +131,13 @@ export class ProductionPreparationService {
           const draft = await repo.getProduct(entry.productKey);
           entries.push({...entry,kind:'blocked',title:draft?.title.value ?? entry.productKey,issues:result.issues}); continue;
         }
+        try { await (this.options.assertPriceMapping ?? assertListingPriceMappingReceipt)(repo,result.sourceSnapshot.draft,result.priceProof); }
+        catch {
+          entries.push({...entry,kind:'blocked',title:result.document.title,issues:[{
+            code:'PRICE_MAPPING_CONFIRMATION_REQUIRED',field:'priceSelection',severity:'block',
+            message:'Chưa có bản đối chiếu SKU và giá được anh xác nhận cho đúng phiên bản listing này. Mở Kiểm tra listing để xem từng dòng nguồn.',sources:[],
+          }]}); continue;
+        }
         let knowledgeAcceptance;
         if (entry.knowledgeAcceptanceId !== undefined) {
           try {
@@ -188,6 +197,8 @@ export class ProductionPreparationService {
       // Never retain this cache across registrations: a later attempt must read afresh.
       const priceImports = new Map<string, Awaited<ReturnType<Repository['getImport']>>>();
       for(const entry of ready) {
+        try { await (this.options.assertPriceMapping ?? assertListingPriceMappingReceipt)(repo,entry.sourceSnapshot.draft,entry.priceProof); }
+        catch { fail('PRICE_MAPPING_CHANGED'); }
         const current=await (this.options.readSource ?? ((key:string)=>repo.getProduct(key)))(entry.productKey);
         if(fingerprint(current)!==fingerprint(entry.sourceSnapshot.draft)) fail('SOURCE_CHANGED');
         if(entry.knowledgeAcceptance) await validateDraftKnowledgeAcceptance(repo,{receiptId:entry.knowledgeAcceptance.id,productKey:entry.productKey,expectedRevision:entry.sourceRevision,categoryId:entry.document.categoryId,brandId:entry.document.brandId,scope:productionPilotScope,attributeList:entry.proposedAttributeList});

@@ -25,6 +25,7 @@ import {
   preparedWireMediaRequirements,
 } from '../../../packages/shopee/src/prepared-wire.js';
 import { productionPilotWriteFingerprint } from '../../../packages/shopee/src/production-pilot-transport.js';
+import { assertProductionBatchMappingProof } from './production-batch-provenance.js';
 
 const fingerprint = (value: unknown) =>
   createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -76,6 +77,8 @@ export type DeferredRecoveryProof = {
 type Dependencies = {
   repo: Repository;
   blobs: BlobStore;
+  /** Test seam only; production uses the real immutable source proof gate. */
+  assertSourceProof?: typeof assertProductionBatchMappingProof;
   load?: typeof loadProductionBatchSource;
   collect?: typeof collectProductionBatchInput;
   createRunner?: (repo: Repository, options: RunnerOptions) => ProductionPilotRunner;
@@ -257,6 +260,10 @@ export async function runPass1ProductionBatch(
     (source) => !args.sourceKey || source.sourceKey === args.sourceKey,
   );
   if (!selected.length || (args.sourceKey && selected.length !== 1)) fail('SOURCE_NOT_SELECTED');
+  if (args.mode === 'execute' || args.mode === 'publish')
+    await (dependencies.assertSourceProof ?? assertProductionBatchMappingProof)(
+      loaded, selected.map((source) => source.sourceKey), dependencies.repo, dependencies.blobs,
+    );
   const authorization = {
     batchId: loaded.value.batchId,
     manifestSha256: loaded.sha256,

@@ -67,6 +67,13 @@ function numeric(value: any): number | undefined {
 function numericLike(before: any, value: number) {
   return typeof before === 'string' ? String(value) : value;
 }
+function blankDimension(value: unknown): boolean {
+  if (value == null) return true;
+  if (!object(value)) return false;
+  return ['package_length', 'package_width', 'package_height'].every((key) =>
+    value[key] == null || value[key] === '' || numeric(value[key]) === 0,
+  );
+}
 function noPromotion(item: Row, target: Row, path: string) {
   requireQc(
     item.has_promotion === false &&
@@ -175,6 +182,21 @@ function checkPreparedWireCreateFields(
     const check = (expected: any, actual: any, path: string) => {
       diff(expected, actual, path, paths, deferImages ? imageComparisonPath : undefined);
     };
+    // Remote parity is not source completeness. Check the independently approved
+    // image inventory even if every image actually sent was received by Shopee.
+    const sourceMedia = context.sourceContract?.approvedMediaSequenceByRole;
+    if (sourceMedia) {
+      if (sourceMedia.cover) diff(sourceMedia.cover, [document.cover.sha256], 'source.media.cover', paths);
+      if (sourceMedia.gallery)
+        diff(sourceMedia.gallery, document.gallery.map((media) => media.sha256), 'source.media.gallery', paths);
+      if (sourceMedia.description)
+        diff(
+          sourceMedia.description,
+          document.description.flatMap((block) => block.type === 'image' ? [block.image.sha256] : []),
+          'source.media.description',
+          paths,
+        );
+    }
     requireQc(
       document.models.length &&
         document.tierNames.length <= 2 &&
@@ -219,11 +241,14 @@ function checkPreparedWireCreateFields(
         numeric(item.weight),
         'item.weight',
       );
-    if (!modelDimensions || own(item, 'dimension')) {
+    if (document.dimensionCm === undefined) {
+      requireQc(!modelDimensions, 'source.dimension.partial_without_item');
+      check(true, blankDimension(item.dimension), 'item.dimension.blank');
+    } else if (!modelDimensions || own(item, 'dimension')) {
       const choices = modelDimensions
-        ? document.models.map((model) => model.dimensionCm ?? document.dimensionCm)
+        ? document.models.map((model) => model.dimensionCm ?? document.dimensionCm!)
         : [document.dimensionCm];
-      const volume = (d: typeof document.dimensionCm) => d.length * d.width * d.height;
+      const volume = (d: NonNullable<PreparedDocument['dimensionCm']>) => d.length * d.width * d.height;
       const maximum = Math.max(...choices.map(volume));
       const tuples = choices.filter((d) => volume(d) === maximum);
       requireQc(
@@ -426,7 +451,9 @@ function checkPreparedWireCreateFields(
           numeric(actual.weight),
           path + '.weight',
         );
-      if (modelDimensions || own(actual, 'dimension'))
+      if (document.dimensionCm === undefined)
+        check(true, blankDimension(actual.dimension), path + '.dimension.blank');
+      else if (modelDimensions || own(actual, 'dimension'))
         for (const d of ['length', 'width', 'height'] as const)
           check(
             (model.dimensionCm ?? document.dimensionCm)[d],

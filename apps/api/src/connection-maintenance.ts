@@ -8,7 +8,15 @@ import { refreshProductionPilotConnection } from './production-refresh-service.j
 
 const authErrors = new Set(['error_auth','invalid_acceess_token','invalid_access_token','shop_no_linked','partner_shop_no_link','shop_access_expired','refresh_token_expired','error_shop_refresh_token','shop_banned']);
 const configErrors = new Set(['error_sign','error_partner_key_expired','invalid_partner_id','source_ip_undeclared','error_api_permission']);
-type Options = {receiptRoot?:string; encryptionKey?:string; transport?:typeof fetch};
+type Options = {receiptRoot?:string; encryptionKey?:string; transport?:typeof fetch; connectivity?:()=>Promise<boolean>};
+
+async function shopeeReachable() {
+  try {
+    const response=await fetch('https://partner.shopeemobile.com/api/v2/auth/token/get',{method:'GET',signal:AbortSignal.timeout(5000)});
+    await response.body?.cancel();
+    return true; // Any HTTP response proves transport is reachable; this is not a token check.
+  } catch {return false;}
+}
 const exists = async (path:string) => access(path).then(()=>true,()=>false);
 
 /** Refreshes credentials only: this scheduler cannot enqueue, create or publish products. */
@@ -29,6 +37,13 @@ export class ConnectionMaintenance {
     const receiptRoot=this.options.receiptRoot ?? resolve(row.partner_id==='2010476' && row.shop_id==='1423724897'
       ? '.local/production-pilot-1423724897/credential-refresh' : '.local/connection-refresh');
     const hasIntent=await exists(join(receiptRoot,`${id}-r${revision}`,'intent.json'));
+    if(!hasIntent) {
+      const reachable=await (this.options.connectivity?.() ?? (this.options.transport ? Promise.resolve(true) : shopeeReachable())).catch(()=>false);
+      if(!reachable) {
+        await this.note(id,revision,'waiting','NETWORK_UNAVAILABLE',60);
+        return {kind:'waiting',code:'NETWORK_UNAVAILABLE'};
+      }
+    }
     try {
       const result=await refreshProductionPilotConnection(this.repo,{
         ...this.options,connectionId:id,expectedRevision:revision,receiptRoot,mode:hasIntent?'recover':'refresh',
@@ -91,7 +106,7 @@ export class ConnectionMaintenance {
     const rows=(await this.repo.pool.query(`SELECT id,revision FROM connections WHERE environment='production'
       AND auto_refresh AND state='connected' AND refresh_status NOT IN ('reauth_required','unknown')
       AND (next_refresh_at IS NULL OR next_refresh_at<=now())
-      AND (expires_at IS NULL OR expires_at<=now()+interval '10 minutes' OR refresh_status='waiting')
+      AND (expires_at IS NULL OR expires_at<=now()+interval '1 hour' OR refresh_status='waiting')
       ORDER BY expires_at NULLS FIRST LIMIT 20`)).rows;
     for(const row of rows)await this.refresh(row.id,row.revision);
   }

@@ -87,7 +87,7 @@ it.each([false, true])(
     const list = await http.inject({ method: 'GET', url: '/v1/products' });
     const context = await http.inject({
       method: 'GET',
-      url: '/v1/production-preparations/context',
+      url: '/v1/production-preparations/context?partnerId=2010476&shopId=1423724897',
     });
     expect(detail.statusCode).toBe(200);
     expect(list.statusCode).toBe(200);

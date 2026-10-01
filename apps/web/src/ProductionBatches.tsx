@@ -61,6 +61,7 @@ const batch = z.object({
   enabled: z.boolean().optional(),
   executionEnabled: z.boolean().optional(),
   holdReason: z.string().optional(),
+  sourceProofRequired: z.boolean().optional(),
   canExecute: z.boolean(),
   canReconcile: z.boolean().optional(),
   lastResult: z
@@ -108,7 +109,12 @@ function explanation(code?: string, deferImages = false) {
     return 'Dữ liệu đọc lại chưa khớp nguồn. Kiểm tra ảnh, giá, tồn, phân loại và cân nặng; ứng dụng giữ nguyên nguồn để đối chiếu.';
   if (code?.includes('AUTH') || code?.includes('CONNECTION'))
     return 'Kết nối shop cần được kiểm tra lại tại Kết nối shop.';
-  if (code?.includes('SOURCE') || code?.includes('MANIFEST') || code?.includes('REGISTRATION'))
+  if (code?.includes('SOURCE_MEDIA_SEQUENCE_MISMATCH'))
+    return 'Số lượng hoặc thứ tự ảnh trong bản chuẩn bị không khớp bộ nguồn đã chọn. Mở hồ sơ ảnh, kiểm đủ ảnh bìa, ảnh sản phẩm và ảnh mô tả trước khi gửi lại.';
+  if (code?.includes('DESCRIPTION_EMPTY_GAP'))
+    return 'Nội dung mô tả có một đoạn trắng nằm giữa hai ảnh. Mở bản xem trước để bỏ đoạn trắng này; chưa có lệnh nào được gửi.';
+  if (code?.includes('SOURCE_PRICE_MISMATCH') || code?.includes('PRICE_CELL_MISMATCH'))
+    return 'Giá trong bản chuẩn bị khác đúng ô của tệp giá đã chọn. Mở dòng SKU và ô giá nguồn để đối chiếu, không tự làm tròn hoặc suy giá.';  if (code?.includes('SOURCE') || code?.includes('MANIFEST') || code?.includes('REGISTRATION'))
     return 'Bộ nguồn chưa còn khớp bản đã tiếp nhận. Cần đối chiếu lại tệp gốc trước khi đăng.';
   return 'Đợt này cần kiểm tra kết quả đã lưu trước khi tiếp tục.';
 }
@@ -493,7 +499,8 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
     mode: 'inspect' | 'execute' | 'reconcile' | 'publish',
     sourceKey?: string,
   ) {
-    if (posting.current || pending || !item.statusFingerprint) return;
+    if (posting.current || pending || !item.statusFingerprint ||
+      (item.sourceProofRequired && (mode === 'execute' || mode === 'publish'))) return;
     const key = item.statusFingerprint;
     if (mode === 'publish') {
       if (
@@ -768,6 +775,8 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                       ? 'Chưa đọc được đợt đăng'
                       : item.busy
                         ? 'Đang xử lý đợt này'
+                        : item.sourceProofRequired
+                          ? 'Thiếu xác nhận nguồn cho lô cũ'
                         : !writeAllowed
                           ? 'Đợt đang được giữ lại'
                           : uncertain
@@ -839,6 +848,8 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                             <p>
                               {unavailable
                                 ? 'Bấm Đọc lại đợt đăng để lấy trạng thái. Chưa xác định được kết quả của đợt này.'
+                                : item.sourceProofRequired
+                                  ? 'Lô này chưa có bằng chứng bất biến về cấu trúc phân loại và vai trò ảnh. Không gửi mới hoặc mở bán từ lô này; đối chiếu nguồn và chuẩn bị lô mới. Các link đã tạo vẫn giữ nguyên.'
                                 : hidden
                                   ? 'Các sản phẩm mới được giữ ẩn để kiểm tra trước khi mở bán.'
                                   : 'Chế độ này tự mở bán sau khi đối chiếu đạt.'}
@@ -891,6 +902,12 @@ export function ProductionBatches({ targetScope, onImageQc, onSource, active = t
                         {item.state === 'unavailable' && (
                           <p className="batch-feedback" role="alert">
                             {explanation(item.code)}
+                          </p>
+                        )}
+                        {item.sourceProofRequired && (
+                          <p className="batch-feedback" role="alert">
+                            <strong>Đã khóa thao tác ghi cho lô cũ thiếu xác nhận nguồn.</strong>{' '}
+                            Bạn vẫn có thể xem tiến độ và dùng “Chỉ đọc đối chiếu”. Không tạo lại link đã có.
                           </p>
                         )}
                         {!unavailable && !writeAllowed && (

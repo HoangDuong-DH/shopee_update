@@ -62,7 +62,7 @@ function fixture() {
     };
   });
   const repo = { pool: { query, connect } };
-  const options: any = { root, load, run, enabled: true };
+  const options: any = { root, load, run, enabled: true, assertSourceProof: vi.fn(async () => undefined) };
   return {
     loaded,
     load,

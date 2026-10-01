@@ -34,7 +34,9 @@ async function setup(count = 1) {
   }));
   const register = vi.fn(async (input: any) => { const loaded = await loadProductionBatchSource(input.manifestPath,input.expectedSha256); return {batchId:loaded.value.batchId,manifestSha256:loaded.sha256}; });
   const readSource = vi.fn(async (key:string) => ({productKey:key,revision:1}));
-  const service = new ProductionPreparationService(repo,blobs,{root,build,register,readSource,verifyStock:async()=>({expectedLocationId:'VNZ',writeLocationId:null})} as any);
+  const service = new ProductionPreparationService(repo,blobs,{root,build,register,readSource,
+    assertPriceMapping: async () => undefined,
+    verifyStock:async()=>({expectedLocationId:'VNZ',writeLocationId:null})} as any);
   const input = {id:randomUUID(),entries:Array.from({length:count},(_,i)=>({productKey:randomUUID(),sourceRevision:1,priceSelection:{importId:priceId,sheet:'Bảng giá',priceProfile:'Giá thường'},stocks:{SKU:0},choices:{}}))};
   return {service,input,build,register,readSource,blobs};
 }
@@ -177,7 +179,9 @@ it('exposes an interrupted parent as resumable while leaving its durable record 
 it('prepares and registers with a single database connection without acquiring a nested pool slot',async()=>{
   const f=await setup(),single=new Pool({connectionString:process.env.DATABASE_URL,options:`-c search_path=${schema},public`,max:1,connectionTimeoutMillis:500});
   try {
-    const service=new ProductionPreparationService(new Repository(single),f.blobs,{root,build:f.build,register:f.register,readSource:f.readSource,verifyStock:async()=>({expectedLocationId:'VNZ',writeLocationId:null})} as any);
+    const service=new ProductionPreparationService(new Repository(single),f.blobs,{root,build:f.build,register:f.register,readSource:f.readSource,
+      assertPriceMapping: async () => undefined,
+      verifyStock:async()=>({expectedLocationId:'VNZ',writeLocationId:null})} as any);
     const preview=await service.preview(f.input);
     expect((await service.register(f.input.id,{expectedFingerprint:preview.fingerprint})).batches).toHaveLength(1);
   } finally {await single.end();}

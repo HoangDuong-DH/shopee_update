@@ -24,6 +24,7 @@ import { productionPilotWriteFingerprint } from '../../../packages/shopee/src/pr
 import { assertDeferredImageVerification } from './production-pilot-image-deferral.js';
 import { ProductionExecutionPolicyService } from './production-execution-policy.js';
 import { currentProductionSource, readProductionBatchExclusions, writeProductionBatchExclusion } from './production-batch-lifecycle.js';
+import { assertProductionBatchMappingProof } from './production-batch-provenance.js';
 
 const owner = 'production:2010476:1423724897';
 const uuid = z.string().uuid(),
@@ -53,6 +54,8 @@ type Options = {
   load?: typeof loadProductionBatchSource;
   run?: typeof runPass1ProductionBatch;
   enabled?: boolean;
+  /** Test seam only; production uses the real immutable source proof gate. */
+  assertSourceProof?: typeof assertProductionBatchMappingProof;
 };
 function deferredRecoveryProof(sourceKey: string, receipt: any): DeferredRecoveryProof {
   return {
@@ -537,7 +540,8 @@ export class ProductionBatchService {
     const excludedCount=listings.filter(s=>s.excluded).length;
     const remaining=listings.filter(s=>!s.excluded);
     const eligible=(s:typeof listings[number])=>!s.excluded && !complete(s.state) && (!['not_sent','authorized_not_started'].includes(s.state)||s.currentSource==='current');
-    const canExecute=this.enabled && saved.executionEnabled && !busy && !interrupted && !blockingWork?.blocksExecution &&
+    const sourceProofRequired=manifest.version===1;
+    const canExecute=!sourceProofRequired && this.enabled && saved.executionEnabled && !busy && !interrupted && !blockingWork?.blocksExecution &&
       !(hidden && remaining.some(s=>s.state==='publication_readback_pending')) && remaining.some(eligible) &&
       remaining.every(s=>['not_sent','authorized_not_started','published','created_readback_pending','created_unlisted','created_hidden_image_qc_deferred','publication_readback_pending'].includes(s.state));
     const statusFingerprint = fingerprint({
@@ -584,7 +588,8 @@ export class ProductionBatchService {
                   ? 'needs_review'
                   : 'ready',
         statusFingerprint,
-        listings: listings.map(s=>({...s,canExecute:canExecute && eligible(s),canExclude:!s.excluded && !s.operationId && !busy && !interrupted,imageQcStatus:s.state==='created_hidden_image_qc_deferred'?'deferred':(['created_unlisted','published'].includes(s.state)?'verified':'required'),canPublish:!s.excluded && hidden && this.enabled && saved.executionEnabled && !busy && !interrupted && s.state==='created_unlisted'})),
+        listings: listings.map(s=>({...s,canExecute:canExecute && eligible(s),canExclude:!s.excluded && !s.operationId && !busy && !interrupted,imageQcStatus:s.state==='created_hidden_image_qc_deferred'?'deferred':(['created_unlisted','published'].includes(s.state)?'verified':'required'),canPublish:!sourceProofRequired && !s.excluded && hidden && this.enabled && saved.executionEnabled && !busy && !interrupted && s.state==='created_unlisted'})),
+        sourceProofRequired,
         createdVerifiedCount,
         hiddenVerifiedCount,
         completedCount,
@@ -667,6 +672,13 @@ export class ProductionBatchService {
       if (input.mode === 'execute' && !current.canExecute) fail('RECONCILIATION_REQUIRED');
       if (input.mode === 'publish' && (!input.sourceKey || !current.listings.some(s=>s.sourceKey===input.sourceKey && s.canPublish)))
         fail('PUBLICATION_NOT_READY');
+      if (input.mode === 'execute' || input.mode === 'publish')
+        await (this.options.assertSourceProof ?? assertProductionBatchMappingProof)(
+          source,
+          (input.sourceKey ? [input.sourceKey] : current.listings.filter(s => !s.excluded).map(s => s.sourceKey)),
+          this.repo,
+          this.blobs,
+        );
       const selected = input.mode === 'publish' ? source.value.listings.find(s=>s.sourceKey===input.sourceKey)! : undefined;
       const verified = input.mode === 'publish' ? assessed.operationProofs.find(p=>p.sourceKey===input.sourceKey) : undefined;
       if(input.mode === 'publish' && !verified) fail('PUBLICATION_NOT_READY');

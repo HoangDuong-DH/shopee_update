@@ -426,7 +426,7 @@ export async function buildPreparedSources(
         logistics: {
           channels: fact(entry.document.logistics),
           weightGrams: fact(entry.document.weightGrams),
-          dimensionCm: fact(entry.document.dimensionCm),
+          dimensionCm: fact(entry.document.dimensionCm ?? null),
         },
         publication: fact('unlisted' as const),
         issues: [],

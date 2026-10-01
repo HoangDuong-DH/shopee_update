@@ -259,7 +259,7 @@ it('validates one source envelope without accepting unsafe numbers or mutating i
       value.document.models[0]!.originalPrice = '9007199254740992';
     },
     (value: PreparedEntry) => {
-      value.document.dimensionCm.width = 1.5;
+      value.document.dimensionCm!.width = 1.5;
     },
     (value: PreparedEntry) => {
       value.document.gallery[0]!.width = Number.MAX_SAFE_INTEGER + 1;

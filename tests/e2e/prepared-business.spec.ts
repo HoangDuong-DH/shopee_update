@@ -570,9 +570,9 @@ for (const [fieldIndex, selectedFields] of updateCases.entries()) {
     } else if (field === 'logistics') {
       coordination.getCell(listing.coordinationRow, 9).value = before.document.weightGrams + 33;
       coordination.getCell(listing.coordinationRow, 10).value =
-        before.document.dimensionCm.length + 2;
+        before.document.dimensionCm!.length + 2;
       desired.document.weightGrams += 33;
-      desired.document.dimensionCm.length += 2;
+      desired.document.dimensionCm!.length += 2;
       for (const variant of listing.variants)
         book.getWorksheet(listing.priceSheet)!.getCell(variant.priceRow, 7).value =
           desired.document.weightGrams;

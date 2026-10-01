@@ -183,9 +183,9 @@ function checkRaw(entry: Case, itemId: string, raw: FieldSnapshot): PreparedRemo
   });
   expect(base.weight).toBe(String(doc.weightGrams / 1000));
   expect(base.dimension).toEqual({
-    package_length: doc.dimensionCm.length,
-    package_width: doc.dimensionCm.width,
-    package_height: doc.dimensionCm.height,
+    package_length: doc.dimensionCm!.length,
+    package_width: doc.dimensionCm!.width,
+    package_height: doc.dimensionCm!.height,
   });
   expect(
     base.logistic_info.map((channel: WireObject) => ({
@@ -594,7 +594,7 @@ it.each(groups)(
     }
     if (field === 'logistics') {
       desired.document.weightGrams += 51;
-      desired.document.dimensionCm.height += 1;
+      desired.document.dimensionCm!.height += 1;
     }
     entry.document = desired.document;
     await uploadRequirements(entry);
@@ -644,7 +644,7 @@ it.each(groups)(
     if (field === 'attributes') expected.item.attribute_list = entry.context.attributeList;
     if (field === 'logistics') {
       expected.item.weight = String(desired.document.weightGrams / 1000);
-      expected.item.dimension.package_height = desired.document.dimensionCm.height;
+      expected.item.dimension.package_height = desired.document.dimensionCm!.height;
     }
     if (!['variationImages', 'price', 'stock'].includes(field))
       expected.item.update_time = Math.floor(clock / 1000);

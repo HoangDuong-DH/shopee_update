@@ -160,6 +160,7 @@ function fixture() {
   const deps: any = {
     repo: { pool: { query } },
     blobs: {},
+    assertSourceProof: vi.fn(async () => undefined),
     load: vi.fn(async () => loaded),
     collect: vi.fn(async () => ({
       sourceReceiptSha256: loaded.sha256,
@@ -206,6 +207,14 @@ it('inspect collects only GET preflight and pure local plan, with no reservation
   expect(f.runner.run).not.toHaveBeenCalled();
   expect(f.runner.publish).not.toHaveBeenCalled();
   expect(result.listings[0]?.state).toBe('inspected');
+});
+it('blocks a legacy manifest without mapping proof before any future write', async () => {
+  const f = fixture();
+  delete f.deps.assertSourceProof;
+  await expect(runPass1ProductionBatch({ ...f.args, mode: 'execute' }, f.deps))
+    .rejects.toThrow('PRODUCTION_SOURCE_MAPPING_PROOF_REQUIRED');
+  expect(f.runner.prepare).not.toHaveBeenCalled();
+  expect(f.runner.run).not.toHaveBeenCalled();
 });
 it('loads the existing operation before checking a hidden conversion binding and never takes the legacy automatic publish branch',async()=>{
   const f=fixture();f.loaded.value.version=2;

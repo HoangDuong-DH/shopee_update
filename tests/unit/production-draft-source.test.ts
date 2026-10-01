@@ -4,15 +4,17 @@ import sharp from 'sharp';
 import { expect, it } from 'vitest';
 import {
   compileDescription,
+  canonicalJson,
   readKini,
   type AssetRef,
   type Fact,
   type ListingDraft,
   type SourceRef,
 } from '@shopee/domain';
+import { folderDraftSelection } from '../../packages/domain/src/folder-source-identity.js';
 import type { ImportRecord } from '@shopee/persistence';
 import { buildProductionDraftSource } from '../../apps/api/src/production-draft-source.js';
-import { assembleProduct, projectProductPriceIssues } from '../../apps/api/src/product-service.js';
+import { assembleProduct, productInput, projectProductPriceIssues, reviewProductMapping, confirmProductMapping } from '../../apps/api/src/product-service.js';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const decision: SourceRef = {
@@ -175,6 +177,15 @@ async function fixture(
     logistics: {},
     issues: options.priceProfiles ? structuredClone(rows.flatMap((row) => row.issues)) : [],
   };
+  draft.sourceSelection!.mappingConfirmation = {
+    kind: 'user_decision',
+    fileSha256: digest(Buffer.from(canonicalJson({
+      productKey: draft.productKey,
+      mapping: folderDraftSelection(draft),
+    }))),
+    locator: `listing-mapping-confirmation:${draft.productKey}`,
+    observedAt: decision.observedAt,
+  };
   const input = {
     productKey: draft.productKey,
     sourceRevision: 4,
@@ -203,7 +214,7 @@ async function fixture(
   };
   const repo = {
     getProduct: async (key: string, revision?: number) =>
-      key === draft.productKey && revision === draft.revision ? structuredClone(draft) : null,
+      key === draft.productKey && (revision === undefined || revision === draft.revision) ? structuredClone(draft) : null,
     getImport: async (id: string) => records.get(id) ?? null,
   };
   const blobs = {
@@ -233,6 +244,23 @@ it('resolves only the selected profile duplicate warning in new drafts and histo
   if (preview.kind === 'ready') expect(preview.sourceSnapshot.draft).toEqual(historical);
   expect(f.parsed).toEqual(raw);
   expect(f.draft).toEqual(historical);
+});
+it('rejects a mapping confirmation forged through the generic draft-save input', async () => {
+  const f = await fixture();
+  const raw = {
+    ...f.draft.sourceSelection!,
+    productKey: f.draft.productKey,
+    expectedRevision: 0,
+    mappingConfirmation: {
+      kind: 'user_decision',
+      fileSha256: digest(Buffer.from('forged')),
+      locator: `listing-mapping-confirmation:${f.draft.productKey}`,
+      observedAt: new Date().toISOString(),
+    },
+  };
+  expect(productInput.safeParse(raw).success).toBe(false);
+  const assembled = await assembleProduct(f.repo as any, raw as any);
+  expect(assembled.sourceSelection?.mappingConfirmation).toBeUndefined();
 });
 it('keeps unresolved duplicate warnings when the selected sheet/profile still contains two rows for that SKU', async () => {
   const f = await fixture({ priceProfiles: true, sameScopeDuplicate: true });
@@ -393,23 +421,17 @@ it('blocks the pending SKU marker even when a manual source workbook supplies a 
   expect(result.issues.some((issue) => issue.code === 'MISSING_VARIANT_SKU')).toBe(true);
   expect(f.draft).toEqual(before);
 });
-it('adds saved gallery images to a text-only description while preserving variants, zero stock and source weights', async () => {
+it('keeps the selected text-only description and separate gallery roles while preserving variants, zero stock and source weights', async () => {
   const f = await fixture(),
     before = structuredClone(f.draft);
   const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
   expect(result.kind).toBe('ready');
   if (result.kind !== 'ready') return;
   expect(result.document.title).toBe('  Prepared title  ');
-  expect(result.document.description.map((block) => block.type)).toEqual(['text', 'image', 'text']);
-  expect(result.document.description[0]).toEqual({ type: 'text', text: 'Heading\n\n' });
-  expect(result.document.description[1]).toMatchObject({
-    type: 'image',
-    image: { importId: before.galleryKeys[0] },
-  });
-  expect(result.document.description[2]).toEqual({
-    type: 'text',
-    text: '\n\nOriginal body\n\nKeep paragraphs',
-  });
+  expect(result.document.description).toEqual(
+    compileDescription(before.sourceSelection!.headline, before.sourceSelection!.body, []),
+  );
+  expect(result.document.gallery.map((image) => image.importId)).toEqual(before.galleryKeys);
   expect(result.document.tierNames).toEqual([' Scent ', 'Size']);
   expect(
     result.document.models.map((m) => [
@@ -433,6 +455,70 @@ it('adds saved gallery images to a text-only description while preserving varian
   ]);
   expect(result.sourceSnapshot.input.priceSelection).toEqual(f.input.priceSelection);
   expect(f.draft).toEqual(before);
+});
+it('blocks a self-consistent but unconfirmed collapse of two source tiers', async () => {
+  const f = await fixture();
+  f.draft.tierNames = ['Size'];
+  f.draft.sourceSelection!.tierNames = ['Size'];
+  for (const variant of f.draft.variants) variant.optionLabels = [variant.optionLabels[1]!];
+  for (const variant of f.draft.sourceSelection!.variants)
+    variant.optionLabels = [variant.optionLabels[1]!];
+  const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+  expect(result.kind).toBe('blocked');
+  expect(result.issues.some((issue) => issue.code === 'SOURCE_MAPPING_CONFIRMATION_REQUIRED')).toBe(true);
+});
+it('blocks a foreign imported image placed into an otherwise self-consistent cover role', async () => {
+  const f = await fixture();
+  const other = f.draft.assets[1]!;
+  f.draft.coverKey = other.key;
+  f.draft.sourceSelection!.coverId = other.key;
+  const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+  expect(result.kind).toBe('blocked');
+  expect(result.issues.some((issue) => issue.code === 'SOURCE_MAPPING_CONFIRMATION_REQUIRED')).toBe(true);
+});
+it('blocks an old draft that has no explicit structure and image-role decision', async () => {
+  const f = await fixture();
+  delete f.draft.sourceSelection!.mappingConfirmation;
+  const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+  expect(result.kind).toBe('blocked');
+  expect(result.issues.some((issue) => issue.code === 'SOURCE_MAPPING_CONFIRMATION_REQUIRED')).toBe(true);
+});
+it('requires a fresh explicit review action before confirming an unbound mapping', async () => {
+  const f = await fixture();
+  delete f.draft.sourceSelection!.mappingConfirmation;
+  const before = structuredClone(f.draft);
+  const saveProduct = async (updated: ListingDraft, expectedRevision: number) => {
+    expect(expectedRevision).toBe(before.revision);
+    expect(updated.revision).toBe(before.revision + 1);
+    return updated;
+  };
+  const repo = { ...f.repo, saveProduct };
+  const review = await reviewProductMapping(repo, before.productKey);
+  await expect(confirmProductMapping(repo, before.productKey, {
+    expectedRevision: review.revision,
+    expectedFingerprint: '0'.repeat(64),
+  })).rejects.toThrow('SOURCE_MAPPING_REVIEW_CHANGED');
+  const updated = await confirmProductMapping(repo, before.productKey, {
+    expectedRevision: review.revision,
+    expectedFingerprint: review.fingerprint,
+  });
+  expect(updated.sourceSelection!.mappingConfirmation?.fileSha256).toBe(review.fingerprint);
+  expect(updated.sourceSelection!.mappingConfirmation?.kind).toBe('user_decision');
+  expect({ ...updated, revision: before.revision, sourceSelection: {
+    ...updated.sourceSelection, mappingConfirmation: undefined,
+  } }).toEqual({ ...before, sourceSelection: {
+    ...before.sourceSelection, mappingConfirmation: undefined,
+  } });
+  expect(f.draft).toEqual(before);
+});
+it('does not trust a folder binding without the original stored source proof', async () => {
+  const f = await fixture();
+  f.draft.sourceSelection!.folderBinding = {
+    batchId: randomUUID(), revision: 1, groupKey: 'other-listing',
+  };
+  const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+  expect(result.kind).toBe('blocked');
+  expect(result.issues.some((issue) => issue.code === 'SOURCE_MAPPING_PROOF_REQUIRED')).toBe(true);
 });
 it.each(['videoKeys', 'sizeChartKey', 'identifiers', 'compliance', 'fulfillment'])(
   'blocks unsupported %s instead of silently dropping it',
@@ -546,6 +632,33 @@ it('checks actual image bytes and dimensions, not just stored descriptors', asyn
     'blocked',
   );
 });
+it.each(['cover', 'variation'] as const)(
+  'holds a %s image whose claimed source is unrelated to its bytes',
+  async (role) => {
+    const f = await fixture();
+    const key = role === 'cover' ? f.draft.coverKey : f.draft.variants[0]!.imageKey!;
+    const image = f.draft.assets.find((asset) => asset.key === key)!;
+    image.source = { ...image.source, fileSha256: 'f'.repeat(64) };
+    const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+    expect(result.kind).toBe('blocked');
+    expect(result.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'ASSET_PROVENANCE_INVALID', field: 'assets.' + key })]),
+    );
+  },
+);
+it.each(['sku', 'originalPrice'] as const)(
+  'holds a %s copied from another source even when its text matches the selected row',
+  async (field) => {
+    const f = await fixture();
+    f.draft.variants[0]![field] = {
+      ...f.draft.variants[0]![field],
+      sources: [decision],
+    };
+    const result = await buildProductionDraftSource(f.repo, f.blobs, f.input, decision);
+    expect(result.kind).toBe('blocked');
+    expect(result.issues.some((issue) => issue.code === 'VARIANT_FACT_PROVENANCE_MISMATCH')).toBe(true);
+  },
+);
 it('rejects caller content replacements and preserves unresolved source issues', async () => {
   const f = await fixture();
   expect(

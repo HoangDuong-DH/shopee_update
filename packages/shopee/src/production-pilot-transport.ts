@@ -36,6 +36,8 @@ const readPaths = new Set(
     'product/get_item_base_info',
     'product/get_model_list',
     'product/get_item_promotion',
+    'discount/get_discount_list',
+    'discount/get_discount',
     'logistics/get_channel_list',
     'shop/get_shop_info',
     'shop/get_warehouse_detail',
@@ -89,6 +91,7 @@ const safeErrors = new Set([
   'shop_banned',
   'error_unlist_item_all_failed',
   'error_unlist_item_failed',
+  'warehouse.error_not_in_whitelist',
   'error_get_shop_fail',
   'error_set_normal_unlisted_item',
 ]);
@@ -111,11 +114,24 @@ export type ProductionPilotMutationPermit = { operationId: string; stepId: strin
 export type ProductionPilotMutationIntent = ProductionPilotMutationPermit & {
   path: string;
   fingerprint: string;
+  cloneScope?: ProductionPilotCloneScope;
 };
+export type ProductionPilotCloneScope = Readonly<{
+  archiveId: string;
+  sourceShopId: string;
+  sourceItemId: string;
+  sourceObservationHash: string;
+  sourceHasVariations: boolean;
+  targetShopId: string;
+  connectionId: string;
+  connectionRevision: number;
+}>;
 export type ProductionPilotImageOptions =
   { scene: 'normal'; ratio: '1:1' | '3:4' } | { scene: 'desc'; ratio?: '1:1' | '3:4' };
 export type ProductionPilotTransportOptions = {
   transport?: typeof fetch;
+  /** Explicit clone lane; source and target identity reach the durable permit authorizer. */
+  cloneScope?: ProductionPilotCloneScope;
   /** Per-request bound. The default stays short for interactive use; large
    * description-image uploads may opt into a longer, still bounded wait. */
   requestTimeoutMs?: number;
@@ -139,6 +155,16 @@ const scopeSchema = z
       .refine((value) => Number.isSafeInteger(Number(value))),
   })
   .strict();
+const cloneScopeSchema = z.object({
+  archiveId: z.string().uuid(),
+  sourceShopId: scopeSchema.shape.shopId,
+  sourceItemId: scopeSchema.shape.shopId,
+  sourceObservationHash: z.string().regex(/^[a-f0-9]{64}$/),
+  sourceHasVariations: z.boolean(),
+  targetShopId: scopeSchema.shape.shopId,
+  connectionId: z.string().uuid(),
+  connectionRevision: z.number().int().positive(),
+}).strict();
 const descriptionFieldSchema = z.union([
   z.object({ field_type: z.literal('text'), text: z.string().max(4000) }).strict(),
   z
@@ -326,6 +352,7 @@ async function boundedBody(response: Response): Promise<string | undefined> {
 export class ProductionPilotTransport {
   private readonly credentials: ShopCredentials;
   private readonly scope: ProductionPilotTransportScope;
+  private readonly cloneScope?: ProductionPilotCloneScope;
   private readonly transport: typeof fetch;
   private readonly authorizeMutation?: ProductionPilotTransportOptions['authorizeMutation'];
   private readonly requestTimeoutMs: number;
@@ -333,6 +360,10 @@ export class ProductionPilotTransport {
   constructor(credentials: ShopCredentials, options: ProductionPilotTransportOptions = {}) {
     const parsed = credentialSchema.safeParse(credentials);
     if (!parsed.success) throw new Error('PRODUCTION_PILOT_SCOPE_FORBIDDEN');
+    const cloneScope = options.cloneScope === undefined ? undefined : cloneScopeSchema.safeParse(options.cloneScope);
+    if (cloneScope && (!cloneScope.success || cloneScope.data.targetShopId !== parsed.data.shopId ||
+      !options.authorizeMutation)) throw new Error('PRODUCTION_PILOT_CLONE_SCOPE_FORBIDDEN');
+    this.cloneScope = cloneScope?.success ? Object.freeze({ ...cloneScope.data }) : undefined;
     this.credentials = { ...parsed.data };
     this.scope = Object.freeze({
       environment: parsed.data.environment,
@@ -374,7 +405,8 @@ export class ProductionPilotTransport {
     this.consumed.add(key);
     let allowed = false;
     try {
-      allowed = await this.authorizeMutation(Object.freeze({ ...parsed.data, path, fingerprint }));
+      allowed = await this.authorizeMutation(Object.freeze({ ...parsed.data, path, fingerprint,
+        ...(this.cloneScope ? { cloneScope: this.cloneScope } : {}) }));
     } catch {
       /* Exceptions may carry credentials or DB connection strings. */
     }
@@ -392,6 +424,7 @@ export class ProductionPilotTransport {
     if (
       Object.keys(body).some((key) => authFields.has(key.toLowerCase())) ||
       (path !== addPath && path !== initPath && path !== publishPath && path !== updatePath) ||
+      (this.cloneScope !== undefined && path === publishPath) ||
       (publication && !publication.success) ||
       (itemUpdate && !itemUpdate.success) ||
       (path === addPath &&
@@ -400,7 +433,10 @@ export class ProductionPilotTransport {
           typeof body.item_name !== 'string' ||
           !body.item_name ||
           typeof body.item_sku !== 'string' ||
-          !body.item_sku ||
+          (!body.item_sku && !this.cloneScope?.sourceHasVariations) ||
+          (this.cloneScope && Object.hasOwn(body, 'video_upload_id') &&
+            (!Array.isArray(body.video_upload_id) || body.video_upload_id.length !== 1 ||
+              !imageId(body.video_upload_id[0]))) ||
           !positiveId(body.category_id))) ||
       (path === initPath &&
         (!positiveId(body.item_id) ||
@@ -582,7 +618,8 @@ export class ProductionPilotTransport {
       } catch {
         return { kind: 'unknown', code: 'PRODUCTION_PILOT_INVALID_RESPONSE' };
       }
-      if (!record(raw) || typeof raw.error !== 'string')
+      if (!record(raw) || (typeof raw.error !== 'string' &&
+        !(method === 'GET' && path === warehousePath && raw.error === undefined)))
         return { kind: 'unknown', code: 'PRODUCTION_PILOT_INVALID_RESPONSE' };
       const requestId =
         typeof raw.request_id === 'string' && /^[A-Za-z0-9_.:-]{1,256}$/.test(raw.request_id)

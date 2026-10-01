@@ -26,6 +26,7 @@ import { ConnectionForm } from './ConnectionForm.js';
 import { ProductionConnectionForm } from './ProductionConnectionForm.js';
 import { ShopNameEditor } from './ShopNameEditor.js';
 import { AssistantPanel } from './AssistantPanel.js';
+import { ShopArchive } from './ShopArchive.js';
 import { useFileUploads } from './useFileUploads.js';
 import { clearIntakeRecovery } from './intake-state.js';
 import { UsageGuide } from './UsageGuide.js';
@@ -54,6 +55,7 @@ type Page =
   | 'sources'
   | 'results'
   | 'shops'
+  | 'archives'
   | 'assistant'
   | 'preview'
   | 'editor'
@@ -71,14 +73,16 @@ const secondaryNavigation = [
   { id: 'image-qc', label: 'Kiểm tra ảnh', icon: CheckCheck },
   { id: 'sandbox-tryout', label: 'Thử sandbox', icon: CheckCheck },
   { id: 'shops', label: 'Kết nối shop', icon: Store },
+  { id: 'archives', label: 'Kho sao chép', icon: Files },
   { id: 'guide', label: 'Hướng dẫn sử dụng', icon: CircleHelp },
   { id: 'assistant', label: 'Tra cứu & kiểm tra', icon: BookOpen },
 ] as const;
 function restoredPage(): Page {
   try {
-    if(new URLSearchParams(window.location.search).get('page')==='shops')return 'shops';
+    const requested = new URLSearchParams(window.location.search).get('page');
     const value = sessionStorage.getItem('workspace-page');
     const restorable = [...navigation, ...secondaryNavigation].map(item => item.id as string);
+    if (requested && restorable.includes(requested)) return requested as Page;
     return value && restorable.includes(value) ? value as Page : 'sources';
   } catch { return 'sources'; }
 }
@@ -286,6 +290,12 @@ export default function Workspace() {
     setError('');
     setPendingPage(null);
     if (next === 'folder') setFolderStarted(true);
+    if ([...navigation, ...secondaryNavigation].some((entry) => entry.id === next)) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('page', next);
+      if (next !== 'shops') url.searchParams.delete('connectShop');
+      window.history.replaceState(null, '', url);
+    }
     setPage(next);
   }
   function startBatch(priceImportId?: string) {
@@ -1009,6 +1019,7 @@ export default function Workspace() {
                   onEdit={edit}
                   onBusy={setSaveBusy}
                   onProduction={() => { setProductionView('working'); go('prepared-batches'); }}
+                  onMappingConfirmed={open}
                   onUpdates={() => go('updates')}
                   onPlan={() => {
                     setPendingPage(null);
@@ -1130,6 +1141,7 @@ export default function Workspace() {
               </>
             )}
             {page === 'assistant' && <AssistantPanel plans={plans} />}
+            {page === 'archives' && <ShopArchive />}
             {page === 'guide' && (
               <UsageGuide onImport={() => startBatch()} onListings={() => go('workbench')} />
             )}

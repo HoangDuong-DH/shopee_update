@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   pendingListingMappingSchema,
   pendingListingWorksheetSchema,
+  explicitVariationAxes,
 } from '../../packages/domain/src/pending-listing-mapping.js';
 import {
   readPendingListingMapping,
@@ -16,6 +17,37 @@ const read = () =>
     sha256: 'a'.repeat(64),
   });
 
+it('reads numbered source axes with arbitrary labels and blocks a flattened mapping', () => {
+  const raw = 'Phân loại 1: Nhóm Alpha · Nhóm Beta\nPhân loại 2: Bản X · Bản Y';
+  expect(explicitVariationAxes(raw)).toEqual({
+    kind: 'declared',
+    axes: [
+      { ordinal: 1, options: ['Nhóm Alpha', 'Nhóm Beta'] },
+      { ordinal: 2, options: ['Bản X', 'Bản Y'] },
+    ],
+  });
+  const mapping = updatePendingSku(read(), 'slot-b', 'B');
+  mapping.structureConfirmed = true;
+  mapping.document.rawVariationText = raw;
+  mapping.document.tiers = [{
+    ordinal: 1,
+    literalHeading: 'Nhóm và bản',
+    options: ['Nhóm Alpha Bản X', 'Nhóm Beta Bản Y'],
+  }];
+  mapping.document.slots[0]!.optionPositions = [1];
+  mapping.document.slots[0]!.optionLabels = ['Nhóm Beta Bản Y'];
+  mapping.document.slots[1]!.optionPositions = [0];
+  mapping.document.slots[1]!.optionLabels = ['Nhóm Alpha Bản X'];
+  const result = resolvePendingListingMapping(mapping, pendingPriceSource());
+  expect(result.seed).toBeUndefined();
+  expect(result.issues.map((issue) => issue.code)).toContain('PENDING_VARIATION_DECLARATION_MISMATCH');
+});
+
+it('does not guess a malformed numbered declaration', () => {
+  expect(explicitVariationAxes('Phân loại 2: Một · Hai')).toEqual({ kind: 'unreadable' });
+  expect(explicitVariationAxes('Phân loại 1: Một · Hai; Phân loại 2: X · Y')).toEqual({ kind: 'unreadable' });
+  expect(explicitVariationAxes('Ghi chú tự do')).toEqual({ kind: 'none' });
+});
 describe('pending classification intake', () => {
   it('retains exact ordered slots and null SKU without generating combinations or copying worksheet prices', () => {
     const mapping = read();

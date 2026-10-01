@@ -53,6 +53,7 @@ Sau `npm run build`, API cũng phục vụ giao diện build tại cổng 4310. 
 ## Kiểm tra và điều tra lỗi
 
 - `GET /health/live`: API còn sống. `GET /health/ready`: truy cập DB và xác minh đầy đủ phiên bản/checksum migration mà bản app yêu cầu.
+- Ngày 25/09/2026, migration `035_production_qc_wait.sql` trên máy vận hành từng mất một dấu cách cuối dòng sau khi đã áp dụng, khiến checksum khác và `/health/ready` trả 503 dù PostgreSQL khỏe. Đã khôi phục đúng byte theo checksum trong DB; không cập nhật checksum trong DB hoặc chạy lại migration. Giữ nguyên byte của migration đã áp dụng khi format/merge; thay đổi logic phải là migration mới.
 - `GET /v1/status`: heartbeat worker gần đây. Heartbeat không chứng minh mọi công việc đều hoàn tất.
 - `node scripts/verify.mjs`: chạy các kiểm tra theo thứ tự và dừng khi có lỗi; báo cáo tại `.local/verification.json` và `.local/test-results.json`.
 - `npm run test:e2e`: đọc bộ Lamy local, kiểm desktop/mobile, lưu ảnh tại `.local/e2e-artifacts/`. Không chạy trên shop thật.

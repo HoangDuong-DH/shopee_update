@@ -30,6 +30,7 @@ async function fixture() {
   const register = vi.fn(async () => ({ batchId: randomUUID(), manifestSha256: 'd'.repeat(64) }));
   const service = new ProductionPreparationService(new Repository(pool as any), {} as any, {
     root, register, readSource: async key => ({ productKey: key, revision: 1 }),
+    assertPriceMapping: async () => undefined,
     verifyStock: async () => ({ expectedLocationId: 'VNZ', writeLocationId: null }),
   });
   return { id, row, entries, read, register, service, client, query };

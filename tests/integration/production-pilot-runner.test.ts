@@ -88,7 +88,30 @@ const ready = async (index = 0) => {
   if (result.kind !== 'ready') throw new Error('Fixture invalid');
   return result.operationId;
 };
-async function makeCase(index: number): Promise<ProductionPilotPreparedInput> {
+function approveFixtureSource(source: ProductionPilotPreparedInput) {
+  const document = source.document;
+  const cover = [document.cover.sha256];
+  const gallery = document.gallery.map((media) => media.sha256);
+  const description = document.description.flatMap((block) =>
+    block.type === 'image' ? [block.image.sha256] : [],
+  );
+  const variation = document.models.flatMap((model) =>
+    model.image ? [model.image.sha256] : [],
+  );
+  source.context.sourceContract = {
+    tierNames: [...document.tierNames],
+    optionLabelsBySku: Object.fromEntries(document.models.map((model) => [model.sku, [...model.optionLabels]])),
+    originalPriceBySku: Object.fromEntries(document.models.map((model) => [model.sku, model.originalPrice])),
+    approvedMediaSha256: [...new Set([...cover, ...gallery, ...description, ...variation])],
+    approvedMediaByRole: {
+      cover,
+      gallery: [...new Set(gallery)],
+      description: [...new Set(description)],
+      variation: [...new Set(variation)],
+    },
+    approvedMediaSequenceByRole: { cover, gallery, description },
+  };
+}async function makeCase(index: number): Promise<ProductionPilotPreparedInput> {
   const assets: Record<string, string> = {},
     folder = join(directory, 'source-' + index);
   await mkdir(folder, { recursive: true });
@@ -294,6 +317,7 @@ beforeEach(async () => {
 });
 
 function enableDeferredImages() {
+  for (const source of cases) approveFixtureSource(source);
   runner=new ProductionPilotRunner(repo,{...runner.options,deferImageQc:true,batchAuthorization:{
     batchId:randomUUID(),manifestSha256:'c'.repeat(64),authorizationReference:'Explicit hidden trial, image review deferred',
     publicationMode:'hidden_for_review',imageQcPolicy:'defer_image_qc',
@@ -361,7 +385,12 @@ it('checks an occupied shop lane before inserting another source reservation', a
   expect((await pool.query('SELECT id FROM production_pilot_operations')).rows.map(r => r.id)).toEqual([id]);
   expect(mutationCalls()).toHaveLength(0);
 });
-it('explicit hidden image deferral records two core reads, leaves image QC pending and permits the next source without publishing',async()=>{
+it('does not authorize a production batch with an incomplete media inventory contract', async () => {
+  enableDeferredImages();
+  delete cases[0]!.context.sourceContract!.approvedMediaSequenceByRole;
+  await expect(prepareSource(cases[0]!)).rejects.toThrow('PRODUCTION_PILOT_SOURCE_CONTRACT_REQUIRED');
+  expect(mutationCalls()).toHaveLength(0);
+});it('explicit hidden image deferral records two core reads, leaves image QC pending and permits the next source without publishing',async()=>{
   enableDeferredImages();
   responseTransform=(path,body)=>{if(path.endsWith('get_item_base_info'))body.response.item_list[0].promotion_image.image_id_list=['unreviewed-transformed-cover'];};
   const id=await ready(1),result=await runner.run(id);
@@ -1026,6 +1055,7 @@ it('uses actual verified feature evidence for a second source without granting a
   const first = await ready();
   expect((await runner.run(first)).state).toBe('verified');
   const second = structuredClone(cases[1]!);
+  approveFixtureSource(second);
   const observedAt = new Date().toISOString();
   second.metadata.observedAt = observedAt;
   second.capabilityEvidence = await runner.capabilityEvidenceFromVerified(first, 1, observedAt, [
@@ -1045,6 +1075,7 @@ it('uses an explicitly nominated legacy capability only for reads while a new ma
   expect((await runner.run(first)).state).toBe('verified');
   const old = await runner.journal.get(first);
   const second = structuredClone(cases[1]!);
+  approveFixtureSource(second);
   const batchAuthorization = { batchId: randomUUID(), manifestSha256: 'a'.repeat(64),
     authorizationReference: 'Fixture new manifest approved independently', sources: [{
       sourceIdentity: second.sourceIdentity, sourceRevision: second.sourceRevision,

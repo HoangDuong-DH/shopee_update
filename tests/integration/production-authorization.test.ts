@@ -93,6 +93,7 @@ afterAll(async () => {
 
 it('prepares a fixed shop authorization with encrypted key, hashed state and no API calls', async () => {
   const p = await prepareProductionAuthorization(repo, input, options);
+  expect(Date.parse(p.expiresAt) - Date.now()).toBeGreaterThan(20 * 60 * 1000);
   const url = new URL(p.authorizationUrl);
   expect(url.origin + url.pathname).toBe('https://open.shopee.com/auth');
   expect(url.searchParams.get('partner_id')).toBe('2010476');
@@ -117,6 +118,19 @@ it.each([{ shopId: '227418363' }, { partnerId: '1115815' }, { redirectUri: 'http
     ).rejects.toThrow();
   },
 );
+it('shows an expired-session result for a matching late Shopee callback without exchanging its code', async () => {
+  const p = await prepareProductionAuthorization(repo, input, options);
+  await pool.query("UPDATE production_authorization_attempts SET expires_at=now()-interval '1 second' WHERE id=$1", [p.attemptId]);
+  const callback = await app.getHttpAdapter().getInstance().inject({
+    method: 'GET',
+    url: '/v1/connections/production-pilot/callback?' + new URLSearchParams(query(p) as any),
+    headers: { cookie: 'shopee_production_authorization=' + p.browserSecret },
+  });
+  expect(callback.statusCode).toBe(200);
+  expect(callback.payload).toContain('Phiên cấp quyền đã hết hạn');
+  expect(callback.payload).not.toContain('Không nhận được phiên cấp quyền hợp lệ');
+  expect(exchange).not.toHaveBeenCalled();
+});
 it('exchanges one code then verifies exact shop; atomically stores expiry and final receipt', async () => {
   const p = await prepareProductionAuthorization(repo, input, options);
   const result = await finishProductionAuthorization(repo, query(p), p.browserSecret, {
@@ -138,13 +152,12 @@ it('exchanges one code then verifies exact shop; atomically stores expiry and fi
   expect((await pool.query('SELECT count(*) FROM jobs')).rows[0].count).toBe('0');
   expect((await pool.query('SELECT count(*) FROM outbox')).rows[0].count).toBe('0');
 });
-it.each(['wrong-state', 'wrong-browser', 'wrong-shop', 'both-account-ids', 'missing-code'])(
+it.each(['wrong-state', 'wrong-browser', 'both-account-ids', 'missing-code'])(
   'blocks %s before token HTTP',
   async (mode) => {
     const p = await prepareProductionAuthorization(repo, input, options);
     const q: any = query(p);
     if (mode === 'wrong-state') q.state = 'ab'.repeat(32);
-    if (mode === 'wrong-shop') q.shop_id = '227418363';
     if (mode === 'both-account-ids') q.main_account_id = '123';
     if (mode === 'missing-code') delete q.code;
     await expect(
@@ -158,6 +171,45 @@ it.each(['wrong-state', 'wrong-browser', 'wrong-shop', 'both-account-ids', 'miss
     expect(exchange).not.toHaveBeenCalled();
   },
 );
+it('records a wrong-shop callback as a scoped rejection before exchanging a token', async () => {
+  const p = await prepareProductionAuthorization(repo, input, options);
+  const result = await finishProductionAuthorization(
+    repo, query(p, { shop_id: '1340479212' }), p.browserSecret,
+    { ...options, transport: exchange },
+  );
+  expect(result).toMatchObject({
+    status: 'rejected', reason: 'WRONG_SHOP',
+    partnerId: input.partnerId, shopId: input.shopId,
+  });
+  expect(exchange).not.toHaveBeenCalled();
+});
+
+it('keeps one browser cookie across two independent shop authorization attempts', async () => {
+  const call = (o: any) => app.getHttpAdapter().getInstance().inject(o);
+  const route = '/v1/connections/production/authorize';
+  const headers = { origin: 'http://127.0.0.1:5173', 'x-app-client': 'internal-workspace' };
+  const first = await call({ method: 'POST', url: route, headers, payload: input });
+  expect(first.statusCode).toBe(201);
+  const cookie = String(first.headers['set-cookie']).split(';')[0];
+  const second = await call({
+    method: 'POST', url: route, headers: { ...headers, cookie },
+    payload: { ...input, shopId: '1340479212' },
+  });
+  expect(second.statusCode).toBe(201);
+  expect(String(second.headers['set-cookie']).split(';')[0]).toBe(cookie);
+  const firstStatus = await call({
+    method: 'GET',
+    url: '/v1/connections/production-pilot/authorization/' + first.json().attemptId,
+    headers: { cookie },
+  });
+  const secondStatus = await call({
+    method: 'GET',
+    url: '/v1/connections/production-pilot/authorization/' + second.json().attemptId,
+    headers: { cookie },
+  });
+  expect(firstStatus.json()).toMatchObject({ status: 'pending', shopId: input.shopId });
+  expect(secondStatus.json()).toMatchObject({ status: 'pending', shopId: '1340479212' });
+});
 it('refuses expired state, removes staged key and sends no request', async () => {
   const p = await prepareProductionAuthorization(repo, input, options);
   await pool.query(
@@ -263,6 +315,7 @@ it('HTTP enrollment sets HttpOnly cookie, strips internal secret, validates orig
     expect(response.headers['cache-control']).toContain('no-store');
     expect(response.headers['set-cookie']).toContain('HttpOnly');
     expect(response.headers['set-cookie']).toContain('SameSite=Lax');
+    expect(response.headers['set-cookie']).toContain('Path=/v1/connections;');
     expect(response.payload).not.toMatch(/fixture-new-live-key|browserSecret/);
     const cookie = String(response.headers['set-cookie']).split(';')[0];
     const prepared = response.json();

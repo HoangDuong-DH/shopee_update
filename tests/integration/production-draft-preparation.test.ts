@@ -22,6 +22,9 @@ import {
   productionBatchPass1Root,
 } from '../../apps/api/src/production-batch-source.js';
 import type { ProductionDraftSourceInput } from '../../apps/api/src/production-draft-source.js';
+import { folderDraftSelection } from '../../packages/domain/src/folder-source-identity.js';
+import { assertProductionBatchMappingProof } from '../../apps/api/src/production-batch-provenance.js';
+import { confirmListingPriceMapping, reviewListingPriceMapping } from '../../apps/api/src/listing-price-mapping.js';
 
 const schema = 'test_draft_preparation_' + randomUUID().replaceAll('-', '');
 const database = new URL(process.env.DATABASE_URL!);
@@ -142,6 +145,12 @@ async function sources(count: number) {
         imageId: images[2]!.id,
       })),
     });
+    draft.sourceSelection!.mappingConfirmation = {
+      kind: 'user_decision',
+      fileSha256: digest({ productKey: draft.productKey, mapping: folderDraftSelection(draft) }),
+      locator: `listing-mapping-confirmation:${draft.productKey}`,
+      observedAt: new Date().toISOString(),
+    };
     const fact = <T>(value: T): Fact<T> => ({
       value,
       confirmed: true,
@@ -159,6 +168,12 @@ async function sources(count: number) {
     draft.attributes = { [String(100 + (i % 3))]: fact([String(200 + (i % 3))]) };
     draft.logistics = { '50': fact(true) };
     await repo.saveProduct(draft, 0);
+    // This fixture models an explicit operator review after the draft is saved.
+    const priceReview = await reviewListingPriceMapping(repo, blobs, draft.productKey);
+    expect(priceReview.issues).toEqual([]);
+    await confirmListingPriceMapping(repo, blobs, draft.productKey, {
+      expectedRevision: draft.revision, expectedFingerprint: priceReview.fingerprint,
+    });
     drafts.push(draft);
     entries.push({
       productKey: draft.productKey,
@@ -217,6 +232,10 @@ it('imports eighty original Word/image source sets and a shared pricebook throug
       async ([call]) =>
         (await loadProductionBatchSource(call.manifestPath, call.expectedSha256)).value,
     ),
+  );
+  await assertProductionBatchMappingProof(
+    await loadProductionBatchSource(f.register.mock.calls[0]![0].manifestPath, f.register.mock.calls[0]![0].expectedSha256),
+    [manifests[0]!.listings[0]!.sourceKey], repo, blobs,
   );
   expect(manifests.map((m) => m.listings.length)).toEqual(Array.from({ length: 20 }, () => 4));
   const listings = manifests.flatMap((m) => m.listings);

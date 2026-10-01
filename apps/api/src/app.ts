@@ -37,7 +37,8 @@ import {
 } from '@shopee/persistence';
 import { makePlan, type Issue, type Scope, type PreparedGateway } from '@shopee/domain';
 import { HealthController, DB_PROBE } from './health.js';
-import { saveAssembledProduct, productInput, projectProductPriceIssues } from './product-service.js';
+import { saveAssembledProduct, productInput, projectProductPriceIssues, reviewProductMapping, confirmProductMapping } from './product-service.js';
+import { reviewListingPriceMapping, confirmListingPriceMapping } from './listing-price-mapping.js';
 import { ConnectionMaintenance } from './connection-maintenance.js';
 import { connectSandbox } from './connection-service.js';
 import { connectProductionPilot, productionConnectionTarget } from './production-connection-service.js';
@@ -70,18 +71,22 @@ import { productionPilotWeightReviewFileLookup } from './production-pilot-weight
 import { SellerKnowledgeService } from './seller-knowledge-service.js';
 import { SellerKnowledgeFacts } from './seller-knowledge-facts.js';
 import { SellerKnowledgeController } from './seller-knowledge-controller.js';
+import { ArchiveTargetMetadataReader } from './archive-target-metadata.js';
 import { SellerKnowledgeDraftService } from './seller-knowledge-draft-service.js';
 import { SellerKnowledgeDraftController } from './seller-knowledge-draft-controller.js';
 const REPO = Symbol('repository'),
   BLOBS = Symbol('blobs');
 function authorizationBrowserSecret(req: any): string {
-  const matches = String(req.headers.cookie ?? '').split(';').map(v => v.trim())
-    .filter(v => v.startsWith(productionAuthorizationCookie + '='));
-  if (matches.length !== 1) return '';
-  const value = matches[0]!.slice(productionAuthorizationCookie.length + 1);
-  return /^[a-f0-9]{64}$/.test(value) ? value : '';
+  const cookies = String(req.headers.cookie ?? '').split(';').map(v => v.trim());
+  for (const name of [productionAuthorizationCookie, 'shopee_production_authorization']) {
+    const matches = cookies.filter(v => v.startsWith(name + '='));
+    if (matches.length !== 1) continue;
+    const value = matches[0]!.slice(name.length + 1);
+    if (/^[a-f0-9]{64}$/.test(value)) return value;
+  }
+  return '';
 }
-function authorizationPage(reply: any, status: string, httpStatus = 200) {
+function authorizationPage(reply: any, status: string, httpStatus = 200, shopId?: string, reason?: string) {
   const messages: Record<string, string> = {
     verified: 'Đã kết nối và xác minh shop đã chọn. Chưa đăng sản phẩm.',
     pending: 'Đang chờ cấp quyền cho shop đã chọn.',
@@ -91,12 +96,19 @@ function authorizationPage(reply: any, status: string, httpStatus = 200) {
     unknown: 'Chưa xác định được kết quả. Quay lại ứng dụng để kiểm tra kết nối đã lưu.',
     invalid: 'Không nhận được phiên cấp quyền hợp lệ. Mở lại liên kết từ ứng dụng trên cùng trình duyệt.',
   };
+  const expected = shopId && /^[1-9]\d*$/.test(shopId) ? shopId : '';
+  const detail = reason === 'WRONG_SHOP' || reason === 'UNEXPECTED_GRANT_SCOPE'
+    ? 'Shopee đã cấp quyền shop khác Shop ID yêu cầu. Chọn lại đúng shop trong phiên cấp quyền mới.'
+    : reason === 'REVISION_CHANGED'
+      ? 'Kết nối shop đã thay đổi khi cấp quyền. Tải lại trạng thái rồi chuẩn bị phiên mới.'
+      : '';
+  const appLink = 'http://127.0.0.1:5173/?page=shops' + (expected ? '&connectShop=' + expected : '');
   return reply.status(httpStatus).type('text/html; charset=utf-8')
     .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
     .send(`<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
       <title>Kết nối Shopee</title><style>body{font:18px/1.6 system-ui;max-width:650px;margin:60px auto;padding:24px;color:#202923}a{color:#a43a21}</style>
-      <h1>Kết nối Shopee</h1><p>${messages[status] ?? messages.invalid}</p>
-      <p><a href="/" rel="noreferrer">Quay lại ứng dụng → Công cụ → Kết nối shop</a></p></html>`);
+      <h1>Kết nối Shopee</h1><p>${messages[status] ?? messages.invalid}</p><p>${expected ? "Shop ID yêu cầu: " + expected : ""}</p><p>${detail}</p>
+      <p><a href="${appLink}" rel="noreferrer">Quay lại ứng dụng → Công cụ → Kết nối shop</a></p></html>`);
 }
 const id = (s: string) => z.string().uuid().parse(s);
 const productionRouteScope=(raw:unknown)=>z.object({partnerId:z.literal('2010476'),shopId:z.literal('1423724897')}).passthrough().parse(raw ?? {});
@@ -144,7 +156,9 @@ class ApiErrors implements ExceptionFilter {
     }
     if (code.startsWith('KNOWLEDGE_DRAFT_'))
       return reply.status(code.endsWith('NOT_FOUND') ? 404 : 409).send({code,message:'Gợi ý không còn khớp bản nháp, shop hoặc thông tin ngành hiện tại. Đọc lại gợi ý và chọn thông tin đã xác nhận. Nguồn gốc vẫn được giữ nguyên.'});
-    if (/^(SELLER_KNOWLEDGE_|KNOWLEDGE_(SYNC|CONNECTION|REQUEST|BATCH|EVIDENCE|CATEGORY|REMOTE|RESPONSE|SCOPE|NOT_FOUND|READ|LOCK|METADATA))/.test(code))
+    if (code.startsWith('ARCHIVE_TARGET_'))
+      return reply.status(409).send({ code, message: 'Chưa đọc đủ metadata của shop đích hoặc kết nối đã đổi. Chưa gửi thay đổi nào lên Shopee.' });
+    if (/^(SELLER_KNOWLEDGE_|KNOWLEDGE_(ARCHIVE|COPY_PLAN|SYNC|CONNECTION|REQUEST|BATCH|EVIDENCE|CATEGORY|REMOTE|RESPONSE|SCOPE|NOT_FOUND|READ|LOCK|METADATA))/.test(code))
       return reply.status(code.endsWith('NOT_FOUND')?404:409).send({code,message:'Chưa đủ dữ liệu để đối chiếu hoặc kết nối đã thay đổi. Nguồn đã lưu vẫn được giữ; xem trạng thái đồng bộ và thử lại. Chưa thay đổi listing trên Shopee.'});
     // Ordinary batch errors have their own HTTP status and recovery guidance below.
     if (/^(PREPARATION|PRODUCTION_PREPARATION|PRODUCTION_BATCH_REVIEW)_[A-Z0-9_]+$/.test(code)) {
@@ -272,6 +286,17 @@ class ApiErrors implements ExceptionFilter {
       return reply
         .status(code.endsWith('_CONFLICT') ? 409 : 400)
         .send({ code, message: inputMessages[code] });
+    const priceMappingMessages: Record<string, string> = {
+      SOURCE_MAPPING_PRODUCT_NOT_FOUND: 'Không tìm thấy listing đã lưu. Mở lại đúng bộ nguồn.',
+      SOURCE_MAPPING_REVIEW_CHANGED: 'Listing hoặc bảng đối chiếu đã đổi. Mở lại bảng SKU và giá trước khi xác nhận.',
+      SOURCE_MAPPING_UNRESOLVED: 'Còn phân loại thiếu, trùng hoặc lệch dòng giá. Xem danh sách cần xử lý trong bảng đối chiếu.',
+      SOURCE_MAPPING_PRICEBOOK_CHANGED: 'File giá đã đổi hoặc không còn sẵn sàng. Nhập và chọn lại đúng phiên bản file.',
+      PRODUCTION_PRICE_MAPPING_CONFIRMATION_REQUIRED: 'Chưa có xác nhận SKU và giá cho đúng phiên bản listing này.',
+      PRODUCTION_PRICE_MAPPING_MISMATCH: 'SKU hoặc giá không còn khớp biên nhận đã duyệt. Dừng gửi và đối chiếu lại nguồn.',
+    };
+    if (Object.hasOwn(priceMappingMessages, code))
+      return reply.status(code === 'SOURCE_MAPPING_PRODUCT_NOT_FOUND' ? 404 : 409)
+        .send({ code, message: priceMappingMessages[code] });
     if (code.startsWith('FOLDER_SOURCE_'))
       return reply.status(/CHANGED|CONFLICT|STALE/.test(code) ? 409 : 400).send({ code,
         message: code === 'FOLDER_SOURCE_CHANGED'
@@ -765,6 +790,18 @@ class AppController {
     if (!record) throw new HttpException({ code: 'NOT_FOUND' }, 404);
     return {...(await projectProductPriceIssues(this.repo, [record]))[0]!,...await localArchiveFlags(this.repo.pool,'product',key)};
   }
+  @Get('products/:key/mapping-review') async productMappingReview(@Param('key') key: string) {
+    return reviewProductMapping(this.repo, key);
+  }
+  @Post('products/:key/confirm-mapping') async productMappingConfirm(@Param('key') key: string, @Body() raw: unknown) {
+    return confirmProductMapping(this.repo, key, raw);
+  }
+  @Get('products/:key/price-mapping-review') async productPriceMappingReview(@Param('key') key: string) {
+    return reviewListingPriceMapping(this.repo, this.blobs, key);
+  }
+  @Post('products/:key/confirm-price-mapping') async productPriceMappingConfirm(@Param('key') key: string, @Body() raw: unknown) {
+    return confirmListingPriceMapping(this.repo, this.blobs, key, raw);
+  }
   @Post('products') async saveProduct(@Body() raw: unknown) {
     const input = productInput.parse(raw);
     return saveAssembledProduct(this.repo, input);
@@ -786,9 +823,9 @@ class AppController {
   }
   @Get('connections/production') productionShopTarget(@Query() query:unknown) {return productionConnectionTarget(this.repo,query);}
   @Post('connections/production') connectProductionShop(@Body() raw:unknown) {return connectProductionPilot(this.repo,raw,{allowOtherShops:true});}
-  @Post('connections/production/authorize') async authorizeProductionShop(@Body() raw:unknown,@Res({passthrough:true}) reply:any) {
-    const {browserSecret,...result}=await prepareProductionAuthorization(this.repo,raw,{allowOtherShops:true});
-    reply.header('Set-Cookie',`${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections/production-pilot; HttpOnly; SameSite=Lax; Max-Age=1200`);
+  @Post('connections/production/authorize') async authorizeProductionShop(@Body() raw:unknown,@Req() req:any,@Res({passthrough:true}) reply:any) {
+    const {browserSecret,...result}=await prepareProductionAuthorization(this.repo,raw,{allowOtherShops:true,browserSecret:authorizationBrowserSecret(req)});
+    reply.header('Set-Cookie',`${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections; HttpOnly; SameSite=Lax; Max-Age=2400`);
     return result;
   }
   @Post('connections/:id/refresh') refreshConnection(@Param('id') key:string,@Body() raw:unknown) {
@@ -812,10 +849,10 @@ class AppController {
     return connectProductionPilot(this.repo, raw);
   }
   @Post('connections/production-pilot/authorize') async authorizeProduction(
-    @Body() raw: unknown, @Res({ passthrough: true }) reply: any,
+    @Body() raw: unknown, @Req() req: any, @Res({ passthrough: true }) reply: any,
   ) {
-    const { browserSecret, ...result } = await prepareProductionAuthorization(this.repo, raw);
-    reply.header('Set-Cookie', `${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections/production-pilot; HttpOnly; SameSite=Lax; Max-Age=1200`);
+    const { browserSecret, ...result } = await prepareProductionAuthorization(this.repo, raw, {browserSecret:authorizationBrowserSecret(req)});
+    reply.header('Set-Cookie', `${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections; HttpOnly; SameSite=Lax; Max-Age=2400`);
     return result;
   }
   @Get('connections/production-pilot/authorization/:attemptId') authorizationStatus(
@@ -832,14 +869,18 @@ class AppController {
     try {
       const result = await finishProductionAuthorization(this.repo, raw, authorizationBrowserSecret(req));
       return reply.status(303).header('Location', '/v1/connections/production-pilot/authorization-result/' + result.attemptId).send('');
-    } catch { return authorizationPage(reply, 'invalid', 400); }
+    } catch (error) {
+      return error instanceof Error && error.message === 'PRODUCTION_AUTHORIZATION_EXPIRED'
+        ? authorizationPage(reply, 'expired')
+        : authorizationPage(reply, 'invalid', 400);
+    }
   }
   @Get('connections/production-pilot/authorization-result/:attemptId') async productionAuthorizationResult(
     @Param('attemptId') attemptId: string, @Req() req: any, @Res() reply: any,
   ) {
     try {
       const result = await productionAuthorizationStatus(this.repo, attemptId, authorizationBrowserSecret(req));
-      return authorizationPage(reply, result.status);
+      return authorizationPage(reply, result.status, 200, result.shopId, result.reason);
     } catch { return authorizationPage(reply, 'invalid', 400); }
   }
   @Get('plans/:id') async plan(@Param('id') key: string) {
@@ -939,6 +980,7 @@ export async function createApp(
       { provide: BLOBS, useValue: blobs },
       { provide: SellerKnowledgeService, useValue: options.sellerKnowledge ?? new SellerKnowledgeService(repo) },
       { provide: SellerKnowledgeFacts, useValue: new SellerKnowledgeFacts(repo) },
+      { provide: ArchiveTargetMetadataReader, useValue: new ArchiveTargetMetadataReader(repo) },
       { provide: SellerKnowledgeDraftService, inject:[SellerKnowledgeService,SellerKnowledgeFacts], useFactory:(knowledge:SellerKnowledgeService,facts:SellerKnowledgeFacts)=>new SellerKnowledgeDraftService(repo,knowledge,facts) },
       { provide: ProductionBatchService, useValue: new ProductionBatchService(repo, blobs) },
       { provide: ProductionBatchReviewService, useValue: new ProductionBatchReviewService(repo, blobs) },

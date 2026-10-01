@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   compileDescription,
@@ -12,11 +12,15 @@ import {
 } from '@shopee/domain';
 import { Repository } from '@shopee/persistence';
 import { resolveFolderSourceClaim } from './folder-source-claim.js';
+import { folderDraftSelection } from '../../../packages/domain/src/folder-source-identity.js';
 import {
   projectResolvedPriceIssues,
   resolvedDuplicatePriceIssueKeys,
 } from '../../../packages/domain/src/source/selected-price-issues.js';
 export const productInput = z.object({
+  // Confirmation is issued only by confirmProductMapping after a revision-bound review.
+  // Reject it explicitly here instead of allowing a generic draft save to forge the proof.
+  mappingConfirmation: z.unknown().optional(),
   folderBinding: z
     .object({
       batchId: z.string().uuid(),
@@ -46,8 +50,57 @@ export const productInput = z.object({
     )
     .min(1)
     .max(2000),
+}).refine((input) => input.mappingConfirmation === undefined, {
+  message: 'SOURCE_MAPPING_CONFIRMATION_REQUIRES_REVIEW',
+  path: ['mappingConfirmation'],
 });
 export type ProductInput = z.infer<typeof productInput>;
+
+/** Readable, revision-bound review of the exact mapping the operator will approve. */
+export async function reviewProductMapping(repo: Pick<Repository, 'getProduct'>, productKey: string) {
+  const draft = await repo.getProduct(productKey);
+  if (!draft?.sourceSelection) throw Error('SOURCE_MAPPING_UNAVAILABLE');
+  const mapping = folderDraftSelection(draft);
+  const fingerprint = createHash('sha256')
+    .update(canonicalJson({ productKey: draft.productKey, mapping }))
+    .digest('hex');
+  return {
+    productKey: draft.productKey,
+    revision: draft.revision,
+    fingerprint,
+    mapping,
+    imageRoles: {
+      cover: draft.assets.find((asset) => asset.key === draft.coverKey)?.source.locator ?? null,
+      gallery: draft.galleryKeys.map((key) => draft.assets.find((asset) => asset.key === key)?.source.locator ?? null),
+      variants: draft.variants.map((variant) => variant.imageKey
+        ? draft.assets.find((asset) => asset.key === variant.imageKey)?.source.locator ?? null
+        : null),
+    },
+  };
+}
+
+/** Explicit operator action only. Saving a draft never calls this function. */
+export async function confirmProductMapping(
+  repo: Pick<Repository, 'getProduct' | 'saveProduct'>,
+  productKey: string,
+  raw: unknown,
+) {
+  const input = z.object({ expectedRevision: z.number().int().positive(), expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(raw);
+  const reviewed = await reviewProductMapping(repo, productKey);
+  if (reviewed.revision !== input.expectedRevision || reviewed.fingerprint !== input.expectedFingerprint)
+    throw Error('SOURCE_MAPPING_REVIEW_CHANGED');
+  const current = await repo.getProduct(productKey, input.expectedRevision);
+  if (!current?.sourceSelection) throw Error('SOURCE_MAPPING_UNAVAILABLE');
+  const updated = structuredClone(current);
+  updated.revision += 1;
+  updated.sourceSelection!.mappingConfirmation = {
+    kind: 'user_decision',
+    fileSha256: reviewed.fingerprint,
+    locator: `listing-mapping-confirmation:${productKey}`,
+    observedAt: new Date().toISOString(),
+  };
+  return repo.saveProduct(updated, input.expectedRevision);
+}
 
 /** Read-only presentation of saved drafts. Authoritative draft revisions and import issues
  * remain intact for source fingerprints, auditing and the compiler's fresh-byte checks. */

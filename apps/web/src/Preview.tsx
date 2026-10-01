@@ -1,7 +1,19 @@
 import { useState } from 'react';
 import type { ChangePlan, ListingDraft, ShopConnection } from '@shopee/domain';
 import { sourceListingIntent } from '../../../packages/domain/src/source-catalog.js';
-import { media, money, post } from './api.js';
+import { api, media, money, post } from './api.js';
+type MappingReview = {
+  productKey: string; revision: number; fingerprint: string;
+  mapping: { title: string; tierNames: string[]; variants: Array<{ sku: string; optionLabels: string[]; originalPrice: string }> };
+  imageRoles: { cover: string | null; gallery: Array<string | null>; variants: Array<string | null> };
+};
+type PriceMappingReview = {
+  productKey: string; revision: number; title: string; fingerprint: string; confirmed: boolean;
+  tierNames: string[];
+  rows: Array<{ slotKey: string; optionLabels: string[]; sourceName: string; sourceFilename: string; sourceImportedAt: string; fileSha256: string; sku: string;
+    sheetName: string; skuCell: string; priceCell: string; originalPrice: string; priceProfile: string | null }>;
+  issues: Array<{ code: string; message: string; slotKey?: string }>;
+};
 export function Issues({ issues }: { issues: ListingDraft['issues'] }) {
   return (
     <div className="issues">
@@ -23,6 +35,7 @@ export function Preview({
   onBusy,
   onProduction,
   onUpdates,
+  onMappingConfirmed,
 }: {
   draft: ListingDraft;
   shops: ShopConnection[];
@@ -31,12 +44,59 @@ export function Preview({
   onBusy?: (busy: boolean) => void;
   onProduction?: () => void;
   onUpdates?: () => void;
+  onMappingConfirmed?: (draft: ListingDraft) => void;
 }) {
   const sourceIntent = sourceListingIntent(draft.sourceListingId?.value);
   const [active, setActive] = useState(draft.coverKey),
     [shop, setShop] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [mappingReview, setMappingReview] = useState<MappingReview | null>(null),
+    [mappingBusy, setMappingBusy] = useState(false);
+  const [priceReview, setPriceReview] = useState<PriceMappingReview | null>(null),
+    [priceBusy, setPriceBusy] = useState(false);
+  async function openPriceReview() {
+    setPriceBusy(true); setError('');
+    try {
+      const reviewed = await api<PriceMappingReview>('/v1/products/' + encodeURIComponent(draft.productKey) + '/price-mapping-review');
+      if (reviewed.revision !== draft.revision) throw Error('Listing đã có bản mới. Mở lại trước khi đối chiếu SKU và giá.');
+      setPriceReview(reviewed);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Chưa đọc được bảng đối chiếu SKU và giá.'); }
+    finally { setPriceBusy(false); }
+  }
+  async function confirmPriceReview() {
+    if (!priceReview || priceReview.issues.length || priceBusy) return;
+    setPriceBusy(true); setError('');
+    try {
+      await post('/v1/products/' + encodeURIComponent(draft.productKey) + '/confirm-price-mapping', {
+        expectedRevision: priceReview.revision, expectedFingerprint: priceReview.fingerprint,
+      });
+      setPriceReview({ ...priceReview, confirmed: true });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Nguồn đã đổi. Mở lại bảng đối chiếu trước khi xác nhận.'); }
+    finally { setPriceBusy(false); }
+  }
+  async function openMappingReview() {
+    setMappingBusy(true); setError('');
+    try {
+      const reviewed = await api<MappingReview>('/v1/products/' + encodeURIComponent(draft.productKey) + '/mapping-review');
+      if (reviewed.revision !== draft.revision) throw Error('Bản nguồn đã đổi. Mở lại listing mới nhất trước khi xác nhận.');
+      setMappingReview(reviewed);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Chưa đọc được bản ánh xạ.'); }
+    finally { setMappingBusy(false); }
+  }
+  async function confirmMapping() {
+    if (!mappingReview || mappingBusy) return;
+    setMappingBusy(true); setError('');
+    try {
+      const updated = await post<ListingDraft>('/v1/products/' + encodeURIComponent(draft.productKey) + '/confirm-mapping', {
+        expectedRevision: mappingReview.revision,
+        expectedFingerprint: mappingReview.fingerprint,
+      });
+      setMappingReview(null);
+      onMappingConfirmed?.(updated);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Bản ánh xạ đã đổi. Đọc lại trước khi xác nhận.'); }
+    finally { setMappingBusy(false); }
+  }
   const sourceChecks: {
     title: string;
     detail: string;
@@ -127,6 +187,40 @@ export function Preview({
             </button>
           ))}
         </div>
+        {draft.sourceSelection && !draft.sourceSelection.folderBinding && (
+          <div className="application-limit">
+            <strong>Xác nhận cấu trúc và đúng ảnh nguồn</strong>
+            <p>Xem lại từng tầng phân loại, SKU, giá và vai trò ảnh. Lưu nháp không tự xác nhận.</p>
+            <button disabled={busy || mappingBusy} onClick={() => void openMappingReview()}>Xem bản ánh xạ cần xác nhận</button>
+            {mappingReview && <div aria-label="Đối chiếu ánh xạ nguồn">
+              <p><strong>{mappingReview.mapping.title}</strong></p>
+              <p>Phân loại: {mappingReview.mapping.tierNames.join(' → ') || 'Một sản phẩm không phân loại'}</p>
+              <p>Ảnh bìa: {mappingReview.imageRoles.cover ?? 'Chưa có'}</p>
+              <p>Ảnh listing: {mappingReview.imageRoles.gallery.join(' · ') || 'Chưa có'}</p>
+              <ol>{mappingReview.mapping.variants.map((variant, index) => <li key={index}>
+                {variant.optionLabels.join(' / ') || 'Sản phẩm lẻ'} · SKU {variant.sku} · Giá {money(variant.originalPrice)} · Ảnh phân loại {mappingReview.imageRoles.variants[index] ?? 'Không có'}
+              </li>)}</ol>
+              <button disabled={busy || mappingBusy} onClick={() => void confirmMapping()}>Tôi đã đối chiếu và xác nhận đúng ánh xạ này</button>
+            </div>}
+          </div>
+        )}
+        {draft.sourceSelection && <div className="application-limit">
+          <strong>Đối chiếu SKU và giá sau khi tạo listing</strong>
+          <p>Hệ thống đọc lại từng dòng và ô trong file giá gốc. Anh xác nhận đúng sản phẩm, mùi, cỡ và giá cho từng phân loại.</p>
+          <button disabled={busy || priceBusy} onClick={() => void openPriceReview()}>Xem bảng đối chiếu SKU và giá</button>
+          {priceReview && <div aria-label="Bảng đối chiếu SKU và giá">
+            <p>{priceReview.confirmed ? 'Đã xác nhận cho đúng phiên bản listing này.' : 'Chưa xác nhận.'}</p>
+            <ol>{priceReview.rows.map(row => <li key={row.slotKey}>
+              <strong>{row.optionLabels.join(' / ') || 'Sản phẩm lẻ'}</strong> → {row.sourceName} · SKU {row.sku} · Giá gốc {money(row.originalPrice)}
+              <small> · {row.sourceFilename} (nhập {new Date(row.sourceImportedAt).toLocaleString('vi-VN')}) · {row.sheetName}, SKU {row.skuCell}, giá {row.priceCell}, bộ giá {row.priceProfile ?? 'không phân bộ'} · dấu kiểm file {row.fileSha256}</small>
+            </li>)}</ol>
+            {priceReview.issues.length > 0 && <div className="source-issues"><h3>Cần anh xử lý trước khi xác nhận</h3>
+              <ul>{priceReview.issues.map((item, index) => <li key={index}>{item.message}</li>)}</ul>
+            </div>}
+            {!priceReview.confirmed && <button disabled={busy || priceBusy || priceReview.issues.length > 0}
+              onClick={() => void confirmPriceReview()}>Tôi đã đối chiếu từng phân loại, SKU và giá nguồn</button>}
+          </div>}
+        </div>}
         {draft.issues.length > 0 && (
           <div className="source-issues">
             <h3>Thông tin cần kiểm tra từ nguồn</h3>

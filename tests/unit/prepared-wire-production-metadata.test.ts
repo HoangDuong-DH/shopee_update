@@ -137,7 +137,7 @@ describe('official custom attribute values', () => {
     ];
     blocked(document, context, 'PREPARED_WIRE_ATTRIBUTE_SELECTION_MISMATCH');
   });
-  it('still rejects duplicate source identity0 instead of ambiguously merging custom values', () => {
+  it('preserves distinct custom source values sharing identity0 without merging', () => {
     const { document, context } = fixture();
     document.attributes = { '100025': ['0', '0'] };
     context.attributeList = [
@@ -149,6 +149,8 @@ describe('official custom attribute values', () => {
         ],
       },
     ];
+    expect(planPreparedWireCreate(document, context).kind).toBe('ready');
+    context.attributeList[0]!.attribute_value_list[1]!.original_value_name = 'Scent A';
     blocked(document, context, 'PREPARED_WIRE_ATTRIBUTE_INVALID');
   });
 });

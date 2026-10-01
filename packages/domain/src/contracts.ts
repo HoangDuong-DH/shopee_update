@@ -67,6 +67,8 @@ export type DraftField =
   | 'publication';
 export type SourceSelection = {
   folderBinding?: import('./folder-source-identity.js').FolderSourceBinding;
+  /** Explicit approval of this exact listing structure and image-role mapping. */
+  mappingConfirmation?: SourceRef & { kind: 'user_decision' };
   /** Exact ID from the source; null/blank means create, a supplied ID means update. */
   sourceListingId?: string | null;
   title: string;

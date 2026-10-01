@@ -15,7 +15,7 @@ let network: ReturnType<typeof vi.spyOn>;
 const id = randomUUID(), fingerprint = 'a'.repeat(64), sourceKey = 'nguon/xit-thom';
 const headers = { 'x-app-client': 'internal-workspace', origin: 'http://localhost:5173' };
 const call = (method: 'GET' | 'POST', url: string, payload?: unknown) =>
-  app.getHttpAdapter().getInstance().inject({ method, url, headers, ...(payload === undefined ? {} : { payload: JSON.stringify(payload), headers: { ...headers, 'content-type': 'application/json' } }) });
+  app.getHttpAdapter().getInstance().inject({ method, url: `${url}${url.includes('?') ? '&' : '?'}partnerId=2010476&shopId=1423724897`, headers, ...(payload === undefined ? {} : { payload: JSON.stringify(payload), headers: { ...headers, 'content-type': 'application/json' } }) });
 
 beforeAll(async () => {
   app = await createApp(repo, new BlobStore('.local/route-contracts-no-write'), ['http://localhost:5173']);

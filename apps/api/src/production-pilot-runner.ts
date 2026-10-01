@@ -704,6 +704,17 @@ export class ProductionPilotRunner {
     z.number().int().positive().parse(input.sourceRevision);
     z.array(z.object({ code: z.string(), field: z.string() }).strict()).parse(input.issues);
     if (input.issues.length) fail('SOURCE_ISSUES');
+    if (!readOnly && (this.options.batchAuthorization || this.options.executionPolicy)) {
+      const contract = input.context.sourceContract;
+      if (
+        !contract ||
+        !contract.approvedMediaSequenceByRole ||
+        !Array.isArray(contract.approvedMediaSequenceByRole.cover) ||
+        !Array.isArray(contract.approvedMediaSequenceByRole.gallery) ||
+        !Array.isArray(contract.approvedMediaSequenceByRole.description)
+      )
+        fail('SOURCE_CONTRACT_REQUIRED');
+    }
     const metadata = z
       .object({
         environment: z.literal('production'),

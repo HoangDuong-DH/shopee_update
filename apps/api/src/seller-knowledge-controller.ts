@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { SellerKnowledgeService } from './seller-knowledge-service.js';
+import { shopListingCopyPolicySchema } from './shop-listing-copy-policy.js';
+import { ArchiveTargetMetadataReader } from './archive-target-metadata.js';
 import { SellerKnowledgeFacts, confirmedFactsSchema } from './seller-knowledge-facts.js';
 import { normalizeSellerCategory, normalizeSellerObservation } from './seller-knowledge-adapter.js';
 import { recommendSellerKnowledge } from '../../../packages/domain/src/seller-knowledge.js';
@@ -22,9 +24,68 @@ export class SellerKnowledgeController {
   constructor(
     @Inject(SellerKnowledgeService) readonly knowledge: SellerKnowledgeService,
     @Inject(SellerKnowledgeFacts) readonly facts: SellerKnowledgeFacts,
+    @Inject(ArchiveTargetMetadataReader) readonly targetMetadata: ArchiveTargetMetadataReader,
   ) {}
   @Get('shops') async shops() {
     return { shops: await this.knowledge.listShops() };
+  }
+  @Get('archives') archives() {
+    return this.knowledge.listArchives();
+  }
+  @Post('archives/:id/target-metadata') async readTargetMetadata(
+    @Param('id') rawId: string, @Body() raw: unknown,
+  ) {
+    const archiveId = uuid.parse(rawId);
+    const input = z.object({
+      partnerId: z.string().regex(/^[1-9]\d{0,9}$/),
+      shopId: z.string().regex(/^[1-9]\d{0,15}$/),
+      categories: z.array(z.object({
+        path: z.array(z.string().trim().min(1).max(256)).min(1).max(20),
+        brandNames: z.array(z.string().trim().min(1).max(256)).max(20),
+        brandRefs: z.array(z.object({ sourceId: z.string().regex(/^[1-9]\d{0,15}$/), name: z.string().trim().min(1).max(256) }).strict()).max(20).optional(),
+      }).strict()).max(30),
+    }).strict().parse(raw);
+    const plan = await this.knowledge.getCopyPlan(archiveId);
+    if (!plan.targets.some((target: { partnerId: string; shopId: string }) =>
+      target.partnerId === input.partnerId && target.shopId === input.shopId))
+      throw Error('KNOWLEDGE_COPY_PLAN_TARGET_NOT_SELECTED');
+    return this.targetMetadata.collect(input);
+  }
+  @Get('archives/:id/copy-plan') copyPlan(@Param('id') id: string) {
+    return this.knowledge.getCopyPlan(uuid.parse(id));
+  }
+  @Post('archives/:id/copy-plan') saveCopyPlan(
+    @Param('id') id: string,
+    @Body() raw: unknown,
+  ) {
+    const input = z.object({
+      expectedRevision: z.number().int().nonnegative(),
+      policy: shopListingCopyPolicySchema.optional(),
+      targets: z.array(z.object({
+        partnerId: z.string().regex(/^[1-9]\d{0,9}$/),
+        shopId: z.string().regex(/^[1-9]\d{0,15}$/),
+        displayName: z.string().trim().min(1).max(150).optional(),
+      }).strict()).max(30),
+    }).strict().parse(raw);
+    return this.knowledge.saveCopyPlan({ archiveId: uuid.parse(id), ...input });
+  }  @Get('archives/:id/items') archiveItems(
+    @Param('id') id: string,
+    @Query() raw: Record<string, unknown>,
+  ) {
+    const query = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(100).default(100),
+        afterItemId: z.string().regex(/^[1-9]\d{0,15}$/).optional(),
+      })
+      .strict()
+      .parse(raw);
+    return this.knowledge.listArchiveItems(uuid.parse(id), query.limit, query.afterItemId);
+  }
+  @Get('archives/:id/items/:itemId') archiveItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.knowledge.getArchiveItem(uuid.parse(id), itemId);
   }
   @Get('search') async search(@Query() raw: unknown) {
     return { listings: await this.knowledge.search(searchSchema.parse(raw)) };
