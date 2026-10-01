@@ -1,5 +1,7 @@
 # Bàn giao kỹ thuật và vận hành nội bộ
 
+> **Mốc tiếp nối 01/10:** bản nâng cấp đã kiểm tổng và triển khai tại `2ba212d`. Đọc [review release](../reviews/2026-10-01-product-integration.md) cho trạng thái cuối, bảo toàn dữ liệu và giới hạn. Các nhận định chưa merge/chưa thử phục hồi bên dưới thuộc baseline trước sửa.
+
 Tài liệu này mô tả cốt lõi hệ thống và điều kiện để bàn giao. Bắt đầu từ [PROJECT_HANDOFF](PROJECT_HANDOFF.md) để biết phạm vi đang được xác nhận. Những mục bên dưới ghi rõ yêu cầu nghiệm thu; sự tồn tại của tài liệu hoặc test fixture không có nghĩa tất cả tính năng đã hoàn tất. Không có chức năng AI mới trong phạm vi nâng cấp này.
 
 ## Phạm vi bàn giao của nhánh ngày 23/09

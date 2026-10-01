@@ -1,5 +1,7 @@
 # Nghiệm thu sản phẩm nội bộ và phương án tích hợp — 01/10/2026
 
+> **Mốc tiếp nối 01/10:** bản nâng cấp đã kiểm tổng và triển khai tại `2ba212d`. Đọc [review release](2026-10-01-product-integration.md) cho trạng thái cuối, bảo toàn dữ liệu và giới hạn. Các nhận định chưa merge/chưa thử phục hồi bên dưới thuộc baseline trước sửa.
+
 ## Kết luận dùng để bàn giao
 
 Ứng viên `codex/internal-operations` có một luồng thao tác nối được từ ZIP/Excel đến nháp, chỉnh phân loại, chuẩn bị theo shop, tạo link ẩn mô phỏng và xuất báo cáo. Đây là phần có thể tiếp tục hoàn thiện thành sản phẩm cho nhân viên dùng hằng ngày. Chưa có bằng chứng đủ để thay bản đang vận hành, mở ghi Shopee, hay gọi toàn bộ các shop/ngành/cập nhật là đã nghiệm thu.

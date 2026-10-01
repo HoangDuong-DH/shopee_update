@@ -4,9 +4,9 @@ Updated: 2026-10-01
 
 ## ListingStudio integration
 
-The current operating fixes and the internal upgrade have been combined in `codex/product-integration`, based on review commit `0eebc2a`. The final release commit and operating deployment receipt are pending. The interface is named **ListingStudio** and has four primary tasks: **Tổng quan**, **Bộ listing**, **Đăng hàng**, and **Shop**. **Công cụ** retains source intake, update intake, workbench, and archive tools. Start with the [integration review](../reviews/2026-10-01-product-integration.md), [operator workflow](../runbooks/internal-manual-review.md), and [isolated development guide](../runbooks/internal-development.md).
+The operating fixes and the internal upgrade were merged at `2ba212d` on `feat/internal-app`, with `be4e5d6` and `b232204` as parents. The application is running locally: API/database readiness and source-worker heartbeat verified. ListingStudio has four primary tasks: **Tổng quan**, **Bộ listing**, **Đăng hàng**, **Shop**; advanced tools remain in **Công cụ**. Start with the [integration review](../reviews/2026-10-01-product-integration.md).
 
-The integrated candidate includes paginated local listing summaries, compact seller-knowledge projections, exact selected-shop isolation, dynamic authorization callback/return locations, authorization recovery, and source/revision guards after bulk edits. Migrations 001–046 retain their original bytes; 047–051 are additive release migrations. Backup, offline restore verification, and operating deployment are in progress. Listing writes, copying, repair, and automatic batch resume remain paused. No new AI feature is included, and these upgrade tests made no Shopee writes.
+The deployed version includes paginated library summaries, compact seller-knowledge projections, exact shop isolation, configurable callback/return locations, authorization recovery, and revision-bound source/mapping/price guards. Migrations 001–046 retain their raw bytes; 047–051 were rehearsed offline, then applied. The verified backup of selected roots contains 9,793 files / 5,397,090,009 bytes, including the database dump; configuration and keys are protected separately. Offline restore preserved all 88 original tables and opened 16 encrypted credential values without external requests. Business rows, connections, paused executions and 1,620 source files stayed unchanged after deployment; only migration history and worker heartbeat changed. Listing writes, copying, repair, automatic batch resume and connection maintenance remain paused. No new AI feature or Shopee write was included in acceptance.
 
 ## Objective
 
@@ -53,7 +53,7 @@ Repository skills:
 ## Known limits
 
 - One visible historical preparation references four source listings whose preparation files are missing. Preserve its paused state; obtain the exact source files before recovery. Do not fabricate evidence or automatically resume it.
-- Deployment completion, final release identity, and restored-data checks must be recorded after their receipts exist. The selected backup scope does not prove every historical private artifact, offsite retention, or a 24-hour backup policy.
+- Deployment, the final release identity and offline restore checks have been recorded in their local receipts and the integration review. The selected backup scope does not prove every historical private artifact, offsite retention, or a 24-hour backup policy.
 - The deterministic assistant review is not an autonomous production agent.
 - Current platform behavior still depends on each partner, shop, category, brand, logistics channel, and API capability at execution time.
 - Some categories require size charts, certifications, video, or other metadata that cannot be invented by the application.

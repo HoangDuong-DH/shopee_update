@@ -2,7 +2,9 @@
 
 ## Trạng thái release
 
-Bản nâng cấp nội bộ và các sửa chữa đang vận hành đã được kết hợp trên nhánh `codex/product-integration`. Đây là bản ListingStudio dùng để kiểm và chuẩn bị release. Sao lưu, phục hồi offline, xác minh migration và triển khai sang checkout vận hành đang tiến hành; chưa công bố hoàn tất triển khai hoặc commit release cuối khi chưa có biên nhận. Đăng hàng, sao chép, sửa listing thật và tự tiếp tục các đợt vẫn tạm dừng.
+Bản nâng cấp và sửa chữa vận hành đã hợp nhất tại **`2ba212d` trên `feat/internal-app`**, giữ hai nhánh cha `be4e5d6` và `b232204`. ListingStudio chạy tại API **4310** và giao diện build **5173**; database `ready`, worker `online`. Bốn mục chính được kiểm trên dữ liệu hiện có. Đăng hàng, sao chép, sửa listing thật, tự tiếp tục đợt và bảo trì kết nối vẫn tạm dừng.
+
+Bản sao lưu các thư mục đã chọn được đối chiếu checksum: **9.793 tệp / 5.397.090.009 byte**, gồm dump mọi schema và nguồn/media/biên nhận hiện có trong phạm vi đó; cấu hình và khóa được bảo vệ riêng. Phục hồi offline bảo toàn số dòng/hash của **88 bảng cũ**, giải mã **16 giá trị thông tin xác thực**, áp năm migration mới và chỉ lịch sử migration thay đổi. Không chạy API/worker hay gọi Shopee trên database phục hồi. Sau triển khai, dữ liệu nghiệp vụ, kết nối, các đợt tạm dừng và **1.620 tệp nguồn / 3.133.586.103 byte** giữ nguyên; chỉ `schema_migrations` và `worker_heartbeats` thay đổi như dự kiến. Tệp lịch sử thiếu vẫn là ngoại lệ; đây không phải backup offsite hoặc khôi phục tệp đã mất từ trước.
 
 Không thay toàn bộ thư mục vận hành bằng một bản sao checkout. Mã release và các migration bổ sung được review riêng; cấu hình, khóa mã hóa, dữ liệu nguồn, kho blob, manifests và journal riêng phải được bảo toàn. Không xóa dữ liệu local hoặc đầu vào bên ngoài deployment.
 
@@ -61,8 +63,12 @@ node scripts/verify-internal.mjs --browser
 
 Verifier bắt buộc loopback PostgreSQL 5443/database thử, tắt writer và bảo trì kết nối, dùng dotenv rỗng và fixture browser tự chọn schema/cổng. Đây không phải lệnh migrate, deploy hoặc khởi động lại bản vận hành. Schema đã có migration history không tương thích phải được giữ riêng; không ghi lại checksum để dùng nó như schema sạch.
 
-## Điều kiện hoàn tất triển khai
+## Duy trì sau triển khai
 
 Người điều phối release cần ghi biên nhận backup và phục hồi offline, đối chiếu byte các migration cũ, dữ liệu bảng và hash tệp, rồi xác minh migration 047–051 trên bản phục hồi. Backup phải gồm dump database, blob nguồn, media/manifest/journal/receipt ngoài `DATA_ROOT` đang được tham chiếu và bản cấu hình/khóa được bảo vệ riêng. Tệp đã thiếu không thể được backup bằng cách lập manifest mới; phạm vi các roots được chọn không chứng minh toàn bộ lịch sử riêng đã đủ, backup offsite hoặc chính sách lưu 24 giờ.
 
-Sau khi xác minh backup/restore và chốt release commit, mới chuyển mã, áp migration bổ sung và kiểm readiness/heartbeat/giao diện. Không chạy API/worker trên database phục hồi có kết nối/công việc thật để kiểm nhanh. Không bật hai writer, tự resume lô cũ hoặc tự gửi Shopee khi khởi động lại. Trạng thái triển khai trong review và handoff sẽ được cập nhật theo biên nhận thực tế.
+Backup/restore, merge, migration và readiness/heartbeat/giao diện đã hoàn tất. Không chạy API/worker trên bản phục hồi có kết nối/công việc thật; không bật hai writer hoặc tự tiếp tục lô cũ. Sáu token shop thật còn hạn theo bản đã lưu khi kiểm lúc 06:07 UTC; một shop vẫn ở trạng thái `refresh_unknown` và TEST chưa có bằng chứng về hạn token. Đây không phải lượt kiểm quyền Shopee mới. Bảo trì kết nối tạm tắt trong cửa sổ triển khai; cần kiểm trạng thái kết nối và quyết định bật lại trước công việc API thật.
+
+## Bảo vệ nguồn mã release
+
+Mã thực thi giữ đúng bản kiểm tổng `run-1bwVTX`. Chỉ tài liệu và quy tắc Git `packages/persistence/migrations/*.sql -text` được bổ sung sau kiểm tổng; 51 blob SQL của index cuối đã đối chiếu SHA với bản đóng băng. Quy tắc Git bảo vệ byte của migration đã áp khi checkout/merge. Build production mới đạt: entry JS gzip **124,48 KB** + preload React **3 KB**, so với baseline **372,13 KB** (ít hơn khoảng **65,7%** số byte tải ban đầu). Đây là dung lượng tải, không phải phép đo thời gian khởi động.

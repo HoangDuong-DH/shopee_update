@@ -8,7 +8,7 @@
 
 ListingStudio là ứng dụng nội bộ để chuẩn hóa dữ liệu sản phẩm, chuẩn bị lô và đăng hoặc cập nhật nhiều listing Shopee qua OpenAPI. Hệ thống giữ liên kết từ dữ liệu trên sàn về đúng Word, ảnh và dòng SKU/giá nguồn để người vận hành có thể kiểm tra, phục hồi và tiếp tục công việc mà không phải nhập lại từng sản phẩm.
 
-> **Trạng thái ngày 01/10/2026:** mã nâng cấp đã được tích hợp vào nhánh release; sao lưu, kiểm tra phục hồi và triển khai sang bản vận hành đang tiến hành. Đăng hàng, sao chép và sửa listing thật vẫn tạm dừng. Kết quả chạy thử tại máy không được coi là bằng chứng sản phẩm đã được Shopee chấp nhận.
+> **Trạng thái ngày 01/10/2026:** bản nâng cấp đã hợp nhất với các sửa chữa hiện hành tại commit `2ba212d` trên `feat/internal-app` và chạy tại máy. API/database sẵn sàng; bộ nhập nguồn hoạt động. Đăng hàng, sao chép và sửa listing thật vẫn tạm dừng. Kết quả kiểm tại máy không phải bằng chứng sản phẩm đã được Shopee chấp nhận.
 
 ## Bài toán hệ thống giải quyết
 
