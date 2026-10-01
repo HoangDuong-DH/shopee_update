@@ -6,6 +6,7 @@ import { canonicalJson } from '@shopee/domain';
 import { SecretBox } from '@shopee/gateway';
 import type { PreparedWireResponse } from '../../../packages/shopee/src/prepared-transport.js';
 import { SellerKnowledgeTransport, sanitizeKnowledge } from './seller-knowledge-transport.js';
+import { defaultShopListingCopyPolicy, shopListingCopyPolicySchema, type ShopListingCopyPolicy } from './shop-listing-copy-policy.js';
 
 type Db = Pick<PoolClient, 'query'>;
 export type SellerKnowledgeScope = {
@@ -130,6 +131,53 @@ const idText = (v: unknown): string | null =>
       ? v
       : null;
 const string = (v: unknown) => (typeof v === 'string' ? v : '');
+type ArchiveMediaSource = {
+  role: string;
+  ordinal: number;
+  sourceMediaId: string | null;
+  sourceUrl: string | null;
+};
+function expectedArchiveMedia(rawItem: any, rawModels: any): ArchiveMediaSource[] {
+  const refs: ArchiveMediaSource[] = [];
+  const add = (role: string, ordinal: number, id: unknown, url: unknown) =>
+    refs.push({
+      role,
+      ordinal,
+      sourceMediaId: typeof id === 'string' ? id : null,
+      sourceUrl: typeof url === 'string' ? url : null,
+    });
+  const gallery = rawItem?.image;
+  if (Array.isArray(gallery?.image_id_list))
+    gallery.image_id_list.forEach((id: unknown, index: number) =>
+      add('gallery', index, id, gallery.image_url_list?.[index]),
+    );
+  const cover = rawItem?.promotion_image;
+  if (Array.isArray(cover?.image_id_list))
+    cover.image_id_list.forEach((id: unknown, index: number) =>
+      add('cover', index, id, cover.image_url_list?.[index]),
+    );
+  const fields = rawItem?.description_info?.extended_description?.field_list;
+  if (Array.isArray(fields))
+    fields.forEach((field: any, index: number) => {
+      if (field?.field_type === 'image')
+        add('description', index, field.image_info?.image_id, field.image_info?.image_url);
+    });
+  if (Array.isArray(rawModels?.tier_variation))
+    rawModels.tier_variation.forEach((tier: any, tierIndex: number) => {
+      if (Array.isArray(tier?.option_list))
+        tier.option_list.forEach((option: any, index: number) => {
+          if (option?.image)
+            add(`variation-${tierIndex}`, index, option.image.image_id, option.image.image_url);
+        });
+    });
+  if (Array.isArray(rawItem?.video_info))
+    rawItem.video_info.forEach((video: any, index: number) => {
+      add('video', index, null, video?.video_url);
+      if (video?.thumbnail_url)
+        add('video-thumbnail', index, null, video.thumbnail_url);
+    });
+  return refs;
+}
 function classifyReadWarnings(path: string, result: any): { codes: string[]; blocking: boolean } {
   const warnings = [result.envelope?.warning, result.response?.warning].filter((value) =>
     typeof value === 'string' ? value.trim().length > 0 : value !== undefined && value !== null,
@@ -966,6 +1014,203 @@ export class SellerKnowledgeService {
           .catch(() => undefined);
       db.release();
     }
+  }
+  async listArchives() {
+    const rows = (await this.repo.pool.query(`
+      SELECT a.id,a.connection_id,a.source_shop_id,a.name,a.selection,a.source_sync_id,
+        a.created_at,a.completed_at,a.item_count
+      FROM shop_listing_archives a
+      JOIN connections c ON c.id=a.connection_id
+        AND c.environment='production' AND c.shop_id=a.source_shop_id
+      ORDER BY a.created_at DESC`)).rows;
+    return rows.map((row) => ({
+      id: row.id, connectionId: row.connection_id, sourceShopId: row.source_shop_id,
+      name: row.name, selection: row.selection, sourceSyncId: row.source_sync_id,
+      createdAt: iso(row.created_at), completedAt: row.completed_at ? iso(row.completed_at) : null,
+      itemCount: row.item_count,
+    }));
+  }
+  async getCopyPlan(archiveId: string) {
+    z.string().uuid().parse(archiveId);
+    const archive = (await this.repo.pool.query(`
+      SELECT a.id,a.source_shop_id,c.partner_id
+      FROM shop_listing_archives a JOIN connections c ON c.id=a.connection_id
+      WHERE a.id=$1 AND c.environment='production' AND c.shop_id=a.source_shop_id`,
+      [archiveId])).rows[0];
+    if (!archive) throw Error('KNOWLEDGE_ARCHIVE_NOT_FOUND');
+    const plan = (await this.repo.pool.query(`
+      SELECT targets,policy,revision,updated_at FROM shop_listing_copy_plans WHERE archive_id=$1`,
+      [archiveId])).rows[0];
+    return {
+      archiveId, sourceShopId: archive.source_shop_id,
+      sourcePartnerId: archive.partner_id,
+      targets: plan?.targets ?? [], policy: plan ? shopListingCopyPolicySchema.parse(plan.policy) : defaultShopListingCopyPolicy,
+      revision: plan?.revision ?? 0,
+      updatedAt: plan?.updated_at ? iso(plan.updated_at) : null,
+    };
+  }
+  async saveCopyPlan(input: {
+    archiveId: string;
+    expectedRevision: number;
+    targets: { partnerId: string; shopId: string; displayName?: string }[];
+    policy?: ShopListingCopyPolicy;
+  }) {
+    z.string().uuid().parse(input.archiveId);
+    z.number().int().nonnegative().parse(input.expectedRevision);
+    if (new Set(input.targets.map((target) => `${target.partnerId}:${target.shopId}`)).size !== input.targets.length)
+      throw Error('KNOWLEDGE_COPY_PLAN_DUPLICATE_TARGET');
+    return transaction(this.repo.pool, async (db) => {
+      await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+        [`knowledge-copy-plan:${input.archiveId}`]);
+      const archive = (await db.query(`
+        SELECT a.source_shop_id,c.partner_id FROM shop_listing_archives a
+        JOIN connections c ON c.id=a.connection_id
+        WHERE a.id=$1 AND c.environment='production' AND c.shop_id=a.source_shop_id`,
+        [input.archiveId])).rows[0];
+      if (!archive) throw Error('KNOWLEDGE_ARCHIVE_NOT_FOUND');
+      if (input.targets.some((target) =>
+        target.partnerId === archive.partner_id && target.shopId === archive.source_shop_id))
+        throw Error('KNOWLEDGE_COPY_PLAN_SOURCE_IS_TARGET');
+      const current = (await db.query(
+        'SELECT revision,policy FROM shop_listing_copy_plans WHERE archive_id=$1 FOR UPDATE',
+        [input.archiveId])).rows[0];
+      if ((current?.revision ?? 0) !== input.expectedRevision)
+        throw Error('KNOWLEDGE_COPY_PLAN_REVISION_CONFLICT');
+      const revision = input.expectedRevision + 1;
+      const policy = shopListingCopyPolicySchema.parse(input.policy ?? current?.policy ?? defaultShopListingCopyPolicy);
+      await db.query(`
+        INSERT INTO shop_listing_copy_plans(archive_id,targets,policy,revision)
+        VALUES($1,$2,$3,$4)
+        ON CONFLICT(archive_id) DO UPDATE SET
+          targets=EXCLUDED.targets,policy=EXCLUDED.policy,revision=EXCLUDED.revision,updated_at=now()`,
+        [input.archiveId, JSON.stringify(input.targets), JSON.stringify(policy), revision]);
+      return {
+        archiveId: input.archiveId, sourceShopId: archive.source_shop_id,
+        sourcePartnerId: archive.partner_id,
+        targets: input.targets, policy, revision, updatedAt: new Date().toISOString(),
+      };
+    });
+  }  async listArchiveItems(archiveId: string, limit = 100, afterItemId?: string) {
+    z.string().uuid().parse(archiveId);
+    const size = z.number().int().min(1).max(100).parse(limit);
+    if (afterItemId !== undefined) numericId.parse(afterItemId);
+    const rows = (await this.repo.pool.query(`
+      SELECT i.item_id,i.evidence_id,i.content_hash,i.item_status,i.title,i.brand_id,i.category_id,
+        i.model_count,i.gallery_count,i.video_count
+      FROM shop_listing_archive_items i
+      JOIN shop_listing_archives a ON a.id=i.archive_id
+      JOIN connections c ON c.id=a.connection_id
+        AND c.environment='production' AND c.shop_id=a.source_shop_id
+      WHERE i.archive_id=$1 AND ($2::text IS NULL OR i.item_id>$2)
+      ORDER BY i.item_id LIMIT $3`, [archiveId, afterItemId ?? null, size])).rows;
+    return rows.map((row) => ({
+      itemId: row.item_id, evidenceId: row.evidence_id, contentHash: row.content_hash,
+      itemStatus: row.item_status, title: row.title, brandId: row.brand_id,
+      categoryId: row.category_id, modelCount: row.model_count,
+      galleryCount: row.gallery_count, videoCount: row.video_count,
+    }));
+  }
+  async getArchiveItem(archiveId: string, itemId: string) {
+    z.string().uuid().parse(archiveId);
+    numericId.parse(itemId);
+    const row = (await this.repo.pool.query(`
+      SELECT a.source_shop_id,a.connection_id,a.selection,a.source_sync_id,a.completed_at,
+        i.item_id,i.evidence_id,i.content_hash,i.item_status,i.title,i.brand_id,i.category_id,
+        i.model_count,i.gallery_count,i.video_count,
+        o.body,o.scope,o.observed_at,o.content_hash AS observation_hash,
+        c.shop_id AS connection_shop_id,c.partner_id AS connection_partner_id,c.environment
+      FROM shop_listing_archives a
+      JOIN connections c ON c.id=a.connection_id
+      JOIN shop_listing_archive_items i ON i.archive_id=a.id
+      JOIN seller_knowledge_observations o ON o.id=i.evidence_id
+        AND o.connection_id=a.connection_id AND o.kind='listing' AND o.subject_key=i.item_id
+      WHERE a.id=$1 AND i.item_id=$2`, [archiveId, itemId])).rows[0];
+    if (!row || row.content_hash !== row.observation_hash)
+      throw Error('KNOWLEDGE_ARCHIVE_ITEM_NOT_FOUND');
+    if (
+      row.environment !== 'production' ||
+      row.source_shop_id !== row.connection_shop_id ||
+      row.scope?.environment !== 'production' ||
+      row.scope?.shopId !== row.source_shop_id ||
+      row.scope?.partnerId !== row.connection_partner_id ||
+      row.body?.scope?.shopId !== row.source_shop_id ||
+      row.body?.connectionId !== row.connection_id ||
+      idText(row.body?.rawItem?.item_id) !== itemId
+    ) throw Error('KNOWLEDGE_ARCHIVE_SCOPE_MISMATCH');
+    const mediaRefs = (await this.repo.pool.query(`
+      SELECT role,ordinal,source_media_id,source_url,blob_sha256,state,last_error
+      FROM shop_listing_media_refs
+      WHERE archive_id=$1 AND item_id=$2
+      ORDER BY role,ordinal`, [archiveId, itemId])).rows.map((ref) => ({
+      role: ref.role, ordinal: ref.ordinal, sourceMediaId: ref.source_media_id,
+      sourceUrl: ref.source_url, blobSha256: ref.blob_sha256, state: ref.state,
+      lastError: ref.last_error,
+    }));
+    const expectedMedia = expectedArchiveMedia(row.body.rawItem, row.body.rawModels);
+    const registered = new Map(mediaRefs.map((ref) => [`${ref.role}:${ref.ordinal}`, ref]));
+    const mediaRefsExpected = expectedMedia.length;
+    const mediaRefsRegistered = mediaRefs.length;
+    const mediaRefsUnregistered = Math.max(0, mediaRefsExpected - mediaRefsRegistered);
+    const mediaRefsStored = mediaRefs.filter((ref) => ref.state === 'stored' && ref.blobSha256).length;
+    const mediaRefsFailed = mediaRefs.filter((ref) => ref.state === 'failed').length;
+    const mediaRefsPending = mediaRefsRegistered - mediaRefsStored - mediaRefsFailed;
+    const mediaSourceMatched =
+      mediaRefsExpected > 0 &&
+      mediaRefsExpected === mediaRefsRegistered &&
+      expectedMedia.every((source) => {
+        const ref = registered.get(`${source.role}:${source.ordinal}`);
+        return ref?.sourceMediaId === source.sourceMediaId &&
+          ref?.sourceUrl === source.sourceUrl;
+      });
+    const mediaCaptureComplete =
+      mediaSourceMatched && mediaRefsPending === 0 && mediaRefsFailed === 0;
+    const promotion = (await this.repo.pool.query(`
+      SELECT content_hash,body,observed_at FROM shop_listing_archive_aux
+      WHERE archive_id=$1 AND item_id=$2 AND kind='promotion'`,
+      [archiveId, itemId])).rows[0];
+    const sourceHasPromotion = row.body.rawItem.has_promotion === true;
+    const promotionCaptureComplete = !sourceHasPromotion || Boolean(
+      promotion?.body?.sourceShopId === row.source_shop_id &&
+      promotion?.body?.itemId === itemId &&
+      promotion?.body?.path === '/api/v2/product/get_item_promotion' &&
+      Array.isArray(promotion?.body?.response?.success_list) &&
+      promotion.body.response.success_list.some(
+        (entry: any) => idText(entry.item_id) === itemId,
+      ),
+    );
+    const copyBlockers = [
+      ...(!row.completed_at ? ['source_archive_incomplete'] : []),
+      ...(!mediaCaptureComplete ? ['media_capture_incomplete'] : []),
+      ...(!promotionCaptureComplete ? ['source_promotion_capture_incomplete'] : []),
+      ...(row.body.issues?.some((issue: string) => issue !== 'SHIPPING_FEE_UNAVAILABLE')
+        ? ['source_issues_require_review'] : []),
+      'target_shop_brand_category_logistics_promotion_variation_preflight_required',
+    ];
+    return {
+      archiveId, itemId, sourceShopId: row.source_shop_id,
+      sourceConnectionId: row.connection_id, sourceSyncId: row.source_sync_id,
+      sourceSelection: row.selection, archiveComplete: row.completed_at !== null,
+      evidenceId: row.evidence_id, contentHash: row.content_hash,
+      observedAt: iso(row.observed_at), scope: row.scope,
+      title: row.title, itemStatus: row.item_status, brandId: row.brand_id,
+      categoryId: row.category_id, modelCount: row.model_count,
+      galleryCount: row.gallery_count, videoCount: row.video_count,
+      rawItem: row.body.rawItem, rawModels: row.body.rawModels,
+      sourceIssues: row.body.issues ?? [],
+      mediaRefs, mediaRefsExpected, mediaRefsRegistered, mediaRefsUnregistered,
+      mediaRefsStored, mediaRefsFailed, mediaRefsPending, mediaSourceMatched,
+      mediaCaptureComplete,
+      sourceHasPromotion, promotionCaptureComplete,
+      promotionSnapshot: promotion && promotionCaptureComplete ? {
+        contentHash: promotion.content_hash,
+        observedAt: iso(promotion.observed_at),
+        response: promotion.body.response,
+      } : null,
+      promotionTransferPolicy: 'target_shop_reconciliation_required',
+      canCopyNow: false,
+      copyBlockers,
+      copyReadiness: 'blocked',
+    };
   }
   async listShops() {
     const shops = (await listShopConnections(this.repo.pool)).filter(

@@ -41,7 +41,13 @@ const inputSchema = z
   })
   .strict()
   .refine((value) => (value.shopId === undefined) !== (value.mainAccountId === undefined));
-const responseId = z.number().int().positive().safe();
+// Shopee documents these identifiers as integers, but some live gateways
+// serialize numeric identifiers as JSON strings. Normalize both forms while
+// retaining the same positive-safe-integer boundary before scope checking.
+const responseId = z
+  .union([z.number().int().positive().safe(), z.string().regex(/^[1-9]\d*$/)])
+  .transform((value) => String(value))
+  .refine((value) => Number.isSafeInteger(Number(value)));
 const successSchema = z.object({
   error: z.literal(''),
   access_token: opaqueValue,
@@ -60,7 +66,10 @@ const successSchema = z.object({
   shop_id_list: z.array(responseId).max(2000).optional(),
   // This adapter enrolls shops only. Additional authorization types need an
   // explicitly separate scope; they must not silently enter this pilot.
-  merchant_id_list: z.array(responseId).max(0).optional(),
+  // Main-account seller authorization may legitimately return merchant IDs
+  // together with the selected shop IDs. We do not enroll or persist those
+  // merchants; the caller still requires the requested shop in shop_id_list.
+  merchant_id_list: z.array(responseId).max(2000).optional(),
   supplier_id_list: z.array(responseId).max(0).optional(),
   user_id_list: z.array(responseId).max(0).optional(),
   principal_id_list: z.array(responseId).max(0).optional(),
@@ -146,7 +155,13 @@ export async function exchangeProductionAuthorization(
       return { kind: 'unknown', reason: 'invalid_response' };
     }
     const common = z.object({ error: z.string() }).safeParse(raw);
-    if (!common.success) return { kind: 'unknown', reason: 'invalid_response' };
+    if (!common.success) {
+      console.warn('AUTH_TOKEN_RESPONSE_SCHEMA_INVALID', {
+        stage: 'common',
+        issues: common.error.issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code })),
+      });
+      return { kind: 'unknown', reason: 'invalid_response' };
+    }
     if (common.data.error)
       return {
         kind: 'rejected',
@@ -154,14 +169,28 @@ export async function exchangeProductionAuthorization(
       };
     if (!response.ok) return { kind: 'unknown', reason: 'transport' };
     const result = successSchema.safeParse(raw);
-    if (!result.success || (mainAccountId && !result.data.shop_id_list?.length))
+    if (!result.success) {
+      // Keep diagnostics useful without logging token values, codes, signed URLs,
+      // upstream messages, or the response body.
+      console.warn('AUTH_TOKEN_RESPONSE_SCHEMA_INVALID', {
+        stage: 'success',
+        issues: result.error.issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code })),
+      });
       return { kind: 'unknown', reason: 'invalid_response' };
+    }
+    if (mainAccountId && !result.data.shop_id_list?.length) {
+      console.warn('AUTH_TOKEN_RESPONSE_SCHEMA_INVALID', {
+        stage: 'scope',
+        issues: [{ path: 'shop_id_list', code: 'missing_or_empty' }],
+      });
+      return { kind: 'unknown', reason: 'invalid_response' };
+    }
     return {
       kind: 'success',
       accessToken: result.data.access_token,
       refreshToken: result.data.refresh_token,
       expiresIn: result.data.expire_in,
-      ...(result.data.shop_id_list ? { shopIdList: result.data.shop_id_list.map(String) } : {}),
+      ...(result.data.shop_id_list ? { shopIdList: result.data.shop_id_list } : {}),
       ...(result.data.request_id ? { requestId: result.data.request_id } : {}),
     };
   } catch {

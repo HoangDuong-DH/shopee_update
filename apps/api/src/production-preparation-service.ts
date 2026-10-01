@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, legacyProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -13,6 +14,8 @@ import { registerProductionBatch } from './production-batch-service.js';
 import { productionPilotScope } from './production-pilot-source.js';
 import { validateDraftKnowledgeAcceptance } from './seller-knowledge-draft-service.js';
 import { projectProductPriceIssues } from './product-service.js';
+import { assertListingPriceMappingReceipt } from './listing-price-mapping.js';
+import { preparationFieldChanges, type PreparationSourceChange } from './production-preparation-changes.js';
 
 const sha = (v: Uint8Array | string) => createHash('sha256').update(v).digest('hex');
 const fingerprint = (v: unknown) => sha(canonicalJson(v));
@@ -25,6 +28,7 @@ function fail(code: string): never { throw Error('PREPARATION_' + code); }
 type Options = {
   root?: string;
   build?: typeof buildProductionDraftSource;
+  assertPriceMapping?: typeof assertListingPriceMappingReceipt;
   register?: typeof registerProductionBatch;
   readSource?: (key: string) => Promise<unknown>;
   verifyStock?: (referenceId:string) => Promise<{expectedLocationId:string;writeLocationId:string|null}|null>;
@@ -69,12 +73,14 @@ export class ProductionPreparationService {
     return !!proof && Object.values(location.expectedLocationBySku).every(v=>v===proof.expectedLocationId) && Object.values(location.writeLocationBySku).every(v=>v===proof.writeLocationId);
   }
   private async row(id: string,query:Pick<PoolClient,'query'>=this.repo.pool) {
-    return (await query.query('SELECT * FROM production_source_preparations WHERE id=$1', [uuid.parse(id)])).rows[0];
+    const row = (await query.query('SELECT * FROM production_source_preparations WHERE id=$1', [uuid.parse(id)])).rows[0];
+    if(row) assertProductionScope(row.body.scope ?? legacyProductionScope);
+    return row;
   }
   private public(row: any) {
     return {
       id: row.id, fingerprint: row.fingerprint, createdAt: new Date(row.created_at).toISOString(),
-      scope: productionPilotScope,
+      scope: row.body.scope ?? legacyProductionScope,
       publicationMode: productionPublicationMode(row.body),
       imageQcPolicy: productionImageQcPolicy(row.body),
       readyCount: row.body.entries.filter((e: any) => e.kind === 'ready').length,
@@ -86,14 +92,34 @@ export class ProductionPreparationService {
     };
   }
   async get(id: string) { const row = await this.row(id); if (!row) fail('NOT_FOUND'); return this.public(row); }
+  async sourceChanges(id:string) {
+    const row=await this.row(id);if(!row)fail('NOT_FOUND');
+    const entries:PreparationSourceChange[]=[];
+    for(const entry of row.body.entries) {
+      const current:any=await (this.options.readSource ?? ((key:string)=>this.repo.getProduct(key)))(entry.productKey);
+      const before=entry.sourceSnapshot?.draft ?? await this.repo.getProduct(entry.productKey,entry.sourceRevision);
+      const currentRevision=Number.isSafeInteger(current?.revision) && current.revision>0 ? current.revision : null;
+      let archived=false;
+      try {await assertPreparationLocalSourcesActive(this.repo.pool,[entry]);}
+      catch(error) {if(error instanceof Error && error.message==='LOCAL_RESOURCE_ARCHIVED')archived=true;else throw error;}
+      const changes=preparationFieldChanges(before,current);
+      const state:PreparationSourceChange['state']=archived?'archived':!current?'missing':currentRevision!==entry.sourceRevision || changes.length?'changed':'current';
+      entries.push({productKey:entry.productKey,title:entry.title ?? entry.productKey,sourceRevision:entry.sourceRevision,currentRevision,state,
+        changedFields:changes.map(change=>change.field),changes});
+    }
+    return {preparationId:id,scope:row.body.scope ?? legacyProductionScope,entries};
+  }
   async context() {
     const hidden = new Set((await workspaceResetState())?.hiddenPreparationIds ?? []);
     const [products, imports, recent] = await Promise.all([
       this.repo.listProducts(), this.repo.listImports(),
-      this.repo.pool.query('SELECT * FROM production_source_preparations ORDER BY created_at DESC LIMIT 30'),
+      this.repo.pool.query(`SELECT * FROM production_source_preparations
+        WHERE COALESCE(body->'scope'->>'partnerId','2010476')=$1
+        AND COALESCE(body->'scope'->>'shopId','1423724897')=$2
+        ORDER BY created_at DESC LIMIT 30`,[currentProductionScope().partnerId,currentProductionScope().shopId]),
     ]);
     const visibleProducts = await projectProductPriceIssues(this.repo, products);
-    return {scope:productionPilotScope,products:visibleProducts.map(p=>({productKey:p.productKey,revision:p.revision,title:p.title.value,
+    return {scope:currentProductionScope(),products:visibleProducts.map(p=>({productKey:p.productKey,revision:p.revision,title:p.title.value,
       skus:p.variants.map(v=>v.sku.value), categoryId:p.categoryId?.value,brandId:p.brandId?.value,
       sourceSelection:p.sourceSelection,attributes:p.attributes,logistics:p.logistics,issues:p.issues})),
       pricebooks:imports.filter(i=>i.kind==='xlsx' && i.status==='ready').map(i=>({id:i.id,filename:i.filename})),
@@ -129,10 +155,17 @@ export class ProductionPreparationService {
           const draft = await repo.getProduct(entry.productKey);
           entries.push({...entry,kind:'blocked',title:draft?.title.value ?? entry.productKey,issues:result.issues}); continue;
         }
+        try { await (this.options.assertPriceMapping ?? assertListingPriceMappingReceipt)(repo,result.sourceSnapshot.draft,result.priceProof); }
+        catch {
+          entries.push({...entry,kind:'blocked',title:result.document.title,issues:[{
+            code:'PRICE_MAPPING_CONFIRMATION_REQUIRED',field:'priceSelection',severity:'block',
+            message:'Chưa có bản đối chiếu SKU và giá được anh xác nhận cho đúng phiên bản listing này. Mở Kiểm tra listing để xem từng dòng nguồn.',sources:[],
+          }]}); continue;
+        }
         let knowledgeAcceptance;
         if (entry.knowledgeAcceptanceId !== undefined) {
           try {
-            knowledgeAcceptance = await validateDraftKnowledgeAcceptance(repo, {receiptId:uuid.parse(entry.knowledgeAcceptanceId),productKey:entry.productKey,expectedRevision:entry.sourceRevision,categoryId:result.document.categoryId,brandId:result.document.brandId,scope:productionPilotScope,attributeList:result.proposedAttributeList});
+            knowledgeAcceptance = await validateDraftKnowledgeAcceptance(repo, {receiptId:uuid.parse(entry.knowledgeAcceptanceId),productKey:entry.productKey,expectedRevision:entry.sourceRevision,categoryId:result.document.categoryId,brandId:result.document.brandId,scope:currentProductionScope(),attributeList:result.proposedAttributeList});
           } catch (error) {
             entries.push({...entry,kind:'blocked',title:result.document.title,issues:[{code:error instanceof Error ? error.message : 'KNOWLEDGE_DRAFT_ACCEPTANCE_INVALID',field:'attributes',severity:'block',message:'Lựa chọn gợi ý đã hết hạn hoặc không còn khớp nguồn, shop và ngành hiện tại. Đọc lại gợi ý rồi chọn lại.',sources:[]}]});continue;
           }
@@ -166,7 +199,7 @@ export class ProductionPreparationService {
         entries.push({...saved,stockMappingEvidence,...(knowledgeAcceptance ? {knowledgeAcceptance} : {}),productKey:entry.productKey,sourceRevision:entry.sourceRevision,title:result.document.title,
           assets,sourceFile:{id:entry.productKey,role:'listing-snapshot' as const,path:sourcePath,sha256:snapshotSha},priceFiles});
       }
-      const body={entries,publicationMode:input.publicationMode ?? 'hidden_for_review',imageQcPolicy:input.imageQcPolicy ?? 'required'}, fp=fingerprint(body);
+      const body={scope:currentProductionScope(),entries,publicationMode:input.publicationMode ?? 'hidden_for_review',imageQcPolicy:input.imageQcPolicy ?? 'required'}, fp=fingerprint(body);
       await client.query('INSERT INTO production_source_preparations(id,request_hash,request,body,fingerprint) VALUES($1,$2,$3,$4,$5)',[input.id,hash,input,body,fp]);
       return this.public(await this.row(input.id,client));
     });
@@ -188,9 +221,11 @@ export class ProductionPreparationService {
       // Never retain this cache across registrations: a later attempt must read afresh.
       const priceImports = new Map<string, Awaited<ReturnType<Repository['getImport']>>>();
       for(const entry of ready) {
+        try { await (this.options.assertPriceMapping ?? assertListingPriceMappingReceipt)(repo,entry.sourceSnapshot.draft,entry.priceProof); }
+        catch { fail('PRICE_MAPPING_CHANGED'); }
         const current=await (this.options.readSource ?? ((key:string)=>repo.getProduct(key)))(entry.productKey);
         if(fingerprint(current)!==fingerprint(entry.sourceSnapshot.draft)) fail('SOURCE_CHANGED');
-        if(entry.knowledgeAcceptance) await validateDraftKnowledgeAcceptance(repo,{receiptId:entry.knowledgeAcceptance.id,productKey:entry.productKey,expectedRevision:entry.sourceRevision,categoryId:entry.document.categoryId,brandId:entry.document.brandId,scope:productionPilotScope,attributeList:entry.proposedAttributeList});
+        if(entry.knowledgeAcceptance) await validateDraftKnowledgeAcceptance(repo,{receiptId:entry.knowledgeAcceptance.id,productKey:entry.productKey,expectedRevision:entry.sourceRevision,categoryId:entry.document.categoryId,brandId:entry.document.brandId,scope:currentProductionScope(),attributeList:entry.proposedAttributeList});
         if(!await this.stockMatches(entry.stockLocation,stockProofs,repo)) fail('STOCK_MAPPING_CHANGED');
         for(const p of entry.priceProof) {
           if (!priceImports.has(p.importId)) priceImports.set(p.importId, await repo.getImport(p.importId));
@@ -202,7 +237,7 @@ export class ProductionPreparationService {
       for(let i=0;i<ready.length;i+=4) {
         const group=ready.slice(i,i+4),batchId=keyUuid(id+':'+row.fingerprint+':'+i);
         const sourceFiles=Array.from(new Map(group.flatMap((e:any)=>[e.sourceFile,...e.priceFiles]).map((file:any)=>[file.id,file])).values());
-        const value:ProductionBatchManifest={version:2,batchId,preparation:{id,fingerprint:row.fingerprint},scope:productionPilotScope,
+        const value:ProductionBatchManifest={version:2,batchId,preparation:{id,fingerprint:row.fingerprint},scope:currentProductionScope(),
           ...(row.body.publicationMode ? {publicationMode:productionPublicationMode(row.body)} : {}),
           ...(row.body.imageQcPolicy ? {imageQcPolicy:productionImageQcPolicy(row.body)} : {}),
           authorizationReference:'operator-preparation:'+id+':'+row.fingerprint,sourceFiles:sourceFiles as any,

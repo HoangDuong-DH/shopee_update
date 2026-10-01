@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { hostname } from 'node:os';
-import { Pool, Repository, BlobStore, SandboxCreateTrialStore } from '@shopee/persistence';
+import { Pool, Repository, BlobStore, SandboxCreateTrialStore, runtimePoolConfig } from '@shopee/persistence';
 import { importNext } from './imports.js';
 import { runSandboxCreateTrialOnce } from './sandbox-create-trials.js';
-const pool = new Pool({ connectionString: process.env.DATABASE_URL }),
+const pool = new Pool(runtimePoolConfig()),
   repo = new Repository(pool),
   blobs = new BlobStore(process.env.DATA_ROOT ?? '.local/data'),
   trials = new SandboxCreateTrialStore(pool);
@@ -19,15 +19,22 @@ process.once('SIGTERM', () => {
   stopped = true;
 });
 console.log('Worker started: source imports and explicitly queued TEST create trials only.');
+async function heartbeat() {
+  await pool.query('INSERT INTO worker_heartbeats(id) VALUES($1) ON CONFLICT(id) DO UPDATE SET updated_at=now()', [workerId]);
+}
+let heartbeatInFlight: Promise<void> | null = null;
+const heartbeatTimer = setInterval(() => {
+  if (stopped || heartbeatInFlight) return;
+  heartbeatInFlight = heartbeat().catch(() => { /* Main loop reports storage failures. */ })
+    .finally(() => { heartbeatInFlight = null; });
+}, 5000);
+heartbeatTimer.unref();
 while (!stopped) {
   try {
-    await pool.query(
-      'INSERT INTO worker_heartbeats(id) VALUES($1) ON CONFLICT(id) DO UPDATE SET updated_at=now()',
-      [workerId],
-    );
+    await heartbeat();
     // Give both queues a turn; imports must not starve a submitted bounded trial.
     const trialProcessed = await runSandboxCreateTrialOnce({ store: trials, repo, workerId });
-    const processed = await importNext(repo, blobs);
+    const processed = await importNext(repo, blobs, { workerId });
     if (hadFailure) console.log('Source worker storage connection recovered.');
     hadFailure = false;
     retryDelay = 1000;
@@ -44,4 +51,6 @@ while (!stopped) {
   }
   await new Promise((r) => setTimeout(r, 1000));
 }
+clearInterval(heartbeatTimer);
+await heartbeatInFlight;
 await pool.end();

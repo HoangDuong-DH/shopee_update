@@ -104,6 +104,8 @@ function validateShape(state: InputBatchState): Map<string, InputBatchFile[]> {
     if (media.coverPath) requirePath(group, media.coverPath, 'image');
   }
   for (const [group, path] of Object.entries(state.wordPaths)) requirePath(group, path, 'docx');
+  for (const group of Object.keys(state.contentSelections ?? {}))
+    if (!groups.has(group) || state.manifests?.[group] || state.pendingMappings?.[group]) throw Error('CONTENT_GROUP_INVALID');
   return groups;
 }
 
@@ -271,6 +273,7 @@ export class InputLibraryRepository {
       ...new Set([
         ...state.files.flatMap((file) => (file.importId ? [file.importId] : [])),
         ...(state.priceSelection ? [state.priceSelection.importId] : []),
+        ...Object.values(state.contentSelections ?? {}).map(v => v.binding.mapping.importId),
       ]),
     ];
     const rows = ids.length
@@ -294,6 +297,11 @@ export class InputLibraryRepository {
         extensionKind(file.name) !== source.kind
       )
         throw new Error('INPUT_BATCH_SOURCE_MISMATCH');
+    }
+    for (const selection of Object.values(state.contentSelections ?? {})) {
+      const source = sources.get(selection.binding.mapping.importId);
+      if (!source || source.kind !== 'xlsx' || source.sha256 !== selection.binding.mapping.sha256)
+        throw Error('CONTENT_WORKBOOK_HASH_MISMATCH');
     }
     if (state.priceSelection) {
       const selection = state.priceSelection;
@@ -328,6 +336,7 @@ export class InputLibraryRepository {
         ...Object.values(state.productKeys).map(resourceId=>({kind:'product' as const,resourceId})),
         ...state.files.flatMap(file=>file.importId ? [{kind:'pricebook' as const,resourceId:file.importId}] : []),
         ...(state.priceSelection ? [{kind:'pricebook' as const,resourceId:state.priceSelection.importId}] : []),
+        ...Object.values(state.contentSelections ?? {}).map(v=>({kind:'pricebook' as const,resourceId:v.binding.mapping.importId})),
       ]);
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
         'input-batch:' + id,
@@ -421,6 +430,7 @@ export class InputLibraryRepository {
         ...new Set([
           ...state.files.flatMap((file) => (file.importId ? [file.importId] : [])),
           ...(state.priceSelection ? [state.priceSelection.importId] : []),
+        ...Object.values(state.contentSelections ?? {}).map(v => v.binding.mapping.importId),
         ]),
       ];
       if (sourceIds.length)
@@ -458,6 +468,7 @@ export class InputLibraryRepository {
       ...new Set([
         ...record.state.files.flatMap((file) => (file.importId ? [file.importId] : [])),
         ...(record.state.priceSelection ? [record.state.priceSelection.importId] : []),
+        ...Object.values(record.state.contentSelections ?? {}).map(v => v.binding.mapping.importId),
       ]),
     ];
     const imports = ids.length
@@ -504,6 +515,7 @@ export class InputLibraryRepository {
         candidates.flatMap(({ state }) => [
           ...state.files.flatMap((file) => (file.importId ? [file.importId] : [])),
           ...(state.priceSelection ? [state.priceSelection.importId] : []),
+        ...Object.values(state.contentSelections ?? {}).map(v => v.binding.mapping.importId),
         ]),
       ),
     ];

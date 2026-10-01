@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { relative, sep, isAbsolute } from 'node:path';
@@ -11,11 +12,11 @@ export function productionPilotImageService(repo: Repository, blobs: BlobStore, 
   const service = new ImageQcService(repo, blobs);
   const source = async (input: Parameters<ProductionPilotCoverQcOptions['findCase']>[0]) => {
     const b = input.binding;
-    if (b.environment !== 'production' || b.partnerId !== '2010476' || b.shopId !== '1423724897' ||
+    if (b.environment !== 'production' || b.partnerId !== currentProductionScope().partnerId || b.shopId !== currentProductionScope().shopId ||
       b.role !== 'cover' || b.position !== 0) throw Error('PRODUCTION_PILOT_COVER_SCOPE_INVALID');
     const op = (await repo.pool.query(`SELECT source_payload FROM production_pilot_operations
       WHERE id=$1 AND owner_key=$2 AND item_id=$3 AND source_fingerprint=$4 AND state IN ('acknowledged','verified')`,
-    [b.operationId, 'production:2010476:1423724897', b.itemId, input.sourceFingerprint])).rows[0];
+    [b.operationId, productionOwner(), b.itemId, input.sourceFingerprint])).rows[0];
     const document = op?.source_payload?.document, assets = op?.source_payload?.assets;
     if (!document || document.cover.importId !== b.sourceAssetId || document.cover.sha256 !== input.sourceSha256 ||
       typeof assets?.[b.sourceAssetId] !== 'string') throw Error('PRODUCTION_PILOT_COVER_SOURCE_CHANGED');

@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -55,6 +56,7 @@ export type PreparationAutofillExplanation = {
   value?: unknown;
   message: string;
   source?: string;
+  confidence?: 'unconfirmed';
 };
 export type PreparationAutofillEntry = {
   productKey: string;
@@ -74,7 +76,7 @@ export type PreparationAutofillEntry = {
 };
 export type ProductionPreparationAutofillResult = {
   attributeMode: 'minimum_required' | 'source_supported';
-  scope: typeof productionPilotScope;
+  scope: ProductionScope;
   connectionRevision: number;
   observedAt: string;
   fingerprint: string;
@@ -234,7 +236,7 @@ function checkedHistory(row: any, connection: any) {
       !supportedId(op.item_id) ||
       op.connection_id !== connection.id ||
       op.owner_key !==
-        `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}` ||
+        `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}` ||
       !Number.isInteger(op.connection_revision) ||
       op.connection_revision < 1 ||
       op.connection_revision > connection.revision ||
@@ -245,7 +247,7 @@ function checkedHistory(row: any, connection: any) {
       !Array.isArray(payload?.document?.logistics) ||
       op.source_fingerprint !==
         hash({
-          scope: productionPilotScope,
+          scope: currentProductionScope(),
           sourceIdentity: op.source_identity,
           sourceRevision: op.source_revision,
           sourcePayload: payload,
@@ -286,7 +288,7 @@ export class ProductionPreparationAutofillService {
       const rows = (
         await this.repo.pool.query(
           'SELECT id,revision,environment,partner_id,shop_id,state,expires_at FROM connections WHERE environment=$1 AND partner_id=$2 AND shop_id=$3',
-          ['production', productionPilotScope.partnerId, productionPilotScope.shopId],
+          ['production', currentProductionScope().partnerId, currentProductionScope().shopId],
         )
       ).rows;
       const c = rows[0];
@@ -313,7 +315,7 @@ export class ProductionPreparationAutofillService {
           key,
           (this.options.metadata ? this.options.metadata(q) : metadataService.get(q, signal)).then((m) => {
             signal?.throwIfAborted();
-            if (m.connectionRevision !== connected.revision || !same(m.scope, productionPilotScope))
+            if (m.connectionRevision !== connected.revision || !same(m.scope, currentProductionScope()))
               fail('CONNECTION_CHANGED');
             return m;
           }),
@@ -326,7 +328,7 @@ export class ProductionPreparationAutofillService {
         `SELECT to_jsonb(o) AS operation,(SELECT to_jsonb(v) FROM production_pilot_verifications v WHERE v.operation_id=o.id) AS verification FROM production_pilot_operations o WHERE o.connection_id=$1 AND o.owner_key=$2 AND o.state='verified' ORDER BY o.created_at DESC LIMIT 100`,
         [
           connected.id,
-          `production:${productionPilotScope.partnerId}:${productionPilotScope.shopId}`,
+          `production:${currentProductionScope().partnerId}:${currentProductionScope().shopId}`,
         ],
       )
     ).rows.filter((r) => checkedHistory(r, connected));
@@ -347,13 +349,6 @@ export class ProductionPreparationAutofillService {
       }
     }
     const stockProof = stockMetadata?.reference?.writeMapping;
-    const verifiedLogistics = stockProof
-      ? history.find(
-          (r) =>
-            r.operation.id === stockProof.verifiedOperationId &&
-            r.verification.evidence_fingerprint === stockProof.verificationFingerprint,
-        )?.operation.source_payload.document.logistics
-      : undefined;
     const importCache = new Map<string, ReturnType<Repository['getImport']>>();
     const getImport = (id: string) => {
       if (!importCache.has(id)) importCache.set(id, this.repo.getImport(id));
@@ -473,7 +468,7 @@ export class ProductionPreparationAutofillService {
               observedAt:
                 r.observed_at instanceof Date ? r.observed_at.toISOString() : r.observed_at,
             });
-            return same(o.scope, productionPilotScope) ? [o] : [];
+            return same(o.scope, currentProductionScope()) ? [o] : [];
           } catch {
             return [];
           }
@@ -505,35 +500,32 @@ export class ProductionPreparationAutofillService {
               'Nguồn và lịch sử có ngành khác nhau; cần chọn ngành cho đúng công dụng.',
             );
           else if (sourceCategory) {
-            category = sourceCategory;
+            missing('categoryId', 'Ngành suy từ tên/cách dùng chưa được xác nhận; cần chọn ngành cho sản phẩm này.');
             result.explanations.push({
               field: 'categoryId',
-              value: category,
+              value: sourceCategory,
               message: additionalFamily
-                ? 'Công dụng trong tên và cách dùng khớp dòng SKU nguồn; ngành đề xuất theo công dụng, cần kiểm lại trước khi gửi.'
+                ? 'Gợi ý chưa xác nhận: công dụng trong tên và cách dùng khớp dòng SKU nguồn.'
                 : extendedRoom
-                  ? 'Tên và cách dùng cùng mô tả xịt phòng; tên mọi SKU đã chọn trong bảng giá xác nhận dạng xịt.'
-                  : 'Loại sản phẩm ghi rõ trong tên nguồn khớp một ngành hiện hành.',
+                  ? 'Gợi ý chưa xác nhận: tên, cách dùng và dòng SKU gợi ý ngành xịt phòng.'
+                  : 'Gợi ý chưa xác nhận: tên nguồn gợi ý một ngành trong danh sách hiện hành.',
               source:
                 extendedRoom || additionalFamily
                   ? 'draft.title + draft.description + all selected workbook SKU names + current category tree'
                   : 'draft.title + current category tree',
+              confidence: 'unconfirmed',
             });
-          } else if (
-            categoryEvidence &&
-            family !== null &&
-            family !== 'special' &&
-            matching.every((o) => sourceFamily(o.title) === family)
-          ) {
-            category = categoryEvidence;
+          } else if (categoryEvidence) {
+            missing('categoryId', 'Lịch sử cùng shop chỉ là tham khảo; cần chọn ngành cho đúng sản phẩm.');
             result.explanations.push({
               field: 'categoryId',
-              value: category,
+              value: categoryEvidence,
               message:
-                'Lịch sử cùng shop, cùng công dụng phủ đủ SKU và chỉ có một ngành; cần kiểm trước khi gửi.',
+                'Ngành này có trong lịch sử cùng shop nhưng chưa được chọn cho nguồn hiện tại.',
               source: matching
                 .map((r) => `${r.title} (item ${r.itemId}; evidence ${r.evidenceId})`)
                 .join('; '),
+              confidence: 'unconfirmed',
             });
           }
         }
@@ -582,6 +574,17 @@ export class ProductionPreparationAutofillService {
               'current brand metadata',
             );
           const attrs: NonNullable<Choices['attributeList']> = [];
+          const suggestAttribute = (
+            attrId: string,
+            value: NonNullable<Choices['attributeList']>[number]['attribute_value_list'],
+            message: string,
+            source: string,
+          ) => {
+            result.explanations.push({field:`attributes.${attrId}`,
+              value:{attribute_id:Number(attrId),attribute_value_list:value},
+              message:'Gợi ý chưa xác nhận: '+message,source,confidence:'unconfirmed'});
+            missing(`attributes.${attrId}`, 'Cần xác nhận thuộc tính từ nguồn hoặc tự chọn giá trị cho ngành hiện tại.');
+          };
           const sourceLines = draft.description.flatMap((block) =>
             block.type === 'text' ? block.text.split(/\r?\n/).map(normalize) : [],
           );
@@ -647,18 +650,13 @@ export class ProductionPreparationAutofillService {
                     : 'dieu kien thuong';
               const values = attr.values.filter((value) => normalize(value.label) === wanted);
               if (values.length === 1) {
-                attrs.push({
-                  attribute_id: Number(attr.id),
-                  attribute_value_list: [{ value_id: Number(values[0]!.id) }],
-                });
-                result.explanations.push({
-                  field: `attributes.${attr.id}`,
-                  message:
-                    wanted === 'dieu kien thuong'
-                      ? 'Mô tả nguồn hướng dẫn cất nơi khô thoáng; đề xuất điều kiện thường.'
-                      : 'Mô tả nguồn ghi rõ mỗi lựa chọn gồm 1 chai.',
-                  source:
-                    'draft.description: ' +
+                suggestAttribute(
+                  attr.id,
+                  [{ value_id: Number(values[0]!.id) }],
+                  wanted === 'dieu kien thuong'
+                    ? 'Mô tả nguồn hướng dẫn cất nơi khô thoáng; đề xuất điều kiện thường.'
+                    : 'Mô tả nguồn ghi rõ mỗi lựa chọn gồm 1 chai.',
+                  'draft.description: ' +
                     sourceLines
                       .filter((line) =>
                         wanted === 'dieu kien thuong'
@@ -666,7 +664,7 @@ export class ProductionPreparationAutofillService {
                           : /moi (lua chon|phan loai) gom/.test(line),
                       )
                       .join('; '),
-                });
+                );
               }
             }
             if (
@@ -678,10 +676,9 @@ export class ProductionPreparationAutofillService {
             ) {
               const values = attr.values.filter((v) => normalize(v.label) === 'chat tay rua san');
               if (values.length === 1)
-                attrs.push({
-                  attribute_id: Number(attr.id),
-                  attribute_value_list: [{ value_id: Number(values[0]!.id) }],
-                });
+                suggestAttribute(attr.id,[{value_id:Number(values[0]!.id)}],
+                  'Tên sản phẩm gợi ý loại chất làm sạch sàn.',
+                  'draft.title + current category attribute values');
             }
             if (
               !attrs.some((a) => a.attribute_id === Number(attr.id)) &&
@@ -690,16 +687,9 @@ export class ProductionPreparationAutofillService {
             ) {
               const values = attr.values.filter((value) => normalize(value.label) === 'dang long');
               if (values.length === 1) {
-                attrs.push({
-                  attribute_id: Number(attr.id),
-                  attribute_value_list: [{ value_id: Number(values[0]!.id) }],
-                });
-                result.explanations.push({
-                  field: `attributes.${attr.id}`,
-                  message:
-                    'Nguồn mô tả ghi rõ dạng dung dịch/dạng lỏng; khớp giá trị Dạng Lỏng trong ngành.',
-                  source: 'draft.description: explicit form declaration',
-                });
+                suggestAttribute(attr.id,[{value_id:Number(values[0]!.id)}],
+                  'Mô tả ghi dạng dung dịch/dạng lỏng; khớp giá trị Dạng Lỏng trong ngành.',
+                  'draft.description: explicit form declaration');
               }
             }
             if (
@@ -711,10 +701,9 @@ export class ProductionPreparationAutofillService {
                 ['dang xit', 'xit'].includes(normalize(v.label)),
               );
               if (value.length === 1)
-                attrs.push({
-                  attribute_id: Number(attr.id),
-                  attribute_value_list: [{ value_id: Number(value[0]!.id) }],
-                });
+                suggestAttribute(attr.id,[{value_id:Number(value[0]!.id)}],
+                  'Tên sản phẩm bắt đầu bằng Xịt; chưa đủ để xác nhận công thức hoặc mẫu.',
+                  'draft.title + current category attribute values');
             }
             if (
               !attrs.some((a) => a.attribute_id === Number(attr.id)) &&
@@ -736,12 +725,10 @@ export class ProductionPreparationAutofillService {
                 attr.validationType === 3 &&
                 attr.units.includes('ml')
               )
-                attrs.push({
-                  attribute_id: Number(attr.id),
-                  attribute_value_list: [
-                    { value_id: 0, original_value_name: String(amounts[0]), value_unit: 'ml' },
-                  ],
-                });
+                suggestAttribute(attr.id,[
+                  {value_id:0,original_value_name:String(amounts[0]),value_unit:'ml'},
+                ],'Tên SKU và phân loại gợi ý cùng một thể tích.',
+                'selected workbook SKU names + draft.variants.optionLabels');
             }
           }
           if (result.choices.brandId !== undefined && attributeMode === 'source_supported') {
@@ -814,7 +801,7 @@ export class ProductionPreparationAutofillService {
             }));
             const knowledge = recommendSellerKnowledge(
               {
-                scope: productionPilotScope,
+                scope: currentProductionScope(),
                 categoryId: Number(category),
                 brandId: Number(result.choices.brandId),
                 skus,
@@ -824,7 +811,7 @@ export class ProductionPreparationAutofillService {
               },
               canonicalObservations,
               {
-                scope: productionPilotScope,
+                scope: currentProductionScope(),
                 categoryId: Number(category),
                 observedAt: m.observedAt,
                 attributes: currentAttributes,
@@ -834,7 +821,7 @@ export class ProductionPreparationAutofillService {
             result.knowledgeIssues = knowledge.issues;
             result.knowledgeSuggestions = knowledge.suggestions.map((s) => {
               const refs = observations.filter((o) => s.evidenceIds.includes(o.evidenceId));
-              const safeHistory =
+              const matchingHistory =
                 knowledgeRows.length <= 200 &&
                 s.sourceClass === 'exact_sku' &&
                 s.confidence === 'reference' &&
@@ -848,18 +835,10 @@ export class ProductionPreparationAutofillService {
                 !s.reasons.some((r) => r !== 'HISTORICAL_REFERENCE_ONLY') &&
                 !/\b(combo|bo doi|bo ba|set)\b/.test(normalize(draft.title.value));
               const existing = attrs.some((a) => a.attribute_id === s.attributeId);
-              if (safeHistory && !existing) {
-                attrs.push({
-                  attribute_id: s.attributeId,
-                  attribute_value_list: s.values.map((v) => ({
-                    value_id: v.valueId,
-                    ...(v.originalValueName ? { original_value_name: v.originalValueName } : {}),
-                    ...(v.valueUnit ? { value_unit: v.valueUnit } : {}),
-                  })),
-                });
+              if (matchingHistory && !existing) {
                 result.explanations.push({
                   field: `attributes.${s.attributeId}`,
-                  message: `Đề xuất từ lịch sử cùng shop, cùng công dụng, phủ đủ SKU: ${s.name}. Đây là tham khảo, chưa phải dữ kiện nguồn đã xác nhận.`,
+                  message: `Lịch sử cùng shop gợi ý ${s.name}; cần đối chiếu nguồn hiện tại và chọn rõ trước khi điền.`,
                   source: refs
                     .map((o) => `${o.title} (item ${o.itemId}; evidence ${o.evidenceId})`)
                     .join('; '),
@@ -867,7 +846,7 @@ export class ProductionPreparationAutofillService {
               }
               return {
                 ...s,
-                applied: existing || safeHistory,
+                applied: existing,
                 references: refs.map((o) => ({
                   itemId: o.itemId,
                   title: o.title,
@@ -936,7 +915,7 @@ export class ProductionPreparationAutofillService {
           .filter(([, f]) => knownFact(f) && typeof f.value === 'boolean')
           .map(([channelId, f]) => ({ channelId, enabled: f.value as boolean }));
         const allEligible = request.logisticsMode === 'all_eligible';
-        const prior: { channelId: string; enabled: boolean }[] | undefined = saved.length ? saved : verifiedLogistics;
+        const prior: { channelId: string; enabled: boolean }[] | undefined = saved.length ? saved : undefined;
         if (allEligible || Array.isArray(prior)) {
           const { selected, requiredMissing } = eligibleProductChannels(channels,
             result.choices.weightGrams, result.choices.dimensionCm,
@@ -945,7 +924,7 @@ export class ProductionPreparationAutofillService {
           if (selected.length && !requiredMissing && !changedSaved)
             add('logistics', selected.map(c => ({channelId:c.id,enabled:true})),
               allEligible ? 'Bật tất cả nhóm vận chuyển đủ điều kiện đăng sản phẩm theo API hiện tại của shop; kiểm riêng cân nặng và kích thước từng listing.'
-                : 'Kênh có trong nguồn/lịch sử và còn đủ điều kiện đăng theo API hiện tại của shop.',
+                : 'Kênh đã xác nhận trong nguồn và còn đủ điều kiện đăng theo API hiện tại của shop.',
               'Shopee get_channel_list: enabled=true, mask_channel_id=0; shop:' + base.shop.id);
           if (requiredMissing) missing('logistics', 'Chưa có đủ nhóm vận chuyển bắt buộc phù hợp kiện hàng; cần kiểm tra cấu hình.');
           if (allEligible) for (const channel of channels.filter(c => c.parentId === '0' && !selected.some(s => s.id === c.id))) {
@@ -1004,7 +983,7 @@ export class ProductionPreparationAutofillService {
     const observedAt = new Date(now()).toISOString();
     const result: ProductionPreparationAutofillResult = {
       attributeMode,
-      scope: productionPilotScope,
+      scope: currentProductionScope(),
       connectionRevision: connected.revision,
       observedAt,
       fingerprint: hash({ request, entries, connectionRevision: connected.revision }),

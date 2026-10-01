@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, ImagePlus, Search, Upload, X } from 'lucide-react';
 import { media, type ImportRecord } from './api.js';
+import { scopedImageRecords } from './editor-source-scope.js';
+import './listing-authoring.css';
 
 export function ImagePicker({
   title,
@@ -11,6 +13,7 @@ export function ImagePicker({
   single = false,
   onChange,
   onUploadFiles,
+  sourceImportIds = null,
 }: {
   title: string;
   description?: string;
@@ -20,14 +23,20 @@ export function ImagePicker({
   single?: boolean;
   onChange: (ids: string[]) => void;
   onUploadFiles?: (files: FileList | null) => Promise<void>;
+  sourceImportIds?: string[] | null;
 }) {
   const [browsing, setBrowsing] = useState(false);
   const [query, setQuery] = useState('');
-  const visible = images.filter((image) =>
-    image.filename.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')),
+  const trigger = useRef<HTMLButtonElement>(null), search = useRef<HTMLInputElement>(null);
+  const eligible = scopedImageRecords(images, sourceImportIds);
+  const canChoose = editable && sourceImportIds !== null;
+  const normalized = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLocaleLowerCase('vi');
+  const visible = eligible.filter((image) =>
+    normalized(image.filename).includes(normalized(query)),
   );
+  function closeBrowser() { setBrowsing(false); requestAnimationFrame(() => trigger.current?.focus()); }
   function choose(id: string) {
-    if (!editable) return;
+    if (!canChoose || !eligible.some(image => image.id === id)) return;
     onChange(
       single
         ? [id]
@@ -35,10 +44,10 @@ export function ImagePicker({
           ? selectedIds.filter((value) => value !== id)
           : [...selectedIds, id],
     );
-    if (single) setBrowsing(false);
+    if (single) closeBrowser();
   }
   function move(index: number, direction: number) {
-    if (!editable) return;
+    if (!canChoose) return;
     const target = index + direction;
     if (target < 0 || target >= selectedIds.length) return;
     const ids = [...selectedIds];
@@ -52,8 +61,10 @@ export function ImagePicker({
           <h3>{title}</h3>
           {description && <p className="caption">{description}</p>}
         </div>
-        {editable && (
-          <button type="button" aria-expanded={browsing} onClick={() => setBrowsing(!browsing)}>
+        {canChoose && (
+          <button ref={trigger} type="button" aria-expanded={browsing} onClick={() => {
+            if (browsing) closeBrowser(); else { setBrowsing(true); requestAnimationFrame(() => search.current?.focus()); }
+          }}>
             <ImagePlus size={16} aria-hidden="true" />{' '}
             {browsing
               ? 'Đóng kho ảnh'
@@ -65,6 +76,7 @@ export function ImagePicker({
           </button>
         )}
       </div>
+      {editable && sourceImportIds === null && <p className="authoring-source-notice" role="status">Chưa xác định được đúng bộ nguồn. Ảnh hiện có vẫn được giữ; mở lại bộ nguồn và bổ sung tệp có bằng chứng trước khi đổi ảnh.</p>}
       {selectedIds.length ? (
         <ol className="editor-selected-images" aria-label={`Ảnh đã chọn · ${title}`}>
           {selectedIds.map((id, index) => {
@@ -80,7 +92,14 @@ export function ImagePicker({
                   <strong>{!single && `${index + 1}. `}</strong>
                   {image?.filename ?? 'Ảnh đã liên kết trong bộ listing'}
                 </span>
-                {editable && (
+                <a className="text-button" href={media(id)} target="_blank" rel="noopener noreferrer">Xem tệp gốc {single ? '' : index + 1}</a>
+                {image ? <details className="image-file-evidence"><summary>Thông tin tệp nguồn</summary><dl>
+                  <div><dt>Tệp</dt><dd>{image.filename}</dd></div>
+                  <div><dt>Vai trò đang chọn</dt><dd>{title}{!single && ` · vị trí ${index + 1}`}</dd></div>
+                  <div><dt>SHA-256</dt><dd><code>{image.sha256}</code></dd></div>
+                  <div><dt>Nhận vào ứng dụng</dt><dd>{new Date(image.createdAt).toLocaleString('vi-VN')}</dd></div>
+                </dl></details> : <p className="caption">Chưa đọc được thông tin tệp đã liên kết. Ảnh đang giữ nguyên.</p>}
+                {canChoose && (
                   <div className="actions">
                     {!single && (
                       <>
@@ -122,10 +141,11 @@ export function ImagePicker({
           {editable && <p className="caption">Chọn đúng tệp đã được chuẩn bị cho vị trí này.</p>}
         </div>
       )}
-      {editable && browsing && (
+      {canChoose && browsing && (
         <section
           className="image-picker-browser"
           aria-label={`Chọn tệp cho ${title.toLocaleLowerCase('vi')}`}
+          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closeBrowser(); } }}
         >
           <div className="section-heading">
             <div>
@@ -156,6 +176,7 @@ export function ImagePicker({
             <Search size={16} aria-hidden="true" />
             <span className="sr-only">Tìm ảnh theo tên tệp</span>
             <input
+              ref={search}
               aria-label={`Tìm tệp cho ${title.toLocaleLowerCase('vi')}`}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -163,14 +184,13 @@ export function ImagePicker({
             />
           </label>
           <p className="caption">
-            {visible.length} tệp sẵn sàng trong Tệp nguồn · Chỉ tệp bạn chọn được thêm vào bản nháp
-            này.
+            {visible.length} ảnh thuộc bộ nguồn đang mở · Bạn chọn rõ vai trò và thứ tự; việc chọn ảnh chưa phải xác nhận nguồn để đăng.
           </p>
           {!visible.length && (
             <p className="empty">
-              {images.length
+              {eligible.length
                 ? 'Không có tệp khớp tên tìm kiếm.'
-                : 'Chưa có ảnh sẵn sàng. Tải ảnh từ máy để bắt đầu.'}
+                : 'Chưa có ảnh đủ thông tin trong bộ nguồn này. Bổ sung đúng tệp gốc để tiếp tục.'}
             </p>
           )}
           <div className="image-picker-grid">
@@ -193,7 +213,7 @@ export function ImagePicker({
               </button>
             ))}
           </div>
-          <button type="button" onClick={() => setBrowsing(false)}>
+          <button type="button" onClick={closeBrowser}>
             Xong · {selectedIds.length} ảnh đã chọn
           </button>
         </section>

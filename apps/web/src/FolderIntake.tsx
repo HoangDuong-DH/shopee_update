@@ -1,3 +1,5 @@
+import { ContentWorkbookIntake } from './ContentWorkbookIntake.js';
+import type { ContentSelection, ContentBinding } from '../../../packages/domain/src/content-workbook.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
@@ -41,12 +43,15 @@ import { PendingSkuMapping, type PendingMappingFile } from './PendingSkuMapping.
 import { isMissingPendingSku, type PendingListingMapping } from '../../../packages/domain/src/pending-listing-mapping.js';
 import { pendingSlotSku } from './pending-listing-mapping.js';
 import { folderBulkStateKey, folderBulkStorageKey, readFolderBulkRecovery, readyFolderBulkEntries, mergeFolderBulkEntries, runFolderBulkSave, type FolderBulkEntry } from './folder-bulk-save.js';
+import { expandListingZips, planSeparateCovers, type ListingZipLayout } from './listing-zip.js';
 
 export type FolderManualContext = {
   productKey: string;
   sourceImportIds?: string[];
   priceSource: { importId: string; sheet: string; priceProfile: string | null };
   prepared: {
+    contentBinding?: ContentBinding;
+    folderBinding?: import('@shopee/domain').SourceSelection['folderBinding'];
     title?: string;
     headline?: string;
     body?: string;
@@ -127,6 +132,11 @@ export function FolderIntake({
   const savedBatch = useRef<InputBatchRecord | undefined>(initialBatch);
   const [batchName, setBatchName] = useState(initial?.name ?? 'Đợt listing mới');
   const [chosenFiles, setChosenFiles] = useState<File[]>([]);
+  const [zipLayout, setZipLayout] = useState<ListingZipLayout>('one_listing_per_zip');
+  const [zipStripOuter, setZipStripOuter] = useState(false);
+  const [zipStatus, setZipStatus] = useState('');
+  const [coverIssues, setCoverIssues] = useState<string[]>([]);
+  const zipController = useRef<AbortController | null>(null);
   const [descriptors, setDescriptors] = useState<InputBatchState['files']>(initial?.files ?? []);
   const [productKeys, setProductKeys] = useState<Record<string, string>>(
     initial?.productKeys ?? {},
@@ -182,6 +192,7 @@ export function FolderIntake({
   );
   const [imageRoleFilter, setImageRoleFilter] = useState<ImageRoleFilter>('all');
   const [selectedImages, setSelectedImages] = useState<Record<string, string[]>>({});
+  const [contentSelections, setContentSelections] = useState<Record<string,ContentSelection>>(initial?.contentSelections ?? {});
   const [wordPaths, setWordPaths] = useState<Record<string, string>>(initial?.wordPaths ?? {});
   const [wordConfirmed, setWordConfirmed] = useState(!!initial?.wordRule);
   const [titleHeader, setTitleHeader] = useState(initial?.wordRule?.titleHeader ?? 'TIÊU ĐỀ'),
@@ -273,6 +284,7 @@ export function FolderIntake({
           item.key,
           {
             media: visual[item.key] ?? emptyMedia(),
+            ...(contentSelections[item.key] ? {content: contentSelections[item.key]} : {}),
             ...(wordConfirmed
               ? {
                   word: {
@@ -290,6 +302,7 @@ export function FolderIntake({
       ),
     [
       grouped.bundles,
+      contentSelections,
       visual,
       wordConfirmed,
       titleHeader,
@@ -375,6 +388,7 @@ export function FolderIntake({
       ]),
     ),
     wordPaths,
+    ...(Object.keys(contentSelections).length ? {contentSelections} : {}),
     wordRule: wordConfirmed
       ? { titleHeader, descriptionHeader, headline: headlineMode, paragraphSeparator }
       : null,
@@ -394,6 +408,7 @@ export function FolderIntake({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      zipController.current?.abort();
     };
   }, []);
   useEffect(() => {
@@ -679,7 +694,7 @@ export function FolderIntake({
       }
     }
   }
-  async function stage(files: FileList | null) {
+  async function stage(files: FileList | File[] | null, nextMode: FolderMode = mode) {
     if (!files?.length || locked || pipelineGuard.current) return;
     const selected = Array.from(files);
     if (hasSaved || uploaded.length) {
@@ -708,7 +723,8 @@ export function FolderIntake({
       relativePath: file.webkitRelativePath || file.name,
       size: file.size,
     }));
-    const nextGroups = groupDirectoryFiles(nextDescriptors, mode);
+    const nextGroups = groupDirectoryFiles(nextDescriptors, nextMode);
+    setMode(nextMode);
     setChosenFiles(selected);
     setDescriptors(nextDescriptors);
     setProductKeys(
@@ -720,13 +736,60 @@ export function FolderIntake({
     setSetupCollapsed(false);
     setUploaded([]);
     setManifests({});
+    setContentSelections({});
     setPendingMappings({});
     setAssemblyState({ context: '', values: [] });
     setVisual({});
     setSelectedImages({});
     setWordPaths({});
     setSelectedFolder('');
+    setCoverIssues([]);
     setError('');
+  }
+  async function stageZips(files: FileList | null) {
+    if (!files?.length || locked || pipelineGuard.current) return;
+    pipelineGuard.current = true; setBusy(true); setError(''); setZipStatus('Đang kiểm tra ZIP…');
+    const controller = new AbortController(); zipController.current = controller;
+    let expanded: File[] | undefined;
+    try {
+      expanded = await expandListingZips(Array.from(files), { layout: zipLayout, stripOuterFolder: zipStripOuter,
+        signal: controller.signal, onProgress: value => {
+          if (mounted.current) setZipStatus(`${value.archive}: đã mở ${value.extractedFiles} tệp.`);
+        } });
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : 'Chưa mở được ZIP.');
+    } finally {
+      pipelineGuard.current = false; zipController.current = null;
+      if (mounted.current) { setBusy(false); setZipStatus(''); }
+    }
+    if (expanded && mounted.current) await stage(expanded, 'parent_with_listing_folders');
+  }
+  async function stageCovers(files: FileList | null) {
+    if (!files?.length || locked || pipelineGuard.current || hasSaved || uploaded.length || !chosenFiles.length) return;
+    const plan = planSeparateCovers(grouped.bundles, Array.from(files));
+    // A saved JSON recipe is explicit source authority. Do not overwrite it with folder-name guesses.
+    const accepted = plan.assignments.filter(assignment => {
+      const group = grouped.bundles.find(value => value.key === assignment.groupKey)!;
+      if (group.files.some(file => file.name === 'listing-source.json')) {
+        plan.issues.push(`${group.name}: đã có listing-source.json; chọn ảnh trong hồ sơ nguồn, chưa thay bìa tự động.`); return false;
+      }
+      if (chosenFiles.some(file => file.webkitRelativePath === assignment.file.webkitRelativePath)
+        || visual[assignment.groupKey]?.coverPath) {
+        plan.issues.push(`${group.name}: đã chọn ảnh bìa; giữ lựa chọn hiện tại.`); return false;
+      }
+      return true;
+    });
+    setCoverIssues(plan.issues);
+    if (!accepted.length) return;
+    const added = accepted.map(value => value.file);
+    setChosenFiles(all => [...all, ...added]);
+    setDescriptors(all => [...all, ...added.map(file => ({ name: file.name, relativePath: file.webkitRelativePath, size: file.size }))]);
+    setVisual(all => {
+      const next = { ...all };
+      for (const assignment of accepted) next[assignment.groupKey] = { ...(next[assignment.groupKey] ?? emptyMedia()), coverPath: assignment.file.webkitRelativePath };
+      return next;
+    });
+    setCoverIssues(all => [`Đã ghép ${accepted.length} ảnh bìa theo STT duy nhất. Kiểm tra hình trước khi lưu.`, ...all]);
   }
   function changeMode(next: FolderMode) {
     if (locked || uploaded.length || hasSaved) return;
@@ -829,6 +892,7 @@ export function FolderIntake({
       ],
       priceSource: { importId: sourceId, sheet, priceProfile: profile },
       prepared: {
+        ...(contentSelections[selectedAssembly.key] && savedBatch.current ? {contentBinding: contentSelections[selectedAssembly.key]!.binding, folderBinding: {batchId,revision:savedBatch.current.revision,groupKey:selectedAssembly.key}} : {}),
         ...(!wordNeedsSelection && candidates.title !== undefined
           ? { title: candidates.title }
           : {}),
@@ -860,7 +924,7 @@ export function FolderIntake({
     }
     if (!assembly.seed) return;
     onContinue(
-      assembly.manifest?.product.sourceRevision === 0 && savedBatch.current
+      (assembly.manifest?.product.sourceRevision === 0 || assembly.seed?.contentBinding) && savedBatch.current
         ? {
             ...assembly.seed,
             folderBinding: {
@@ -1054,6 +1118,7 @@ export function FolderIntake({
               {progress.filename ? ` · ${progress.filename}` : ''}
             </p>
           )}
+          <ContentWorkbookIntake groups={grouped.bundles.filter(g=>!manifests[g.key]&&!pendingMappings[g.key])} value={contentSelections} onChange={setContentSelections} locked={locked} />
           {setupCollapsed && !priceReady && (
             <p className="folder-compact-progress">
               Cần chọn bảng giá, sheet và bộ giá trước khi hoàn thiện SKU. Mở “Bảng giá & tệp nguồn”
@@ -1188,6 +1253,26 @@ export function FolderIntake({
               />
             </label>
           </div>
+          <fieldset className="folder-batch-mode">
+            <legend>Hoặc nhận nguồn từ ZIP</legend>
+            <label>
+              Bố cục trong ZIP
+              <select aria-label="Bố cục trong ZIP" value={zipLayout} disabled={locked}
+                onChange={event => setZipLayout(event.target.value as ListingZipLayout)}>
+                <option value="one_listing_per_zip">Mỗi ZIP là một listing</option>
+                <option value="listing_folders">ZIP chứa nhiều thư mục listing hoặc ZIP con</option>
+              </select>
+            </label>
+            <label><input type="checkbox" checked={zipStripOuter} disabled={locked}
+              onChange={event => setZipStripOuter(event.target.checked)} /> Bỏ một thư mục bao ngoài ZIP</label>
+            <label className={`upload-button${locked ? ' disabled' : ''}`}>
+              Chọn ZIP
+              <input type="file" multiple accept=".zip" aria-label="Chọn ZIP nguồn listing" disabled={locked}
+                onChange={event => { void stageZips(event.currentTarget.files); event.currentTarget.value = ''; }} />
+            </label>
+            {zipStatus && <p role="status">{zipStatus}</p>}
+            <p className="caption">Hỗ trợ ZIP lồng tối đa 3 tầng. Sau khi mở, kiểm tra số bộ bên dưới rồi bấm Đọc các thư mục. Tệp ảnh và nội dung được giữ nguyên; ZIP gốc giữ trên máy.</p>
+          </fieldset>
           <div className="folder-batch-mode">
             <label>
               <input
@@ -1209,6 +1294,16 @@ export function FolderIntake({
               />{' '}
               Mỗi thư mục con là một listing
             </label>
+          </div>
+          <div className="folder-batch-mode">
+            <label className={`upload-button${locked || hasSaved || uploaded.length || !chosenFiles.length ? ' disabled' : ''}`}>
+              Ghép thêm thư mục ảnh bìa
+              <input type="file" multiple {...{ webkitdirectory: '' }} aria-label="Chọn thư mục ảnh bìa riêng"
+                disabled={locked || hasSaved || uploaded.length > 0 || !chosenFiles.length}
+                onChange={event => { void stageCovers(event.currentTarget.files); event.currentTarget.value = ''; }} />
+            </label>
+            <p className="caption">Chọn trước khi đọc tệp. Chỉ ghép khi ảnh bìa và thư mục listing có cùng STT ở đầu tên và khớp duy nhất; trường hợp trùng hoặc không rõ giữ lại để bạn chọn.</p>
+            {coverIssues.length > 0 && <ul aria-label="Kết quả ghép ảnh bìa">{coverIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
           </div>
           {hasSaved && !chosenFiles.length && (
             <p className="caption">

@@ -1,9 +1,10 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { z } from 'zod';
 import { canonicalJson } from '@shopee/domain';
 import type { PreparedWireResponse } from '../../../packages/shopee/src/prepared-transport.js';
 
 const cacheable = new Set(['product/get_category','product/get_attribute_tree','product/get_brand_list','logistics/get_channel_list'].map(path=>'/api/v2/'+path));
-const scopeSchema=z.object({environment:z.literal('production'),partnerId:z.literal('2010476'),shopId:z.literal('1423724897'),connectionRevision:z.number().int().positive()}).strict();
+const scopeSchema=z.object({environment:z.literal('production'),partnerId:z.string().refine(value => value === currentProductionScope().partnerId),shopId:z.string().refine(value => value === currentProductionScope().shopId),connectionRevision:z.number().int().positive()}).strict();
 const secretFields=new Set(['partner_id','partner_key','shop_id','access_token','refresh_token','timestamp','sign','authorization']);
 export type ProductionPilotReadEvidence={observedAt:string;file:string;result:PreparedWireResponse};
 type Options={batchId:string;manifestSha256:string;maxAgeMs?:number;now?:()=>number};

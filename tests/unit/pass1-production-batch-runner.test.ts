@@ -1,3 +1,4 @@
+import { withProductionScope } from '../../apps/api/src/production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -20,6 +21,7 @@ function fixture() {
     identity = 'pass1:source-a';
   const doc = {
     sourceKey: identity,
+    publication: 'unlisted',
     title: 'Original source',
     cover: { importId: 'image-a' },
     gallery: [],
@@ -160,6 +162,7 @@ function fixture() {
   const deps: any = {
     repo: { pool: { query } },
     blobs: {},
+    assertSourceProof: vi.fn(async () => undefined),
     load: vi.fn(async () => loaded),
     collect: vi.fn(async () => ({
       sourceReceiptSha256: loaded.sha256,
@@ -206,6 +209,14 @@ it('inspect collects only GET preflight and pure local plan, with no reservation
   expect(f.runner.run).not.toHaveBeenCalled();
   expect(f.runner.publish).not.toHaveBeenCalled();
   expect(result.listings[0]?.state).toBe('inspected');
+});
+it('blocks a legacy manifest without mapping proof before any future write', async () => {
+  const f = fixture();
+  delete f.deps.assertSourceProof;
+  await expect(runPass1ProductionBatch({ ...f.args, mode: 'execute' }, f.deps))
+    .rejects.toThrow('PRODUCTION_SOURCE_MAPPING_PROOF_REQUIRED');
+  expect(f.runner.prepare).not.toHaveBeenCalled();
+  expect(f.runner.run).not.toHaveBeenCalled();
 });
 it('loads the existing operation before checking a hidden conversion binding and never takes the legacy automatic publish branch',async()=>{
   const f=fixture();f.loaded.value.version=2;
@@ -306,11 +317,17 @@ it('hidden mode skips a verified hidden create without repeating metadata or QC'
   expect(result.listings[0]?.state).toBe('created_unlisted');
   expect(f.deps.collect).not.toHaveBeenCalled();expect(f.runner.run).not.toHaveBeenCalled();expect(f.runner.publish).not.toHaveBeenCalled();
 });
-it('hidden execution continues to the next prepared source after verified creation in original order',async()=>{
+it.each([undefined,'PRODUCTION_PILOT_MANDATORY_ATTRIBUTE_MISSING','PRODUCTION_PILOT_BRAND_REVALIDATION_REQUIRED','PRODUCTION_BATCH_SOURCE_CHANGED','PRODUCTION_BATCH_SOURCE_ARCHIVED'])(
+  'hidden execution continues independent sources after preflight outcome %s',async(preflightError)=>{
   const f=fixture();f.loaded.value.publicationMode='hidden_for_review';
   const second=structuredClone(f.source);second.sourceIdentity='pass1:source-b';second.sourceKey='b';
   second.document.sourceKey=second.sourceIdentity;second.document.title='Second exact source';
   f.loaded.value.listings.push(second);
+  const lifecycleError=preflightError?.startsWith('PRODUCTION_BATCH_SOURCE_');
+  if(lifecycleError)f.deps.lockSource=async(_repo:unknown,source:any)=>{
+    if(source.sourceKey==='a')throw Error(preflightError);
+    return async()=>{};
+  };
   const originalQuery=f.deps.repo.pool.query.getMockImplementation();
   f.deps.repo.pool.query.mockImplementation(async(sql:string,values:any[]=[])=>{
     if(sql.includes('FROM connections'))return originalQuery(sql,values);
@@ -318,6 +335,7 @@ it('hidden execution continues to the next prepared source after verified creati
     return {rows:op && op.source_identity===values[1]?[{id:op.id,source_revision:op.source_revision}]:[]};
   });
   f.deps.collect.mockImplementation(async(_repo:unknown,args:any)=>{
+    if(preflightError && args.sourceKey==='a')throw Error(preflightError);
     const source=f.loaded.value.listings.find((s:any)=>s.sourceKey===args.sourceKey);
     return {sourceReceiptSha256:f.loaded.sha256,input:{...structuredClone(f.input),sourceIdentity:source.sourceIdentity,document:source.document}};
   });
@@ -333,9 +351,35 @@ it('hidden execution continues to the next prepared source after verified creati
   });
   f.runner.run.mockImplementation(async()=>({state:'verified',operationId:f.getOperation().operation.id,itemId:f.getOperation().operation.item_id}));
   const result=await runPass1ProductionBatch({...f.args,mode:'execute'},f.deps);
-  expect(result).toMatchObject({stopped:false,listings:[{sourceKey:'a',state:'created_unlisted',itemId:'5001'},{sourceKey:'b',state:'created_unlisted',itemId:'5002'}]});
-  expect(f.runner.prepare).toHaveBeenCalledTimes(2);expect(f.runner.publish).not.toHaveBeenCalled();
-  expect(f.deps.collect.mock.calls.map((call:any)=>call[1].sourceKey)).toEqual(['a','b']);
+  expect(result).toMatchObject(preflightError
+    ? {stopped:true,listings:[{sourceKey:'a',state:'blocked',code:preflightError,...(!lifecycleError?{failureScope:'source_preflight'}:{})},{sourceKey:'b',state:'created_unlisted',itemId:'5001'}]}
+    : {stopped:false,listings:[{sourceKey:'a',state:'created_unlisted',itemId:'5001'},{sourceKey:'b',state:'created_unlisted',itemId:'5002'}]});
+  expect(f.runner.prepare).toHaveBeenCalledTimes(preflightError?1:2);expect(f.runner.publish).not.toHaveBeenCalled();
+  expect(f.deps.collect.mock.calls.map((call:any)=>call[1].sourceKey)).toEqual(lifecycleError?['b']:['a','b']);
+});
+it.each(['PRODUCTION_PILOT_AUTH_REQUIRED','PRODUCTION_PILOT_CATEGORY_UNVERIFIED','PRODUCTION_PILOT_ATTRIBUTE_TREE_UNVERIFIED','PRODUCTION_PILOT_INVENTORY_INCOMPLETE'])(
+  'stops sibling dispatch on shared preflight error %s',async(code)=>{
+    const f=fixture();f.loaded.value.listings.push({...structuredClone(f.source),sourceKey:'b',sourceIdentity:'pass1:source-b'});
+    f.deps.collect.mockRejectedValue(Error(code));
+    const result=await runPass1ProductionBatch({...f.args,mode:'execute'},f.deps);
+    expect(result.listings).toEqual([{sourceKey:'a',state:'blocked',code}]);
+    expect(f.deps.collect).toHaveBeenCalledOnce();expect(f.runner.prepare).not.toHaveBeenCalled();
+  });
+it('does not downgrade a local-looking error when a durable operation appeared during preflight',async()=>{
+  const f=fixture();f.deps.collect.mockImplementation(async()=>{
+    f.setOperation('unknown');throw Error('PRODUCTION_PILOT_MANDATORY_ATTRIBUTE_MISSING');
+  });
+  const result=await runPass1ProductionBatch({...f.args,mode:'execute'},f.deps);
+  expect(result.listings).toEqual([{sourceKey:'a',state:'blocked',code:'PRODUCTION_PILOT_MANDATORY_ATTRIBUTE_MISSING'}]);
+  expect(f.runner.prepare).not.toHaveBeenCalled();expect(f.runner.run).not.toHaveBeenCalled();
+});
+it('persists the successor binding after reserve and before any write, and stops if binding persistence fails',async()=>{
+  const f=fixture();f.loaded.value.publicationMode='hidden_for_review';
+  const bind=vi.fn(async()=>{f.events.push('bind');throw Error('binding disk unavailable');});
+  const result=await runPass1ProductionBatch({...f.args,mode:'execute'},{...f.deps,bindSuccessor:bind});
+  expect(f.events).toEqual(['prepare','bind']);expect(bind).toHaveBeenCalledOnce();
+  expect(result.stopped).toBe(true);expect(f.runner.run).not.toHaveBeenCalled();
+  expect(f.getOperation().operation.state).toBe('authorized');
 });
 it('hidden mode preserves unresolved image QC instead of reporting completion',async()=>{
   const f=fixture();f.loaded.value.publicationMode='hidden_for_review';
@@ -548,4 +592,17 @@ it('refuses a tampered completed proof instead of skipping the source as success
   expect(result.stopped).toBe(true);
   expect(f.runner.prepare).not.toHaveBeenCalled();
   expect(f.runner.publish).not.toHaveBeenCalled();
+});
+it('a new shop gets exact intended hidden probe permissions without reusing the legacy capability ID',async()=>{
+  const f=fixture();f.loaded.value.scope.shopId='1126307464';f.loaded.value.publicationMode='hidden_for_review';
+  await withProductionScope(f.loaded.value.scope,async()=>{
+    const result=await runPass1ProductionBatch(f.args,f.deps);
+    expect(result.listings[0]?.state).toBe('inspected');
+    expect(f.runner.capabilityEvidenceFromVerified).not.toHaveBeenCalled();
+    const options=f.deps.collect.mock.calls[0][2],runnerOptions=f.deps.createRunner.mock.calls[0][1];
+    expect(options.priorCapabilityEvidence).toMatchObject({shopId:'1126307464',connectionRevision:1,gallery34:{state:'unknown'}});
+    expect(options.capabilityProbe).toEqual(runnerOptions.capabilityProbe);
+    expect(runnerOptions.capabilityProofOperationIds).toEqual([]);
+    expect(f.runner.prepare).not.toHaveBeenCalled();
+  });
 });

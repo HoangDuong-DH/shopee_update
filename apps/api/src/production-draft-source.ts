@@ -1,3 +1,5 @@
+import { ContentWorkbookService } from './content-workbook-service.js';
+import { localBulkEditReceiptSchema } from '../../../packages/domain/src/bulk-product-edit.js';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -22,6 +24,9 @@ import {
   projectResolvedPriceIssues,
   resolvedDuplicatePriceIssueKeys,
 } from '../../../packages/domain/src/source/selected-price-issues.js';
+import { folderDraftSelection } from '../../../packages/domain/src/folder-source-identity.js';
+import { resolveFolderSourceClaim } from './folder-source-claim.js';
+import { readMappingSourceHashes, currentProductMappingDecision, hasStructuredMappingDecision } from './product-mapping-decision.js';
 
 const nonblank = z
   .string()
@@ -166,6 +171,7 @@ const grams = (value: unknown) =>
 const draftKeys = new Set([
   // Server-owned intake provenance; it changes no product fields or writer permissions.
   'folderSource',
+  'localBulkEdit',
   'sourceListingId',
   'productKey',
   'revision',
@@ -202,7 +208,7 @@ const variantKeys = new Set([
 /** Converts an exact saved source revision. No source edits, membership inference, network calls,
  * credential access, stock top-up, or Shopee writes. Extra operating choices stay in the receipt. */
 export async function buildProductionDraftSource(
-  repo: Pick<Repository, 'getProduct' | 'getImport'>,
+  repo: Pick<Repository, 'getProduct' | 'getImport'> & Partial<Pick<Repository, 'pool'>>,
   blobs: Pick<BlobStore, 'read'>,
   raw: unknown,
   decisionSource: SourceRef,
@@ -256,6 +262,20 @@ export async function buildProductionDraftSource(
     return blocked();
   }
   draft = structuredClone(draft);
+  const bulkReceipt = (draft as ListingDraft & { localBulkEdit?: unknown }).localBulkEdit;
+  if (bulkReceipt !== undefined) {
+    const parsed = localBulkEditReceiptSchema.safeParse(bulkReceipt);
+    let receiptMatches=parsed.success && parsed.data.previousRevision===draft.revision-1;
+    if(parsed.success && parsed.data.previousRevision+1<draft.revision) {
+      try {
+        const original=await repo.getProduct(draft.productKey,parsed.data.previousRevision+1);
+        receiptMatches=original?.revision===parsed.data.previousRevision+1
+          && same((original as ListingDraft & {localBulkEdit?:unknown})?.localBulkEdit,bulkReceipt);
+      } catch { /* An unavailable historical receipt stays unverified. */ }
+    }
+    if (!receiptMatches)
+      add('BULK_EDIT_RECEIPT_INVALID', 'localBulkEdit', 'Nhật ký sửa hàng loạt không khớp phiên bản nguồn. Giữ bản đã lưu để đối chiếu, không gửi đăng.');
+  }
   for (const key of Object.keys(draft))
     if (!draftKeys.has(key) && active((draft as any)[key]))
       add('UNSUPPORTED_SOURCE_FIELD', key, 'Trường nguồn này chưa được hỗ trợ; không được bỏ qua.');
@@ -286,7 +306,12 @@ export async function buildProductionDraftSource(
       !value ||
       value.confirmed !== true ||
       !Array.isArray(value.sources) ||
-      !value.sources.length
+      !value.sources.some((source) =>
+        (source.kind === 'product_file' || source.kind === 'user_decision') &&
+        typeof source.fileSha256 === 'string' && !!source.fileSha256.trim() &&
+        typeof source.locator === 'string' && !!source.locator.trim() &&
+        Number.isFinite(Date.parse(source.observedAt)),
+      )
     ) {
       add('UNCONFIRMED_FACT', field, 'Thông tin nguồn chưa được xác nhận.', value?.sources ?? []);
       return false;
@@ -370,6 +395,53 @@ export async function buildProductionDraftSource(
       'sourceSelection',
       'Nội dung hoặc vai trò ảnh/phân loại lệch ánh xạ đã lưu.',
     );
+  // A saved selection is not independent evidence: a mistaken one-tier mapping or an
+  // unrelated imported image can be self-consistent. Recheck a bound folder against its
+  // immutable manifest, or require an explicit decision bound to the complete mapping.
+  let currentMappingDecision=false;
+  if(hasStructuredMappingDecision(draft)) {
+    try {currentMappingDecision=currentProductMappingDecision(draft,await readMappingSourceHashes(repo,draft));}
+    catch { /* Unknown source identities cannot authorize a mapping. */ }
+    if(!currentMappingDecision) add('SOURCE_MAPPING_DECISION_CHANGED','sourceSelection',
+      'Bản nguồn hoặc quyết định ánh xạ đã đổi. Đọc lại đúng phiên bản rồi xác nhận cấu trúc và ảnh nguồn.');
+  }
+  if (selection.folderBinding && !currentMappingDecision) {
+    if (!repo.pool || !draft.folderSource) {
+      add('SOURCE_MAPPING_PROOF_REQUIRED', 'sourceSelection', 'Thiếu bằng chứng bộ nguồn gốc cho cấu trúc phân loại và vai trò ảnh.');
+    } else {
+      try {
+        const proof = await resolveFolderSourceClaim(repo as Repository, {
+          productKey: draft.productKey,
+          expectedRevision: 0,
+          folderBinding: selection.folderBinding,
+          contentBinding: selection.contentBinding,
+          sourceListingId: draft.sourceListingId?.value,
+          title: selection.title,
+          headline: selection.headline,
+          body: selection.body,
+          coverId: selection.coverId,
+          galleryIds: selection.galleryIds,
+          descriptionImageIds: selection.descriptionImageIds,
+          tierNames: selection.tierNames,
+          variants: selection.variants,
+        });
+        if (proof.fingerprint !== draft.folderSource.fingerprint || draft.folderSource.productKey !== draft.productKey)
+          throw Error('FOLDER_SOURCE_FINGERPRINT_MISMATCH');
+      } catch {
+        add('SOURCE_MAPPING_PROOF_MISMATCH', 'sourceSelection', 'Cấu trúc hoặc ảnh không còn khớp đúng manifest và thư mục nguồn của listing.');
+      }
+    }
+  } else if(!currentMappingDecision) {
+    const confirmation = selection.mappingConfirmation;
+    const expected = hash(canonicalJson({ productKey: draft.productKey, mapping: folderDraftSelection(draft) }));
+    if (
+      confirmation?.kind !== 'user_decision' ||
+      confirmation.fileSha256 !== expected ||
+      confirmation.locator !== `listing-mapping-confirmation:${draft.productKey}` ||
+      !Number.isFinite(Date.parse(confirmation.observedAt))
+    )
+      add('SOURCE_MAPPING_CONFIRMATION_REQUIRED', 'sourceSelection', 'Cần xác nhận rõ cấu trúc hai tầng/phân loại và đúng vai trò từng ảnh của listing này; chưa dùng bản nháp tự khớp làm bằng chứng.');
+  }
   if (
     draft.tierNames.length > 2 ||
     draft.variants.length > 100 ||
@@ -382,6 +454,23 @@ export async function buildProductionDraftSource(
       'Cấu trúc phân loại chưa được luồng này hỗ trợ.',
     );
 
+  let contentRecord: ImportRecord | undefined;
+  if (selection.contentBinding) {
+    try {
+      const content = await new ContentWorkbookService(repo, blobs).resolve(selection.contentBinding);
+      if (content.title !== selection.title || content.headline !== selection.headline || content.body !== selection.body)
+        throw Error('CONTENT_SELECTION_MISMATCH');
+      const record = await repo.getImport(selection.contentBinding.mapping.importId);
+      if (!record || record.sha256 !== selection.contentBinding.mapping.sha256 || record.kind !== 'xlsx')
+        throw Error('CONTENT_WORKBOOK_HASH_MISMATCH');
+      // Price-parser readiness is unrelated to this exact raw content binding.
+      contentRecord = record;
+    } catch {
+      add('CONTENT_SELECTION_MISMATCH', 'sourceSelection.contentBinding',
+        'Nội dung không còn đối chiếu được với ô Excel gốc. Mở nguồn đã lưu để sửa hoặc chọn lại đúng dòng; chưa gửi Shopee.');
+      return blocked();
+    }
+  }
   const records = new Map<string, ImportRecord>();
   const checkedBytes = new Map<string, Uint8Array>();
   async function imported(importId: string, kind: ImportRecord['kind']) {
@@ -494,6 +583,13 @@ export async function buildProductionDraftSource(
         'SAVED_PRICE_MISMATCH',
         'variants.' + index,
         'SKU hoặc giá đã lưu lệch dòng nguồn được chọn.',
+      );
+    if (!same(variant.sku, row.sku) || !same(variant.originalPrice, row.originalPrice))
+      add(
+        'VARIANT_FACT_PROVENANCE_MISMATCH',
+        'variants.' + index,
+        'SKU hoặc giá có cùng giá trị nhưng khác căn cứ của dòng giá đã chọn; cần lưu lại ánh xạ từ nguồn gốc.',
+        [...variant.sku.sources, ...variant.originalPrice.sources],
       );
     if (
       fresh.sku.value !== row.sku.value ||
@@ -783,6 +879,20 @@ export async function buildProductionDraftSource(
     }
     const asset = descriptors[0]!,
       data = checkedBytes.get(key)!;
+    if (
+      asset.source.kind !== 'product_file' ||
+      asset.source.fileSha256 !== asset.sha256 ||
+      !asset.source.locator?.trim() ||
+      !Number.isFinite(Date.parse(asset.source.observedAt))
+    ) {
+      add(
+        'ASSET_PROVENANCE_INVALID',
+        'assets.' + key,
+        'Ảnh đã chọn thiếu căn cứ tệp gốc khớp byte ảnh; cần xác nhận lại đúng ảnh cho vai trò này.',
+        [asset.source],
+      );
+      continue;
+    }
     try {
       const metadata = await sharp(data).metadata();
       const mime =
@@ -820,24 +930,10 @@ export async function buildProductionDraftSource(
   const options = draft.tierNames.map((_, tier) => [
     ...new Set(draft.variants.map((v) => v.optionLabels[tier]!)),
   ]);
-  const sourceDescription = draft.description.some((block) => block.type === 'image')
-    ? draft.description
-    : (() => {
-        const text = draft.description
-          .filter((block) => block.type === 'text')
-          .map((block) => block.text)
-          .join('');
-        const lines = text.split(/\r?\n/);
-        const opening = lines.shift()?.trim() ?? '';
-        const content = lines.join('\n').trim();
-        return opening && content && draft.galleryKeys.length
-          ? compileDescription(opening, content, draft.galleryKeys.slice(0, 9))
-          : draft.description;
-      })();
   const document: PreparedDocument = {
     sourceKey: draft.productKey,
     title: draft.title.value,
-    description: sourceDescription.map((b) =>
+    description: draft.description.map((b) =>
       b.type === 'text' ? { ...b } : { type: 'image', image: media.get(b.assetKey)! },
     ),
     cover: media.get(draft.coverKey)!,
@@ -870,7 +966,7 @@ export async function buildProductionDraftSource(
     draft,
     input: structuredClone(input),
     decisionSource: structuredClone(decisionSource),
-    imports: [...records.values()].map((r) => ({
+    imports: [...records.values(), ...(contentRecord && !records.has(contentRecord.id) ? [contentRecord] : [])].map((r) => ({
       id: r.id,
       sha256: r.sha256,
       filename: r.filename,

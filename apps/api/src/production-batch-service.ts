@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, productionScopeSchema, type ProductionScope } from './production-scope.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -24,6 +25,8 @@ import { productionPilotWriteFingerprint } from '../../../packages/shopee/src/pr
 import { assertDeferredImageVerification } from './production-pilot-image-deferral.js';
 import { ProductionExecutionPolicyService } from './production-execution-policy.js';
 import { currentProductionSource, readProductionBatchExclusions, writeProductionBatchExclusion } from './production-batch-lifecycle.js';
+import { assertProductionBatchMappingProof } from './production-batch-provenance.js';
+import { bindRecoverySuccessor,durableRecoveryFile,hasRecoverySuccessor,noDispatchProofMatches,recoveryFingerprint,withNoDispatchProofs,type NoDispatchProof,type RecoveryReference } from './production-batch-recovery.js';
 
 const owner = 'production:2010476:1423724897';
 const uuid = z.string().uuid(),
@@ -37,6 +40,7 @@ const registration = z
     batchId: uuid,
     manifestPath: z.string().min(1),
     expectedSha256: sha,
+    scope: productionScopeSchema.optional(),
     executionEnabled: z.boolean().default(true),
     holdReason: z.string().min(1).max(2000).optional(),
   })
@@ -53,6 +57,8 @@ type Options = {
   load?: typeof loadProductionBatchSource;
   run?: typeof runPass1ProductionBatch;
   enabled?: boolean;
+  /** Test seam only; production uses the real immutable source proof gate. */
+  assertSourceProof?: typeof assertProductionBatchMappingProof;
 };
 function deferredRecoveryProof(sourceKey: string, receipt: any): DeferredRecoveryProof {
   return {
@@ -101,6 +107,7 @@ export async function registerProductionBatch(
     batchId: loaded.value.batchId,
     manifestPath: loaded.manifestPath,
     expectedSha256: loaded.sha256,
+    scope: assertProductionScope(loaded.value.scope),
     executionEnabled: input.executionEnabled ?? true,
     ...(input.holdReason ? { holdReason: input.holdReason } : {}),
   });
@@ -111,7 +118,8 @@ export async function registerProductionBatch(
     await writeFile(path, JSON.stringify(value, null, 2), { flag: 'wx' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    if (!same(registration.parse(JSON.parse(await readFile(path, 'utf8'))), value))
+    const prior=registration.parse(JSON.parse(await readFile(path, 'utf8')));
+    if (!same({...prior,scope:prior.scope ?? loaded.value.scope}, value))
       fail('REGISTRATION_CONFLICT');
   }
   return { batchId: value.batchId, manifestSha256: value.expectedSha256 };
@@ -132,13 +140,13 @@ export class ProductionBatchService {
     return this.options.enabled ?? process.env.PRODUCTION_PILOT_ENABLED === '1';
   }
   private lockKey(batchId: string) {
-    return 'production-batch-coordinator:' + owner + ':' + batchId;
+    return 'production-batch-coordinator:' + productionOwner() + ':' + batchId;
   }
   private async acquireCoordinator(batchId: string,withLifecycleLock=false) {
     if (this.repo.pool.options?.max !== undefined && this.repo.pool.options.max < 2)
       fail('POOL_CAPACITY_REQUIRED');
     const client = await this.repo.pool.connect(),
-      keys = ['production-batch-coordinator:' + owner, this.lockKey(batchId)],
+      keys = ['production-batch-coordinator:' + productionOwner(), this.lockKey(batchId)],
       held: string[] = [];
     let lifecycleLocked=false;
     try {
@@ -154,7 +162,9 @@ export class ProductionBatchService {
       return async () => {
         try {
           if(lifecycleLocked)await client.query('SELECT pg_advisory_unlock(hashtextextended(current_schema() || chr(58) || $1,0))',[localArchiveLock]);
-          for (const key of held.reverse())
+          // Keep the per-batch lease until all other cleanup has finished, so
+          // status cannot advertise readiness before this shop lease is released.
+          for (const key of held)
             await client.query(
               "SELECT pg_advisory_unlock(hashtextextended(current_schema()||':'||$1,0))",
               [key],
@@ -207,12 +217,14 @@ export class ProductionBatchService {
       throw error;
     }
     if (saved.batchId !== batchId) fail('REGISTRATION_CONFLICT');
+    if(saved.scope) assertProductionScope(saved.scope);
     const source = await (
       this.options.load ??
       (verifySourceBytes ? loadProductionBatchSource : readProductionBatchManifest)
     )(saved.manifestPath, saved.expectedSha256);
     if (source.value.batchId !== batchId || source.sha256 !== saved.expectedSha256)
       fail('MANIFEST_CHANGED');
+    assertProductionScope(source.value.scope);
     return { saved, source };
   }
   list() {
@@ -229,8 +241,16 @@ export class ProductionBatchService {
       try {
         return await this.status(id);
       } catch (error) {
+        if (error instanceof Error && error.message === 'PRODUCTION_BATCH_SCOPE_MISMATCH') return null;
+        let scope: ProductionScope;
+        try {
+          const saved=registration.parse(JSON.parse(await readFile(resolve(this.root,'web-registry',id+'.json'),'utf8')));
+          if(!saved.scope) return null;
+          scope=assertProductionScope(saved.scope);
+        } catch { return null; }
         return {
           batchId: id,
+          partnerId:scope.partnerId,shopId:scope.shopId,
           state: 'unavailable' as const,
           code: safeCode(error),
           listings: [],
@@ -245,7 +265,7 @@ export class ProductionBatchService {
     await Promise.all(Array.from({ length: Math.min(width, ids.length) }, async () => {
       while (cursor < ids.length) { const index = cursor++; batches[index] = await read(ids[index]!); }
     }));
-    return { batches };
+    return { batches: batches.filter((batch): batch is NonNullable<typeof batch> => batch !== null) };
   }
   async status(batchId: string) {
     return (await this.inspectStatus(batchId)).status;
@@ -266,7 +286,7 @@ export class ProductionBatchService {
     LEFT JOIN production_pilot_publications p ON p.create_operation_id=o.id
     LEFT JOIN production_pilot_publication_verifications pv ON pv.operation_id=p.id
     WHERE o.owner_key=$1 AND o.source_identity=ANY($2::text[]) ORDER BY o.created_at,o.id`,
-        [owner, manifest.listings.map((s) => s.sourceIdentity)],
+        [productionOwner(), manifest.listings.map((s) => s.sourceIdentity)],
       )
     ).rows;
     const laneRows = (await this.repo.pool.query(
@@ -275,7 +295,7 @@ export class ProductionBatchService {
        o.source_payload->'document'->>'title' AS title,
        o.source_payload->'batchAuthorization'->>'batchId' AS batch_id
        FROM production_pilot_lanes lane JOIN production_pilot_operations o ON o.id=lane.operation_id
-       WHERE lane.owner_key=$1 AND o.owner_key=$1`, [owner],
+       WHERE lane.owner_key=$1 AND o.owner_key=$1`, [productionOwner()],
     )).rows;
     const lane = laneRows.find(row => uuid.safeParse(row.operation_id).success);
     const blockingLane = lane && !rows.some(row => row.operation?.id === lane.operation_id) ? lane : null;
@@ -334,8 +354,8 @@ export class ProductionBatchService {
           if (
             !connection ||
             connection.environment !== 'production' ||
-            connection.partner_id !== '2010476' ||
-            connection.shop_id !== '1423724897' ||
+            connection.partner_id !== currentProductionScope().partnerId ||
+            connection.shop_id !== currentProductionScope().shopId ||
             connection.state !== 'connected'
           )
             fail('CONNECTION_REQUIRED');
@@ -382,7 +402,7 @@ export class ProductionBatchService {
               if (pub) {
                 state = 'needs_review';
                 if (
-                  pub.owner_key !== owner ||
+                  pub.owner_key !== productionOwner() ||
                   pub.create_operation_id !== op.id ||
                   pub.source_fingerprint !== op.source_fingerprint ||
                   pub.create_verification_id !== entry.verification.id ||
@@ -424,6 +444,7 @@ export class ProductionBatchService {
       }
       return {
         sourceKey: sourceListing.sourceKey,
+        sourceRevision: sourceListing.sourceRevision,
         title: sourceListing.document.title,
         modelCount: sourceListing.document.models.length,
         state,
@@ -461,7 +482,7 @@ export class ProductionBatchService {
       const request = records.get(recovery.requestId),
         resultName = recovery.requestId + '.result.json';
       if (
-        ![1, 2].includes(recovery.version) ||
+        ![1, 2, 3].includes(recovery.version) ||
         recovery.batchId !== batchId ||
         recovery.manifestSha256 !== source.sha256 ||
         name !== recovery.requestId + '.recovery.json' ||
@@ -469,7 +490,8 @@ export class ProductionBatchService {
         !Array.isArray(recovery.originalRequests) ||
         !recovery.originalRequests.length ||
         !Array.isArray(recovery.operationProofs) ||
-        (recovery.version === 2 && !Array.isArray(recovery.deferredOperationProofs)) ||
+        (recovery.version >= 2 && !Array.isArray(recovery.deferredOperationProofs)) ||
+        (recovery.version === 3 && (!same(recovery.scope,currentProductionScope()) || !Array.isArray(recovery.noDispatchProofs))) ||
         !names.includes(resultName)
       )
         fail('RECOVERY_INVALID');
@@ -496,12 +518,27 @@ export class ProductionBatchService {
         const affected = manifest.listings.filter(
           (s) => !old.sourceKey || s.sourceKey === old.sourceKey,
         );
+        if(recovery.version===3 && old.mode!=='publish') {
+          for(const s of affected) {
+            const negative=recovery.noDispatchProofs.find((proof:NoDispatchProof)=>proof.sourceKey===s.sourceKey);
+            if(!negative)continue;
+            if(!noDispatchProofMatches(negative,s))fail('RECOVERY_INVALID');
+            const current=rows.filter(row=>row.operation.source_identity===s.sourceIdentity);
+            if(current.length && (current.length!==1 || !await hasRecoverySuccessor(this.root,source,records,recovery,s.sourceKey,current[0].operation))) {
+              // The historical empty-journal event stays true. A new operation
+              // without its explicit successor receipt is independently unsafe.
+              const listing=listings.find(listing=>listing.sourceKey===s.sourceKey)!;
+              listing.state='needs_review';
+            }
+          }
+        }
         if (
           !affected.length ||
           affected.some((s) => {
+            if(recovery.version===3 && old.mode!=='publish' && noDispatchProofMatches(recovery.noDispatchProofs.find((proof:NoDispatchProof)=>proof.sourceKey===s.sourceKey),s))return false;
             const proof = operationProofs.find((p) => p.sourceKey === s.sourceKey);
             if (proof && recovery.operationProofs.some((saved: any) => same(proof, saved))) return false;
-            const deferred = recovery.version === 2 && old.mode !== 'publish'
+            const deferred = recovery.version >= 2 && old.mode !== 'publish'
               ? deferredOperationProofs.find((p) => p.sourceKey === s.sourceKey) : undefined;
             return !deferred || !recovery.deferredOperationProofs.some((saved: any) => same(deferred, saved));
           })
@@ -511,10 +548,9 @@ export class ProductionBatchService {
       }
       recoveries.push(recovery);
     }
-    const hasUnfinished = [...records.keys()].some(
-      (id) => !names.includes(id + '.result.json') && !recoveredRequestIds.has(id),
-    );
-    const alive = !callerOwnsLock && hasUnfinished ? await this.coordinatorAlive(batchId) : false;
+    // A result can be durable a few milliseconds before the coordinator releases
+    // its lease. Do not advertise an executable button during that cleanup window.
+    const alive = !callerOwnsLock ? await this.coordinatorAlive(batchId) : false;
     let interruptedInspection = false;
     for (const [id, record] of records) {
       if (!names.includes(id + '.result.json') && !recoveredRequestIds.has(id)) {
@@ -527,7 +563,7 @@ export class ProductionBatchService {
     }
     results.sort((a, b) => String(a.finishedAt).localeCompare(String(b.finishedAt)));
     const lastResult = results.at(-1) ?? null,
-      busy = pending.length > 0 && alive,
+      busy = alive,
       interrupted = pending.length > 0 && !alive;
     const publicationMode = executionPolicy?.publicationMode ?? productionPublicationMode(manifest), hidden = publicationMode === 'hidden_for_review';
     const complete = (state:string) => state === 'published' || (hidden && ['created_unlisted','created_hidden_image_qc_deferred'].includes(state));
@@ -537,7 +573,8 @@ export class ProductionBatchService {
     const excludedCount=listings.filter(s=>s.excluded).length;
     const remaining=listings.filter(s=>!s.excluded);
     const eligible=(s:typeof listings[number])=>!s.excluded && !complete(s.state) && (!['not_sent','authorized_not_started'].includes(s.state)||s.currentSource==='current');
-    const canExecute=this.enabled && saved.executionEnabled && !busy && !interrupted && !blockingWork?.blocksExecution &&
+    const sourceProofRequired=manifest.version===1;
+    const canExecute=!sourceProofRequired && this.enabled && saved.executionEnabled && !busy && !interrupted && !blockingWork?.blocksExecution &&
       !(hidden && remaining.some(s=>s.state==='publication_readback_pending')) && remaining.some(eligible) &&
       remaining.every(s=>['not_sent','authorized_not_started','published','created_readback_pending','created_unlisted','created_hidden_image_qc_deferred','publication_readback_pending'].includes(s.state));
     const statusFingerprint = fingerprint({
@@ -558,13 +595,14 @@ export class ProductionBatchService {
       records,
       operationProofs,
       deferredOperationProofs,
+      noDispatchRecoveries:recoveries.filter(recovery=>recovery.version===3),
       orphanRequestIds: interrupted ? [...pending] : [],
       status: {
         batchId,
         manifestSha256: source.sha256,
-        shopName: 'vuatinhdau.vn',
-        partnerId: '2010476',
-        shopId: '1423724897',
+        shopName: currentProductionScope().shopId,
+        partnerId: currentProductionScope().partnerId,
+        shopId: currentProductionScope().shopId,
         publicationMode,
         imageQcPolicy:executionPolicy?.imageQcPolicy ?? productionImageQcPolicy(manifest),
         ...(executionPolicy ? {executionPolicyId:executionPolicy.id,executionPolicyFingerprint:executionPolicy.fingerprint} : {}),
@@ -584,7 +622,8 @@ export class ProductionBatchService {
                   ? 'needs_review'
                   : 'ready',
         statusFingerprint,
-        listings: listings.map(s=>({...s,canExecute:canExecute && eligible(s),canExclude:!s.excluded && !s.operationId && !busy && !interrupted,imageQcStatus:s.state==='created_hidden_image_qc_deferred'?'deferred':(['created_unlisted','published'].includes(s.state)?'verified':'required'),canPublish:!s.excluded && hidden && this.enabled && saved.executionEnabled && !busy && !interrupted && s.state==='created_unlisted'})),
+        listings: listings.map(s=>({...s,canExecute:canExecute && eligible(s),canExclude:!s.excluded && !s.operationId && !busy && !interrupted,imageQcStatus:s.state==='created_hidden_image_qc_deferred'?'deferred':(['created_unlisted','published'].includes(s.state)?'verified':'required'),canPublish:!sourceProofRequired && !s.excluded && hidden && this.enabled && saved.executionEnabled && !busy && !interrupted && s.state==='created_unlisted'})),
+        sourceProofRequired,
         createdVerifiedCount,
         hiddenVerifiedCount,
         completedCount,
@@ -667,6 +706,13 @@ export class ProductionBatchService {
       if (input.mode === 'execute' && !current.canExecute) fail('RECONCILIATION_REQUIRED');
       if (input.mode === 'publish' && (!input.sourceKey || !current.listings.some(s=>s.sourceKey===input.sourceKey && s.canPublish)))
         fail('PUBLICATION_NOT_READY');
+      if (input.mode === 'execute' || input.mode === 'publish')
+        await (this.options.assertSourceProof ?? assertProductionBatchMappingProof)(
+          source,
+          (input.sourceKey ? [input.sourceKey] : current.listings.filter(s => !s.excluded).map(s => s.sourceKey)),
+          this.repo,
+          this.blobs,
+        );
       const selected = input.mode === 'publish' ? source.value.listings.find(s=>s.sourceKey===input.sourceKey)! : undefined;
       const verified = input.mode === 'publish' ? assessed.operationProofs.find(p=>p.sourceKey===input.sourceKey) : undefined;
       if(input.mode === 'publish' && !verified) fail('PUBLICATION_NOT_READY');
@@ -692,6 +738,10 @@ export class ProductionBatchService {
         ...(publicationIntent ? {publicationIntent} : {}),
         ...(current.executionPolicyId ? {executionPolicyId:current.executionPolicyId,executionPolicyFingerprint:current.executionPolicyFingerprint} : {}),
         acceptedAt: new Date().toISOString(),
+        ...(input.mode==='execute' && assessed.noDispatchRecoveries.length ? {noDispatchRecoveryRefs:assessed.noDispatchRecoveries.map(recovery=>({
+          requestId:recovery.requestId,recoveryFingerprint:recoveryFingerprint(recovery),
+          sourceKeys:recovery.noDispatchProofs.map((proof:NoDispatchProof)=>proof.sourceKey),
+        }))} : {}),
       };
       try {
         await writeFile(resolve(directory, claim + '.claim.json'), JSON.stringify(accepted), {
@@ -723,6 +773,7 @@ export class ProductionBatchService {
         },
         originalOrphans,
         deferredRecoveryProofs,
+        accepted,
       ).finally(heldRelease);
       dispatched = true;
       void running.catch(() => undefined);
@@ -738,6 +789,7 @@ export class ProductionBatchService {
     args: Parameters<typeof runPass1ProductionBatch>[0],
     originalOrphans: any[] = [],
     deferredRecoveryProofs: DeferredRecoveryProof[] = [],
+    accepted?:any,
   ) {
     try {
       let result;
@@ -747,6 +799,10 @@ export class ProductionBatchService {
           blobs: this.blobs,
           lifecycleRoot:this.root,
           ...(deferredRecoveryProofs.length ? {deferredRecoveryProofs} : {}),
+          ...(accepted?.noDispatchRecoveryRefs?.length ? {bindSuccessor:async(sourceKey:string,operation:Record<string,any>)=>{
+            const {source}=await this.load(batchId);
+            await bindRecoverySuccessor(this.root,source,accepted,accepted.noDispatchRecoveryRefs as RecoveryReference[],sourceKey,operation);
+          }} : {}),
         });
         result = {
           stopped: raw.stopped,
@@ -756,6 +812,7 @@ export class ProductionBatchService {
             ...(s.operationId ? { operationId: s.operationId } : {}),
             ...(s.itemId ? { itemId: s.itemId } : {}),
             ...(s.code ? { code: s.code } : {}),
+            ...(s.failureScope === 'source_preflight' ? { failureScope: s.failureScope } : {}),
           })),
         };
       } catch (error) {
@@ -779,8 +836,11 @@ export class ProductionBatchService {
           for (const listing of latest.status.listings)
             if (!original.sourceKey || original.sourceKey === listing.sourceKey)
               affected.add(listing.sourceKey);
+        const persist=async(noDispatchProofs:NoDispatchProof[])=>{
+        await this.load(batchId); // Revalidate the immutable manifest before recording recovery.
         const safe = [...affected].every(
           (key) => {
+            if(noDispatchProofs.some(proof=>proof.sourceKey===key))return true;
             const state = latest.status.listings.find((s) => s.sourceKey === key)?.state;
             if (['created_unlisted', 'published'].includes(state ?? '') && latest.operationProofs.some((p) => p.sourceKey === key)) return true;
             return state === 'created_hidden_image_qc_deferred' &&
@@ -792,7 +852,7 @@ export class ProductionBatchService {
           const deferredProofs = latest.deferredOperationProofs.filter((p) => affected.has(p.sourceKey) &&
             latest.status.listings.some((s) => s.sourceKey === p.sourceKey && s.state === 'created_hidden_image_qc_deferred'));
           const recovery = {
-            version: deferredProofs.length ? 2 : 1,
+            version: noDispatchProofs.length ? 3 : deferredProofs.length ? 2 : 1,
             requestId,
             batchId,
             manifestSha256: args.expectedSha256,
@@ -803,14 +863,22 @@ export class ProductionBatchService {
             })),
             resultFingerprint: fingerprint(savedResult),
             operationProofs: latest.operationProofs.filter((p) => affected.has(p.sourceKey)),
-            ...(deferredProofs.length ? {deferredOperationProofs: deferredProofs} : {}),
+            ...(deferredProofs.length || noDispatchProofs.length ? {deferredOperationProofs: deferredProofs} : {}),
+            ...(noDispatchProofs.length ? {scope:currentProductionScope(),noDispatchProofs} : {}),
           };
-          await writeFile(
+          await durableRecoveryFile(
             resolve(this.root, 'web-jobs', batchId, requestId + '.recovery.json'),
-            JSON.stringify(recovery, null, 2),
-            { flag: 'wx' },
+            recovery,
           );
         }
+        };
+        const candidates=[...affected].filter(key=>latest.status.listings.some(listing=>listing.sourceKey===key && listing.state==='not_sent' && !listing.operationId)
+          && result.listings.some(listing=>listing.sourceKey===key && listing.state==='not_sent')
+          && !originalOrphans.some(original=>original.mode==='publish' && (!original.sourceKey || original.sourceKey===key)));
+        if(candidates.length) {
+          const {source}=await this.load(batchId);
+          await withNoDispatchProofs(this.repo,this.root,source,candidates,persist);
+        } else await persist([]);
       }
     } catch {
       /* Unrecorded completion remains pending; a restart cannot silently replay it. */

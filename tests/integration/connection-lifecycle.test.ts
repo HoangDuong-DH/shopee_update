@@ -51,6 +51,12 @@ it('refreshes another shop only within its own scope and deduplicates concurrent
  expect((await listShopConnections(pool))[0]?.state).toBe('connected');
  await service.tick();expect(transport).toHaveBeenCalledTimes(2);
 });
+it('starts automatic renewal with an hour of token validity left',async()=>{
+ await pool.query("UPDATE connections SET expires_at=now()+interval '45 minutes' WHERE id=$1",[id]);
+ const transport=fetcher();
+ await new ConnectionMaintenance(repo,{encryptionKey:key,receiptRoot,transport,connectivity:async()=>true}).tick();
+ expect((await pool.query('SELECT revision FROM connections WHERE id=$1',[id])).rows[0].revision).toBe(2);
+});
 it('does not replay a refresh after network outcome is unknown, even on scheduler restart',async()=>{
  const transport=vi.fn(async()=>{throw Error('DO_NOT_LOG_TOKEN');});
  await new ConnectionMaintenance(repo,{encryptionKey:key,receiptRoot,transport}).tick();
@@ -58,6 +64,17 @@ it('does not replay a refresh after network outcome is unknown, even on schedule
  await next.tick();await next.refresh(id,1);
  expect(transport).toHaveBeenCalledTimes(1);
  expect((await listShopConnections(pool))[0]?.state).toBe('refresh_unknown');
+});
+it('waits for Shopee connectivity before consuming a refresh token, then renews automatically',async()=>{
+ const transport=fetcher();
+ const offline=new ConnectionMaintenance(repo,{encryptionKey:key,receiptRoot,transport,connectivity:async()=>false});
+ expect(await offline.refresh(id,1)).toMatchObject({kind:'waiting'});
+ expect(transport).not.toHaveBeenCalled();
+ const held=(await pool.query('SELECT revision,refresh_status,next_refresh_at FROM connections WHERE id=$1',[id])).rows[0];
+ expect(held.revision).toBe(1);expect(held.refresh_status).toBe('waiting');expect(held.next_refresh_at).not.toBeNull();
+ const online=new ConnectionMaintenance(repo,{encryptionKey:key,receiptRoot,transport,connectivity:async()=>true});
+ expect(await online.refresh(id,1)).toMatchObject({kind:'success'});
+ expect((await pool.query('SELECT revision,refresh_status FROM connections WHERE id=$1',[id])).rows[0]).toMatchObject({revision:2,refresh_status:'healthy'});
 });
 it('recovers sealed rotated credentials after a failed GET without rotating twice',async()=>{
  const transport=fetcher();let reads=0;
@@ -75,9 +92,11 @@ it('keeps independent shop authorizations pending and verifies callback scope be
  expect((await pool.query("SELECT count(*) FROM production_authorization_attempts WHERE status='pending'")).rows[0].count).toBe('2');
  const q={state:new URL(a.authorizationUrl).searchParams.get('state'),shop_id:'112233',code:'fixture-code'};
  const transport=vi.fn(async(url:RequestInfo|URL)=>String(url).includes('/auth/token/get')?response({error:'',access_token:'new-access-token',refresh_token:'new-refresh-token',expire_in:14400,shop_id_list:[112233]}):shop());
- await expect(finishProductionAuthorization(repo,{...q,shop_id:'445566'},a.browserSecret,{...options,transport})).rejects.toThrow('WRONG_SHOP');
+ expect((await finishProductionAuthorization(repo,{...q,shop_id:'445566'},a.browserSecret,{...options,transport})).status).toBe('rejected');
  expect(transport).not.toHaveBeenCalled();
- expect((await finishProductionAuthorization(repo,q,a.browserSecret,{...options,transport})).status).toBe('verified');
+ const retry=await prepareProductionAuthorization(repo,input,{...options,browserSecret:a.browserSecret});
+ const retryQuery={...q,state:new URL(retry.authorizationUrl).searchParams.get('state')};
+ expect((await finishProductionAuthorization(repo,retryQuery,a.browserSecret,{...options,transport})).status).toBe('verified');
  expect((await pool.query("SELECT shop_id FROM connections WHERE shop_id='112233'")).rowCount).toBe(1);
 });
 it('reuses only the same app key and enrolls only the requested shop from a multi-shop main-account grant',async()=>{

@@ -192,6 +192,25 @@ const step = (
   path: PreparedWireStep['path'] = '/api/v2/product/update_item',
 ): PreparedWireStep => ({ group, method: 'POST', path, payload: { item_id: 1234, ...payload } });
 describe('independent raw Shopee readback QC', () => {
+  it('does not call a three-of-nine gallery complete just because Shopee matches the submitted subset', () => {
+    const { document, context, raw } = fixture(1);
+    context.sourceContract = {
+      tierNames: [...document.tierNames],
+      optionLabelsBySku: Object.fromEntries(document.models.map((model) => [model.sku, [...model.optionLabels]])),
+      originalPriceBySku: Object.fromEntries(document.models.map((model) => [model.sku, model.originalPrice])),
+      approvedMediaSha256: [document.cover.sha256, document.gallery[0]!.sha256],
+      approvedMediaSequenceByRole: {
+        cover: [document.cover.sha256],
+        gallery: [document.gallery[0]!.sha256, 'd'.repeat(64)],
+        description: document.description.flatMap((block) => block.type === 'image' ? [block.image.sha256] : []),
+      },
+    };
+    expect(checkPreparedWireCreate(document, context, raw)).toMatchObject({
+      verified: false,
+      mismatchedPaths: ['source.media.gallery.length'],
+    });
+    expect(checkPreparedWireCreateWithoutImages(document, context, raw).coreVerified).toBe(false);
+  });
   it.each([0, 1, 2])(
     'checks a %i-tier create directly from raw fields in arbitrary model order',
     (tiers) => {
@@ -202,6 +221,14 @@ describe('independent raw Shopee readback QC', () => {
       });
     },
   );
+  it('accepts a blank package size only when the source leaves it blank', () => {
+    const { document, context, raw } = fixture(1);
+    delete document.dimensionCm;
+    delete raw.item.dimension;
+    expect(checkPreparedWireCreate(document, context, raw).verified).toBe(true);
+    raw.item.dimension = { package_length: 1, package_width: 1, package_height: 1 };
+    expect(checkPreparedWireCreate(document, context, raw).mismatchedPaths).toContain('item.dimension.blank');
+  });
   it.each([
     'title',
     'category',

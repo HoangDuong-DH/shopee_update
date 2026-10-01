@@ -1,3 +1,5 @@
+import { ContentWorkbookService } from './content-workbook-service.js';
+import { ContentWorkbookController } from './content-workbook-controller.js';
 import 'reflect-metadata';
 import {
   Body,
@@ -37,7 +39,13 @@ import {
 } from '@shopee/persistence';
 import { makePlan, type Issue, type Scope, type PreparedGateway } from '@shopee/domain';
 import { HealthController, DB_PROBE } from './health.js';
-import { saveAssembledProduct, productInput, projectProductPriceIssues } from './product-service.js';
+import { saveAssembledProduct, productInput, projectProductPriceIssues, reviewProductMapping, confirmProductMapping } from './product-service.js';
+import { reviewListingPriceMapping, confirmListingPriceMapping } from './listing-price-mapping.js';
+import { OperationsOverviewController } from './operations-overview-controller.js';
+import { OperationsOverviewService, operationsRuntime } from './operations-overview-service.js';
+import { LocalLibraryController } from './local-library-controller.js';
+import { LocalLibraryService } from './local-library-service.js';
+import { productionApplicationLocation } from './production-authorization-location.js';
 import { ConnectionMaintenance } from './connection-maintenance.js';
 import { connectSandbox } from './connection-service.js';
 import { connectProductionPilot, productionConnectionTarget } from './production-connection-service.js';
@@ -58,6 +66,11 @@ import { ImageQcService } from './image-qc-service.js';
 import { sandboxTryoutContext } from './sandbox-tryout-context.js';
 import { ProductionPilotService } from './production-pilot-service.js';
 import { ProductionBatchService } from './production-batch-service.js';
+import { ProductionWorkflows } from './production-workflows.js';
+import { createProductionOperationReport, productionOperationReportWorkbook } from './production-operation-report.js';
+import { BulkProductEditController } from './bulk-product-edit-controller.js';
+import { BulkProductEditService } from './bulk-product-edit-service.js';
+import { selectedProductionScope } from './production-scope.js';
 import { ProductionBatchReviewService } from './production-batch-review-service.js';
 import { ProductionPreparationService } from './production-preparation-service.js';
 import { ProductionPreparationAutofillService } from './production-preparation-autofill.js';
@@ -70,18 +83,22 @@ import { productionPilotWeightReviewFileLookup } from './production-pilot-weight
 import { SellerKnowledgeService } from './seller-knowledge-service.js';
 import { SellerKnowledgeFacts } from './seller-knowledge-facts.js';
 import { SellerKnowledgeController } from './seller-knowledge-controller.js';
+import { ArchiveTargetMetadataReader } from './archive-target-metadata.js';
 import { SellerKnowledgeDraftService } from './seller-knowledge-draft-service.js';
 import { SellerKnowledgeDraftController } from './seller-knowledge-draft-controller.js';
 const REPO = Symbol('repository'),
   BLOBS = Symbol('blobs');
 function authorizationBrowserSecret(req: any): string {
-  const matches = String(req.headers.cookie ?? '').split(';').map(v => v.trim())
-    .filter(v => v.startsWith(productionAuthorizationCookie + '='));
-  if (matches.length !== 1) return '';
-  const value = matches[0]!.slice(productionAuthorizationCookie.length + 1);
-  return /^[a-f0-9]{64}$/.test(value) ? value : '';
+  const cookies = String(req.headers.cookie ?? '').split(';').map(v => v.trim());
+  for (const name of [productionAuthorizationCookie, 'shopee_production_authorization']) {
+    const matches = cookies.filter(v => v.startsWith(name + '='));
+    if (matches.length !== 1) continue;
+    const value = matches[0]!.slice(name.length + 1);
+    if (/^[a-f0-9]{64}$/.test(value)) return value;
+  }
+  return '';
 }
-function authorizationPage(reply: any, status: string, httpStatus = 200) {
+function authorizationPage(reply: any, status: string, httpStatus = 200, shopId?: string, reason?: string, partnerId?: string) {
   const messages: Record<string, string> = {
     verified: 'Đã kết nối và xác minh shop đã chọn. Chưa đăng sản phẩm.',
     pending: 'Đang chờ cấp quyền cho shop đã chọn.',
@@ -91,15 +108,26 @@ function authorizationPage(reply: any, status: string, httpStatus = 200) {
     unknown: 'Chưa xác định được kết quả. Quay lại ứng dụng để kiểm tra kết nối đã lưu.',
     invalid: 'Không nhận được phiên cấp quyền hợp lệ. Mở lại liên kết từ ứng dụng trên cùng trình duyệt.',
   };
+  const expected = shopId && /^[1-9]\d*$/.test(shopId) ? shopId : '';
+  const detail = reason === 'WRONG_SHOP' || reason === 'UNEXPECTED_GRANT_SCOPE'
+    ? 'Shopee đã cấp quyền shop khác Shop ID yêu cầu. Chọn lại đúng shop trong phiên cấp quyền mới.'
+    : reason === 'REVISION_CHANGED'
+      ? 'Kết nối shop đã thay đổi khi cấp quyền. Tải lại trạng thái rồi chuẩn bị phiên mới.'
+      : '';
+  const application = new URL(productionApplicationLocation());
+  application.searchParams.set('page','shops');
+  if(expected)application.searchParams.set('connectShop',expected);
+  if(partnerId && /^[1-9]\d*$/.test(partnerId))application.searchParams.set('partnerId',partnerId);
+  const appLink=application.href;
   return reply.status(httpStatus).type('text/html; charset=utf-8')
     .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
     .send(`<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
       <title>Kết nối Shopee</title><style>body{font:18px/1.6 system-ui;max-width:650px;margin:60px auto;padding:24px;color:#202923}a{color:#a43a21}</style>
-      <h1>Kết nối Shopee</h1><p>${messages[status] ?? messages.invalid}</p>
-      <p><a href="/" rel="noreferrer">Quay lại ứng dụng → Công cụ → Kết nối shop</a></p></html>`);
+      <h1>Kết nối Shopee</h1><p>${messages[status] ?? messages.invalid}</p><p>${expected ? "Shop ID yêu cầu: " + expected : ""}</p><p>${detail}</p>
+      <p><a href="${appLink}" rel="noreferrer">Quay lại ứng dụng → Shop → Kết nối shop</a></p></html>`);
 }
 const id = (s: string) => z.string().uuid().parse(s);
-const productionRouteScope=(raw:unknown)=>z.object({partnerId:z.literal('2010476'),shopId:z.literal('1423724897')}).passthrough().parse(raw ?? {});
+const productionRouteScope = selectedProductionScope;
 const lifecycle = (raw: unknown = 'active') => z.enum(['active','archived','all']).parse(raw);
 const fields = z.enum([
   'title',
@@ -132,6 +160,40 @@ class ApiErrors implements ExceptionFilter {
         fields: error.issues.map((i) => i.path.join('.')),
       });
     const code = error instanceof Error ? error.message : '';
+    const storageCode = (error as {code?:string})?.code;
+    if(['ECONNREFUSED','ECONNRESET','57P01','57P02','57P03','53300'].includes(storageCode ?? ''))
+      return reply.status(503).send({code:'DATABASE_UNAVAILABLE',message:'Chưa kết nối được kho dữ liệu. Kiểm tra PostgreSQL rồi đọc lại công việc; không gửi lại thao tác chưa rõ kết quả.'});
+    if(storageCode==='57014') return reply.status(503).send({code:'DATABASE_REQUEST_TIMEOUT',message:'Kho dữ liệu xử lý quá thời gian chờ. Đọc lại trạng thái công việc trước khi gửi lại.'});
+    if (/^CONTENT_[A-Z0-9_]+$/.test(code)) {
+      const messages: Record<string,string> = {
+        CONTENT_WORKBOOK_NOT_FOUND: 'Không tìm thấy Excel nội dung. Chọn lại tệp đã nhập.',
+        CONTENT_SHEET_NOT_FOUND: 'Sheet đã chọn không có trong tệp gốc. Đọc lại bảng và chọn đúng sheet.',
+        CONTENT_WORKBOOK_TOO_LARGE: 'Excel nội dung vượt 16 MB. Chia tệp nhỏ hơn trước khi nhập.',
+        CONTENT_WORKBOOK_LIMIT: 'Excel vượt giới hạn 30 sheet, 10.000 dòng hoặc 128 cột. Chia nguồn nhỏ hơn.',
+        CONTENT_RESPONSE_TOO_LARGE: 'Phần nội dung vượt 8 MB. Chia workbook hoặc sheet trước khi ghép.',
+        CONTENT_WORKBOOK_INVALID: 'Tệp Excel chưa đọc được. Mở và lưu lại đúng định dạng XLSX rồi nhập lại.',
+        CONTENT_WORKBOOK_UNAVAILABLE: 'Chưa đọc được tệp gốc đã lưu. Kiểm tra kho nguồn hoặc nhập lại đúng tệp; chưa ghi thay đổi.',
+        CONTENT_WORKBOOK_HASH_MISMATCH: 'Byte Excel không khớp tệp nguồn đã chọn. Giữ bản đang làm và nhập lại đúng nguồn.',
+        CONTENT_HEADER_CHANGED: 'Tên cột hoặc sheet không khớp bản xem trước. Đọc lại bảng rồi chọn đúng cột.',
+        CONTENT_FORMULA_WITHOUT_VALUE: 'Ô công thức chưa có kết quả đã lưu. Tính lại và lưu bằng Excel trước khi nhập.',
+        CONTENT_MERGED_CELL_AMBIGUOUS: 'Ô đã chọn nằm trong vùng gộp chưa rõ nội dung. Chọn ô gốc hoặc sửa bảng Excel.',
+        CONTENT_CELL_VALUE_INVALID: 'Có ô nội dung không phải chữ hoặc số hợp lệ. Sửa ô được chỉ ra trong Excel.',
+        CONTENT_ROW_INVALID: 'Dòng nội dung thiếu dữ liệu hoặc không khớp STT. Đọc lại và chọn chính xác dòng cần dùng.',
+        CONTENT_SELECTION_MISMATCH: 'Nội dung, ảnh hoặc SKU không khớp bộ nguồn đã lưu. Đọc lại bộ nguồn trước khi lưu; chưa ghi đè.',
+        CONTENT_GROUP_INVALID: 'Bộ này đã có hồ sơ nguồn riêng hoặc không thuộc lô. Chọn nội dung đúng bộ đang xử lý.',
+        CONTENT_SELECTION_LIMIT: 'Chọn tối đa 500 bộ cho một lần ghép nội dung.',
+        CONTENT_READER_UNAVAILABLE: 'Bộ đọc nội dung chưa được cấu hình. Nhờ người phụ trách kiểm tra phiên bản ứng dụng.',
+      };
+      return reply.status(code.endsWith('_NOT_FOUND') ? 404 : /MISMATCH|CHANGED|UNAVAILABLE/.test(code) ? 409 : 400)
+        .send({code,message:messages[code] ?? 'Lựa chọn nội dung chưa hợp lệ. Đọc lại Excel và kiểm tra sheet, cột, dòng trước khi lưu.'});
+    }
+    if(/^BULK_EDIT_/.test(code)) {
+      const messages:Record<string,string> = {
+        BULK_EDIT_BLOCKED:'Có bộ chưa sửa được an toàn. Xem vấn đề từng bộ hoặc chỉ giữ phần hợp lệ rồi xem trước lại.',
+        BULK_EDIT_PARTIAL_STATE:'Chưa đối chiếu được đầy đủ lần lưu trước. Giữ mã lần lưu để người phụ trách kiểm tra; không tạo thao tác mới.',
+      };
+      return reply.status(409).send({code,message:messages[code] ?? 'Bản xem trước hoặc nguồn đã thay đổi; đọc lại nguồn và xem trước trước khi lưu.'});
+    }
     if(code==='CONNECTION_NOT_FOUND')return reply.status(404).send({code,message:'Không tìm thấy kết nối shop.'});
     if (code.startsWith('LOCAL_ARCHIVE_') || code === 'LOCAL_RESOURCE_ARCHIVED') {
       const messages:Record<string,string>={
@@ -144,7 +206,9 @@ class ApiErrors implements ExceptionFilter {
     }
     if (code.startsWith('KNOWLEDGE_DRAFT_'))
       return reply.status(code.endsWith('NOT_FOUND') ? 404 : 409).send({code,message:'Gợi ý không còn khớp bản nháp, shop hoặc thông tin ngành hiện tại. Đọc lại gợi ý và chọn thông tin đã xác nhận. Nguồn gốc vẫn được giữ nguyên.'});
-    if (/^(SELLER_KNOWLEDGE_|KNOWLEDGE_(SYNC|CONNECTION|REQUEST|BATCH|EVIDENCE|CATEGORY|REMOTE|RESPONSE|SCOPE|NOT_FOUND|READ|LOCK|METADATA))/.test(code))
+    if (code.startsWith('ARCHIVE_TARGET_'))
+      return reply.status(409).send({ code, message: 'Chưa đọc đủ metadata của shop đích hoặc kết nối đã đổi. Chưa gửi thay đổi nào lên Shopee.' });
+    if (/^(SELLER_KNOWLEDGE_|KNOWLEDGE_(ARCHIVE|COPY_PLAN|SYNC|CONNECTION|REQUEST|BATCH|EVIDENCE|CATEGORY|REMOTE|RESPONSE|SCOPE|NOT_FOUND|READ|LOCK|METADATA))/.test(code))
       return reply.status(code.endsWith('NOT_FOUND')?404:409).send({code,message:'Chưa đủ dữ liệu để đối chiếu hoặc kết nối đã thay đổi. Nguồn đã lưu vẫn được giữ; xem trạng thái đồng bộ và thử lại. Chưa thay đổi listing trên Shopee.'});
     // Ordinary batch errors have their own HTTP status and recovery guidance below.
     if (/^(PREPARATION|PRODUCTION_PREPARATION|PRODUCTION_BATCH_REVIEW)_[A-Z0-9_]+$/.test(code)) {
@@ -272,6 +336,21 @@ class ApiErrors implements ExceptionFilter {
       return reply
         .status(code.endsWith('_CONFLICT') ? 409 : 400)
         .send({ code, message: inputMessages[code] });
+    const priceMappingMessages: Record<string, string> = {
+      SOURCE_MAPPING_UNAVAILABLE: 'Bộ này chưa có liên kết nguồn đầy đủ để đối chiếu. Mở lại đúng bộ và bổ sung nguồn trước khi xác nhận.',
+      SOURCE_MAPPING_IMPORT_INVALID: 'Loại hoặc mã tệp không khớp vai trò đã chọn. Đối chiếu lại đúng bộ nguồn.',
+      SOURCE_MAPPING_IMPORT_UNAVAILABLE: 'Một tệp nguồn chưa sẵn sàng hoặc không còn đọc được. Giữ bản đang làm và đọc lại tệp trước khi xác nhận.',
+      SOURCE_MAPPING_IMPORT_CHANGED: 'Tệp nguồn không còn khớp bản đã chọn. Đọc lại đúng phiên bản tệp và đối chiếu trước khi xác nhận.',
+      SOURCE_MAPPING_PRODUCT_NOT_FOUND: 'Không tìm thấy listing đã lưu. Mở lại đúng bộ nguồn.',
+      SOURCE_MAPPING_REVIEW_CHANGED: 'Listing hoặc bảng đối chiếu đã đổi. Mở lại bảng SKU và giá trước khi xác nhận.',
+      SOURCE_MAPPING_UNRESOLVED: 'Còn phân loại thiếu, trùng hoặc lệch dòng giá. Xem danh sách cần xử lý trong bảng đối chiếu.',
+      SOURCE_MAPPING_PRICEBOOK_CHANGED: 'File giá đã đổi hoặc không còn sẵn sàng. Nhập và chọn lại đúng phiên bản file.',
+      PRODUCTION_PRICE_MAPPING_CONFIRMATION_REQUIRED: 'Chưa có xác nhận SKU và giá cho đúng phiên bản listing này.',
+      PRODUCTION_PRICE_MAPPING_MISMATCH: 'SKU hoặc giá không còn khớp biên nhận đã duyệt. Dừng gửi và đối chiếu lại nguồn.',
+    };
+    if (Object.hasOwn(priceMappingMessages, code))
+      return reply.status(code === 'SOURCE_MAPPING_PRODUCT_NOT_FOUND' ? 404 : 409)
+        .send({ code, message: priceMappingMessages[code] });
     if (code.startsWith('FOLDER_SOURCE_'))
       return reply.status(/CHANGED|CONFLICT|STALE/.test(code) ? 409 : 400).send({ code,
         message: code === 'FOLDER_SOURCE_CHANGED'
@@ -349,6 +428,15 @@ class ApiErrors implements ExceptionFilter {
 }
 @Controller('v1')
 class AppController {
+  private workflows?: ProductionWorkflows;
+  private workflow(raw: unknown) {
+    this.workflows ??= new ProductionWorkflows(this.repo,this.blobs,{
+      batch:this.productionBatch,review:this.productionBatchReview,preparation:this.productionPreparation,
+      execution:this.productionPreparationExecution,metadata:this.productionPreparationMetadata,
+      autofill:this.productionPreparationAutofill,
+    });
+    return this.workflows.get(raw);
+  }
   constructor(
     @Inject(REPO) readonly repo: Repository,
     @Inject(BLOBS) readonly blobs: BlobStore,
@@ -370,11 +458,33 @@ class AppController {
     @Inject(ProductionPreparationMetadataService) readonly productionPreparationMetadata: ProductionPreparationMetadataService,
     @Inject(ProductionPreparationAutofillService) readonly productionPreparationAutofill: ProductionPreparationAutofillService,
   ) {}
-  @Get('production-batches') productionBatchList(@Query() query:unknown) { productionRouteScope(query);return this.productionBatch.list(); }
-  @Post('production-batches/:id/exclusions') productionBatchExclude(@Param('id') key:string,@Query() query:unknown, @Body() raw:unknown) { productionRouteScope(query);return this.productionBatch.exclude(key, raw); }
-  @Get('production-batches/:id/review') productionBatchReviewStatus(@Param('id') key:string,@Query() query:any) { productionRouteScope(query);return this.productionBatchReview.review(key,String(query.sourceKey ?? '')); }
-  @Post('production-batches/:id/review/approve') productionBatchReviewApprove(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.productionBatchReview.approve(key,raw); }
-  @Get('production-preparations/context') productionPreparationContext(@Query() query:unknown) { productionRouteScope(query);return this.productionPreparation.context(); }
+  @Get('production-batches') productionBatchList(@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).batch.list(); }
+  private async operationReport(key:string,query:unknown) {
+    const scope=productionRouteScope(query);
+    const report=createProductionOperationReport(await this.workflow(query).batch.status(key),scope);
+    if(report.shopName===scope.shopId) {
+      // Display-only lookup: no token, renewal or external shop request.
+      const rows=(await this.repo.pool.query('SELECT name,display_name FROM connections WHERE environment=$1 AND partner_id=$2 AND shop_id=$3',
+        [scope.environment,scope.partnerId,scope.shopId])).rows;
+      const name=rows.length===1 ? rows[0].display_name ?? rows[0].name : null;
+      if(typeof name==='string' && name.trim())report.shopName=name.trim();
+    }
+    return report;
+  }
+  @Get('production-batches/:id/report') async productionBatchReport(@Param('id') key:string,@Query() query:unknown) {
+    return this.operationReport(key,query);
+  }
+  @Get('production-batches/:id/report.xlsx') async productionBatchReportExcel(@Param('id') key:string,@Query() query:unknown,@Res() reply:any) {
+    const report = await this.operationReport(key,query);
+    return reply.header('Cache-Control','private, no-store')
+      .header('Content-Disposition',`attachment; filename="shopee-batch-${report.batchId}.xlsx"`)
+      .type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .send(await productionOperationReportWorkbook(report));
+  }
+  @Post('production-batches/:id/exclusions') productionBatchExclude(@Param('id') key:string,@Query() query:unknown, @Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).batch.exclude(key, raw); }
+  @Get('production-batches/:id/review') productionBatchReviewStatus(@Param('id') key:string,@Query() query:any) { productionRouteScope(query);return this.workflow(query).review.review(key,String(query.sourceKey ?? '')); }
+  @Post('production-batches/:id/review/approve') productionBatchReviewApprove(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).review.approve(key,raw); }
+  @Get('production-preparations/context') productionPreparationContext(@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).preparation.context(); }
   @Post('production-preparations/autofill') async productionPreparationFill(@Query() query:unknown,@Body() raw:unknown, @Req() req:any, @Res({ passthrough: true }) reply:any) {
     productionRouteScope(query);
     // Read-only preparation: stop upstream reads when the operator leaves/cancels.
@@ -383,7 +493,7 @@ class AppController {
     req.raw.once('aborted', cancel);
     reply.raw.once('close', cancel);
     const deadline = setTimeout(() => controller.abort(new Error('PRODUCTION_PREPARATION_AUTOFILL_TIMEOUT')), 360_000);
-    try { return await this.productionPreparationAutofill.recommend(raw, controller.signal); }
+    try { return await this.workflow(query).autofill.recommend(raw, controller.signal); }
     finally {
       clearTimeout(deadline);
       req.raw.removeListener('aborted', cancel);
@@ -396,21 +506,22 @@ class AppController {
     for(const key of ['brandOffset','inventoryOffset']) if(typeof query[key]==='string' && /^\d+$/.test(query[key] as string)) query[key]=Number(query[key]);
     if(query.includeInventory==='true') query.includeInventory=true;
     if(query.includeInventory==='false') query.includeInventory=false;
-    return this.productionPreparationMetadata.get(productionPreparationMetadataQuerySchema.parse(query));
+    return this.workflow(raw).metadata.get(productionPreparationMetadataQuerySchema.parse(query));
   }
-  @Get('production-preparations/:id') productionPreparationGet(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.productionPreparation.get(key); }
-  @Get('production-preparations/:id/execution') productionPreparationExecutionGet(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.productionPreparationExecution.get(key); }
-  @Post('production-preparations/:id/run') productionPreparationExecutionRun(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.productionPreparationExecution.start(key,raw); }
-  @Post('production-preparations/preview') productionPreparationPreview(@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.productionPreparation.preview(raw); }
-  @Post('production-preparations/:id/register') productionPreparationRegister(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.productionPreparation.register(key,raw); }
-  @Get('production-batches/:id') productionBatchStatus(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.productionBatch.status(key); }
+  @Get('production-preparations/:id') productionPreparationGet(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).preparation.get(key); }
+  @Get('production-preparations/:id/source-changes') productionPreparationSourceChanges(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).preparation.sourceChanges(key); }
+  @Get('production-preparations/:id/execution') productionPreparationExecutionGet(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).execution.get(key); }
+  @Post('production-preparations/:id/run') productionPreparationExecutionRun(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).execution.start(key,raw); }
+  @Post('production-preparations/preview') productionPreparationPreview(@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).preparation.preview(raw); }
+  @Post('production-preparations/:id/register') productionPreparationRegister(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).preparation.register(key,raw); }
+  @Get('production-batches/:id') productionBatchStatus(@Param('id') key:string,@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).batch.status(key); }
   @Post('production-batches/:id/publish') async productionBatchPublish(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown,@Res() reply:any) {
     productionRouteScope(query);
-    return reply.status(202).send(await this.productionBatch.publish(key,raw));
+    return reply.status(202).send(await this.workflow(query).batch.publish(key,raw));
   }
   @Post('production-batches/:id/run') async productionBatchRun(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown,@Res() reply:any) {
     productionRouteScope(query);
-    return reply.status(202).send(await this.productionBatch.start(key,raw));
+    return reply.status(202).send(await this.workflow(query).batch.start(key,raw));
   }
   @Get('production-pilot/status') productionPilotStatus() { return this.productionPilot.status(); }
   @Post('production-pilot/start') async productionPilotStart(@Body() raw: unknown,@Res() reply:any) {
@@ -694,13 +805,19 @@ class AppController {
     const r = await this.repo.pool.query(
       "SELECT max(updated_at) AS last_seen FROM worker_heartbeats WHERE updated_at>now()-interval '15 seconds'",
     );
+    const runtime = operationsRuntime();
     return {
       productionWrites: false,
       listingExecutor: 'not_configured',
       statusScope: 'legacy_worker',
+      isolatedMode: runtime.isolatedMode,
+      operationsOverviewPath: '/v1/operations/overview',
       workspaceResetId: (await workspaceResetState())?.id,
       productionBatchWorkflow: {
-        enabled: process.env.PRODUCTION_PILOT_ENABLED === '1',
+        enabled: runtime.productionWorkflowEnabled,
+        productionWritesConfigured: runtime.productionWritesConfigured,
+        executionReadiness: runtime.executionReadiness,
+        executor: runtime.executor,
         statusPath: '/v1/production-batches',
         requiresPerBatchChecks: true,
       },
@@ -765,9 +882,21 @@ class AppController {
     if (!record) throw new HttpException({ code: 'NOT_FOUND' }, 404);
     return {...(await projectProductPriceIssues(this.repo, [record]))[0]!,...await localArchiveFlags(this.repo.pool,'product',key)};
   }
+  @Get('products/:key/mapping-review') async productMappingReview(@Param('key') key: string) {
+    return reviewProductMapping(this.repo, key);
+  }
+  @Post('products/:key/confirm-mapping') async productMappingConfirm(@Param('key') key: string, @Body() raw: unknown) {
+    return confirmProductMapping(this.repo, key, raw);
+  }
+  @Get('products/:key/price-mapping-review') async productPriceMappingReview(@Param('key') key: string) {
+    return reviewListingPriceMapping(this.repo, this.blobs, key);
+  }
+  @Post('products/:key/confirm-price-mapping') async productPriceMappingConfirm(@Param('key') key: string, @Body() raw: unknown) {
+    return confirmListingPriceMapping(this.repo, this.blobs, key, raw);
+  }
   @Post('products') async saveProduct(@Body() raw: unknown) {
     const input = productInput.parse(raw);
-    return saveAssembledProduct(this.repo, input);
+    return saveAssembledProduct(this.repo, input, this.blobs);
   }
   @Get('shops') async shops() {
     return listShopConnections(this.repo.pool);
@@ -786,9 +915,9 @@ class AppController {
   }
   @Get('connections/production') productionShopTarget(@Query() query:unknown) {return productionConnectionTarget(this.repo,query);}
   @Post('connections/production') connectProductionShop(@Body() raw:unknown) {return connectProductionPilot(this.repo,raw,{allowOtherShops:true});}
-  @Post('connections/production/authorize') async authorizeProductionShop(@Body() raw:unknown,@Res({passthrough:true}) reply:any) {
-    const {browserSecret,...result}=await prepareProductionAuthorization(this.repo,raw,{allowOtherShops:true});
-    reply.header('Set-Cookie',`${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections/production-pilot; HttpOnly; SameSite=Lax; Max-Age=1200`);
+  @Post('connections/production/authorize') async authorizeProductionShop(@Body() raw:unknown,@Req() req:any,@Res({passthrough:true}) reply:any) {
+    const {browserSecret,...result}=await prepareProductionAuthorization(this.repo,raw,{allowOtherShops:true,browserSecret:authorizationBrowserSecret(req)});
+    reply.header('Set-Cookie',`${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections; HttpOnly; SameSite=Lax; Max-Age=2400${new URL(result.callbackUrl).protocol === 'https:' ? '; Secure' : ''}`);
     return result;
   }
   @Post('connections/:id/refresh') refreshConnection(@Param('id') key:string,@Body() raw:unknown) {
@@ -812,10 +941,10 @@ class AppController {
     return connectProductionPilot(this.repo, raw);
   }
   @Post('connections/production-pilot/authorize') async authorizeProduction(
-    @Body() raw: unknown, @Res({ passthrough: true }) reply: any,
+    @Body() raw: unknown, @Req() req: any, @Res({ passthrough: true }) reply: any,
   ) {
-    const { browserSecret, ...result } = await prepareProductionAuthorization(this.repo, raw);
-    reply.header('Set-Cookie', `${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections/production-pilot; HttpOnly; SameSite=Lax; Max-Age=1200`);
+    const { browserSecret, ...result } = await prepareProductionAuthorization(this.repo, raw, {browserSecret:authorizationBrowserSecret(req)});
+    reply.header('Set-Cookie', `${productionAuthorizationCookie}=${browserSecret}; Path=/v1/connections; HttpOnly; SameSite=Lax; Max-Age=2400${new URL(result.callbackUrl).protocol === 'https:' ? '; Secure' : ''}`);
     return result;
   }
   @Get('connections/production-pilot/authorization/:attemptId') authorizationStatus(
@@ -832,14 +961,18 @@ class AppController {
     try {
       const result = await finishProductionAuthorization(this.repo, raw, authorizationBrowserSecret(req));
       return reply.status(303).header('Location', '/v1/connections/production-pilot/authorization-result/' + result.attemptId).send('');
-    } catch { return authorizationPage(reply, 'invalid', 400); }
+    } catch (error) {
+      return error instanceof Error && error.message === 'PRODUCTION_AUTHORIZATION_EXPIRED'
+        ? authorizationPage(reply, 'expired')
+        : authorizationPage(reply, 'invalid', 400);
+    }
   }
   @Get('connections/production-pilot/authorization-result/:attemptId') async productionAuthorizationResult(
     @Param('attemptId') attemptId: string, @Req() req: any, @Res() reply: any,
   ) {
     try {
       const result = await productionAuthorizationStatus(this.repo, attemptId, authorizationBrowserSecret(req));
-      return authorizationPage(reply, result.status);
+      return authorizationPage(reply, result.status, 200, result.shopId, result.reason, result.partnerId);
     } catch { return authorizationPage(reply, 'invalid', 400); }
   }
   @Get('plans/:id') async plan(@Param('id') key: string) {
@@ -932,13 +1065,18 @@ export async function createApp(
     sellerKnowledge?: SellerKnowledgeService;
   } = {},
 ): Promise<NestFastifyApplication> {
+  const contents = new ContentWorkbookService(repo, blobs);
   @Module({
-    controllers: [AppController, HealthController, SellerKnowledgeController, SellerKnowledgeDraftController],
+    controllers: [AppController, HealthController, SellerKnowledgeController, SellerKnowledgeDraftController, BulkProductEditController, ContentWorkbookController, OperationsOverviewController, LocalLibraryController],
     providers: [
       { provide: REPO, useValue: repo },
+      { provide: OperationsOverviewService, useValue: new OperationsOverviewService(repo) },
+      { provide: LocalLibraryService, useValue: new LocalLibraryService(repo) },
       { provide: BLOBS, useValue: blobs },
+      { provide: BulkProductEditService, useValue: new BulkProductEditService(repo) },
       { provide: SellerKnowledgeService, useValue: options.sellerKnowledge ?? new SellerKnowledgeService(repo) },
       { provide: SellerKnowledgeFacts, useValue: new SellerKnowledgeFacts(repo) },
+      { provide: ArchiveTargetMetadataReader, useValue: new ArchiveTargetMetadataReader(repo) },
       { provide: SellerKnowledgeDraftService, inject:[SellerKnowledgeService,SellerKnowledgeFacts], useFactory:(knowledge:SellerKnowledgeService,facts:SellerKnowledgeFacts)=>new SellerKnowledgeDraftService(repo,knowledge,facts) },
       { provide: ProductionBatchService, useValue: new ProductionBatchService(repo, blobs) },
       { provide: ProductionBatchReviewService, useValue: new ProductionBatchReviewService(repo, blobs) },
@@ -950,7 +1088,8 @@ export async function createApp(
         coverImageQc: productionPilotImageService(repo, blobs, resolve(productionPilotSourceRoot, 'assets')),
         weightReview: { findReview: productionPilotWeightReviewFileLookup(productionPilotSourceRoot) },
       }) },
-      { provide: InputService, useValue: new InputService(repo) },
+      { provide: ContentWorkbookService, useValue: contents },
+      { provide: InputService, useValue: new InputService(repo, contents) },
       { provide: WorkbenchService, useValue: new WorkbenchService(repo) },
       { provide: ImportPatchService, useValue: new ImportPatchService(repo, blobs) },
       {

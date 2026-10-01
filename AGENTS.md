@@ -1,5 +1,13 @@
 # Tra cứu kiến thức Shopee
 
+## Chốt nguồn dữ liệu và thao tác listing — 25/09/2026
+
+- Mọi ảnh bìa, ảnh phân loại, SKU, giá và cấu trúc phân loại phải truy được đến đúng tệp/dòng/ô mà người dùng cung cấp hoặc xác nhận. Không tự tìm ảnh, dùng dữ liệu listing khác, suy SKU/giá từ tên, hay tự ghép phân loại để lấp chỗ thiếu. Dữ liệu lịch sử và suy luận chỉ là gợi ý chưa xác nhận; thiếu hoặc mâu thuẫn thì giữ riêng listing và báo rõ nguồn cần bổ sung.
+- Trước bất kỳ lần ghi Shopee nào, đọc trạng thái và toàn bộ trường của đúng item/shop. Sau ghi, đọc lại và so cả trường mục tiêu lẫn các trường phải giữ nguyên. `NORMAL` phải vẫn `NORMAL`, `UNLIST` phải vẫn `UNLIST` trừ khi người dùng giao đổi trạng thái. Kết quả API chưa rõ thì đọc lại trước khi thử gửi lại.
+- Với tác vụ xóa kích thước, chỉ xóa R–D–C; không xóa/tạo lại phân loại, SKU, giá, tồn, ảnh, video hay nội dung. Nếu dữ liệu khác chênh lệch sau lưu, ghi ngoại lệ và báo người dùng; không tự bù hoặc ghi đè. Mốc tiến độ và trường hợp ngoại lệ ở `.local/session-dimension-clear-20260924/pause-checkpoint.json` và báo cáo cùng thư mục.
+- Trước khi dùng đường chuẩn bị/đăng, đọc `docs/runbooks/source-provenance-guard.md`. Kiểm tra ở code không thay thế việc đối chiếu nguồn thật và QC sau đăng.
+- Mọi ngành hàng dùng cùng chốt nguồn: đối chiếu số tầng, tên tầng, nhãn từng lựa chọn, tổ hợp SKU/giá và vai trò ảnh với khai báo độc lập của đúng bộ nguồn trước khi ghi. Không dùng script ghi trực tiếp bỏ qua chốt nguồn và không coi đọc lại khớp payload là bằng chứng payload đúng nguồn. Bộ thiếu nguồn giữ riêng; các bộ đủ tiếp tục.
+
 > Bản public bắt đầu từ `docs/handoffs/PROJECT_HANDOFF.md` và hai skill trong `skills/`. Các checkpoint `docs/delivery/` có thể chỉ tồn tại trên máy vận hành; khi thiếu, không suy diễn nội dung từ đường dẫn hoặc lịch sử Git.
 
 - **Checkpoint mới nhất17/09 — ảnh v4, user bỏ qua753:** đọc `docs/delivery/2026-09-17-image-naming-v4.md`. D Bo_nguon hiện45bộ/1761vịtrí/82SKU;1191ảnhđổi tên,108ảnhsai dòng cáchlyngoàiinput;753nguyên29tệpởD/Tam_bo_qua.726còn16ảnh,835/836mỗi11ảnh,735thiếuảnhđúng.18strict+27pendingkhôngđồngnghĩa45ready.45JSONpathsđãđồngbộ;334actualparser+4181staged+97unit+11UI/type/buildđạt. Guide BAT_DAU_TAI_DAY.txt vàTINH_TRANG_ANH_V4.csv mới. ZIPv3làlịchsử; khôngZIPv4vìuserưu tiênthư mụcnhanh. Backup1590tệp ởD/Luu_tru_goi_cu/Truoc_doi_ten_v4_20260917. KhôngghiShopee/DB;giữshopvàquyềnngười dùngtựbấmđăngẩn. Dùngchungchaikhôngđủkếtluậnảnhsai;soExcel+loại+cỡ+mùi+chữtrênảnh. 4bộxịtcònC01/C02riêng,khôngtựgộp.

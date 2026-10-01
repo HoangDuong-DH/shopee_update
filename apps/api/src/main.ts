@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { ConnectionMaintenance, startConnectionMaintenance } from './connection-maintenance.js';
-import { Pool, Repository, BlobStore } from '@shopee/persistence';
+import { Pool, Repository, BlobStore, runtimePoolConfig } from '@shopee/persistence';
 import { createApp } from './app.js';
 import { registerWebRoutes } from './web-routes.js';
-const pool = new Pool({ connectionString: process.env.DATABASE_URL }),
+const pool = new Pool(runtimePoolConfig()),
   repo = new Repository(pool);
 const app = await createApp(
   repo,

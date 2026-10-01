@@ -245,6 +245,8 @@ export function validateAttributeSelection(
         } else if (
           value.original_value_name !== undefined &&
           value.original_value_name !== actual.raw.name &&
+          !(info.format_type === 2 && nonblank(value.value_unit) &&
+            actual.raw.name === value.original_value_name + value.value_unit) &&
           !(
             Array.isArray(actual.raw.multi_lang) &&
             actual.raw.multi_lang.some(

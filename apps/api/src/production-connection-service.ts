@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { Repository, transaction } from '@shopee/persistence';
 import { SecretBox, readShopInfo } from '@shopee/gateway';
+import { productionAuthorizationLocation } from './production-authorization-location.js';
 
 // Explicit pilot enrollment requested by the owner. This is not a product-write allowlist.
 export const productionPilotTarget = Object.freeze({
@@ -51,6 +52,7 @@ export async function productionConnectionTarget(repo: Repository, raw:unknown =
   const savedKey=row?.partner_key_ciphertext ? row : await savedProductionPartnerKey(repo,target.partnerId);
   return {
     ...productionPilotTarget, ...target,
+    authorizationCallbackUrl: productionAuthorizationLocation(),
     expectedHandle: row?.name ?? (target.shopId===productionPilotTarget.shopId ? productionPilotTarget.expectedHandle : `Shop ${target.shopId}`),
     appName: target.partnerId===productionPilotTarget.partnerId ? productionPilotTarget.appName : `Ứng dụng ${target.partnerId}`,
     consoleUrl: target.partnerId===productionPilotTarget.partnerId ? productionPilotTarget.consoleUrl : "https://open.shopee.com/console/app",

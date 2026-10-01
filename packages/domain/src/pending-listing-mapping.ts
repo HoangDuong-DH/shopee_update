@@ -209,6 +209,31 @@ export function pendingSelectedVariationImage(
   );
 }
 
+/** Parse only explicitly numbered source axes. Labels remain arbitrary product data. */
+export function explicitVariationAxes(raw: string):
+  | { kind: 'none' }
+  | { kind: 'unreadable' }
+  | { kind: 'declared'; axes: { ordinal: number; options: string[] }[] } {
+  const lines = raw.replace(/\r\n?/g, '\n').split('\n').filter((line) => line.trim());
+  const axes: { ordinal: number; options: string[] }[] = [];
+  for (const line of lines) {
+    const match = /^\s*Phân\s*loại\s*(\d+)\s*[:：]\s*(.*?)\s*$/i.exec(line);
+    if (!match) {
+      if (/Phân\s*loại\s*\d+/i.test(line))
+        return { kind: 'unreadable' };
+      continue;
+    }
+    if (/Phân\s*loại\s*\d+\s*[:：]/i.test(match[2]!)) return { kind: 'unreadable' };
+    const options = match[2]!.split(/[·•]/).map((value) => value.trim());
+    if (!options.length || options.some((value) => !value))
+      return { kind: 'unreadable' };
+    axes.push({ ordinal: Number(match[1]), options });
+  }
+  if (!axes.length) return { kind: 'none' };
+  if (axes.length > 2 || axes.some((axis, index) => axis.ordinal !== index + 1))
+    return { kind: 'unreadable' };
+  return { kind: 'declared', axes };
+}
 export type PendingMappingIssue = { code: string; message: string; line?: number };
 export function resolvePendingMappingRows(
   mapping: PendingListingMapping,
@@ -228,6 +253,20 @@ export function resolvePendingMappingRows(
       issues: [{ code: 'PENDING_WORKSHEET_INVALID', message: 'Hồ sơ phân loại chưa hợp lệ.' }],
     };
   const result: ReturnType<typeof resolvePendingMappingRows> = { rows: [], issues: [] };
+  const declaration = explicitVariationAxes(mapping.document.rawVariationText);
+  if (declaration.kind === 'unreadable')
+    result.issues.push({
+      code: 'PENDING_VARIATION_DECLARATION_UNREADABLE',
+      message: 'Ô nguồn có khai báo phân loại nhưng không đọc được rõ từng tầng; cần sửa nguồn hoặc xác nhận bản cấu trúc rõ ràng.',
+    });
+  if (declaration.kind === 'declared' &&
+    (declaration.axes.length !== mapping.document.tiers.length ||
+      declaration.axes.some((axis, index) =>
+        JSON.stringify(axis.options) !== JSON.stringify(mapping.document.tiers[index]?.options))))
+    result.issues.push({
+      code: 'PENDING_VARIATION_DECLARATION_MISMATCH',
+      message: 'Số tầng hoặc lựa chọn phân loại trong bản chuẩn bị không khớp nguyên văn ô nguồn.',
+    });
   if (!mapping.structureConfirmed)
     result.issues.push({
       code: 'PENDING_STRUCTURE_UNCONFIRMED',

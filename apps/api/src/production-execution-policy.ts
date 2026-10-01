@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -51,8 +52,8 @@ const bodySchema = z
     scope: z
       .object({
         environment: z.literal('production'),
-        partnerId: z.literal('2010476'),
-        shopId: z.literal('1423724897'),
+        partnerId: z.string().refine(value => value === currentProductionScope().partnerId),
+        shopId: z.string().refine(value => value === currentProductionScope().shopId),
       })
       .strict(),
     batches: z
@@ -207,9 +208,9 @@ export class ProductionExecutionPolicyService {
     return transaction(this.repo.pool, async (c) => {
       // Same namespaces as parent and child coordinators. Fail promptly while any dispatch owns them.
       for (const key of [
-        'production-preparation-owner:' + owner,
+        'production-preparation-owner:' + productionOwner(),
         'production-preparation-execution:' + preparationId,
-        'production-batch-coordinator:' + owner,
+        'production-batch-coordinator:' + productionOwner(),
       ]) {
         const row = (
           await c.query(
@@ -267,7 +268,7 @@ export class ProductionExecutionPolicyService {
           manifest.version !== 2 ||
           manifest.preparation?.id !== preparationId ||
           manifest.preparation?.fingerprint !== preparation.fingerprint ||
-          !same(manifest.scope, scope)
+          !same(manifest.scope, currentProductionScope())
         )
           fail('MANIFEST_CHANGED');
         const status = await this.options.batchStatus!(batch.batchId);
@@ -308,7 +309,7 @@ export class ProductionExecutionPolicyService {
       if (
         !(
           await c.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked', [
-            'production-pilot:' + owner,
+            'production-pilot:' + productionOwner(),
           ])
         ).rows[0]?.locked
       )
@@ -333,7 +334,7 @@ export class ProductionExecutionPolicyService {
           const rows = (
             await c.query(
               'SELECT * FROM production_pilot_operations WHERE owner_key=$1 AND source_identity=$2 FOR SHARE',
-              [owner, source.sourceIdentity],
+              [productionOwner(), source.sourceIdentity],
             )
           ).rows;
           const state = status.listings.find((r: any) => r.sourceKey === source.sourceKey)?.state;
@@ -350,7 +351,7 @@ export class ProductionExecutionPolicyService {
               !same(payload.document, source.document) ||
               op.source_fingerprint !==
                 fp({
-                  scope,
+                  scope: currentProductionScope(),
                   sourceIdentity: source.sourceIdentity,
                   sourceRevision: source.sourceRevision,
                   sourcePayload: payload,
@@ -410,7 +411,7 @@ export class ProductionExecutionPolicyService {
         id: input.id,
         preparationId,
         preparationFingerprint: preparation.fingerprint,
-        scope,
+        scope: currentProductionScope(),
         publicationMode: input.publicationMode,
         imageQcPolicy: input.imageQcPolicy,
         createdAt: new Date().toISOString(),

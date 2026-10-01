@@ -27,6 +27,9 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 let serial = 0;
 let gateway: StatefulGateway;
 let service: PreparedExecutionService;
+// PostgreSQL setup/readback may contend with other isolated acceptance work.
+// This budgets the whole test; requestTimeoutMs remains 20ms in each timeout case.
+const timeoutCaseBudgetMs = 5000;
 
 class StatefulGateway implements PreparedGateway {
   readonly mode = 'simulation' as const;
@@ -259,7 +262,7 @@ it('validates one source envelope without accepting unsafe numbers or mutating i
       value.document.models[0]!.originalPrice = '9007199254740992';
     },
     (value: PreparedEntry) => {
-      value.document.dimensionCm.width = 1.5;
+      value.document.dimensionCm!.width = 1.5;
     },
     (value: PreparedEntry) => {
       value.document.gallery[0]!.width = Number.MAX_SAFE_INTEGER + 1;
@@ -576,7 +579,7 @@ it('bounds a never-settling create and continues another shop without replaying 
   await expect(service.reconcile(result.jobs[0]!.id)).rejects.toThrow('PREPARED_STILL_RUNNING');
   expect(attempted).toEqual([first.scope.shopId, second.scope.shopId]);
   expect(gateway.writes).toHaveLength(1);
-}, 1500);
+}, timeoutCaseBudgetMs);
 
 it('exposes active dispatch as running while the durable write intent is unknown, then ends polling on timeout', async () => {
   service = new PreparedExecutionService(repo, gateway, { requestTimeoutMs: 300 });
@@ -663,7 +666,7 @@ it('does not adopt a timed-out create when its promise later completes without e
   expect(await service.runOnce()).toBe(false);
   expect((await service.reconcile(beforeReconcile.id)).state).toBe('verified');
   expect(gateway.writes).toHaveLength(1);
-}, 1500);
+}, timeoutCaseBudgetMs);
 
 it('does not read a timed-out pending update as complete even when selected values already match', async () => {
   const e = await entry();
@@ -679,7 +682,7 @@ it('does not read a timed-out pending update as complete even when selected valu
   expect(job.readback).toBeNull();
   await expect(service.reconcile(job.id)).rejects.toThrow('PREPARED_STILL_RUNNING');
   expect(gateway.writes).toHaveLength(1);
-}, 1500);
+}, timeoutCaseBudgetMs);
 
 it('same stock instruction under a new batch ID cannot replenish an order decrement', async () => {
   const e = await entry();

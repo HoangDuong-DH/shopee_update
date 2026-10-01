@@ -23,7 +23,7 @@ export const autofillResultSchema = z.object({
   observedAt:z.string(),connectionRevision:z.number().int(),fingerprint:z.string(),
   entries:z.array(z.object({
     productKey:z.string(),sourceRevision:z.number().int(),choices:autofillChoicesSchema,
-    explanations:z.array(z.object({field:z.string(),value:z.unknown().optional(),message:z.string(),source:z.string().optional()})),
+    explanations:z.array(z.object({field:z.string(),value:z.unknown().optional(),message:z.string(),source:z.string().optional(),confidence:z.literal('unconfirmed').optional()})),
     unresolved:z.array(z.object({field:z.string(),message:z.string()})),
     issues:z.array(z.object({code:z.string(),message:z.string()})),metadata:z.unknown().optional(),
     knowledgeSuggestions:z.array(z.object({name:z.string(),applied:z.boolean(),references:z.array(z.object({itemId:z.string(),title:z.string(),evidenceId:z.string()})),reasons:z.array(z.string()).optional()}).passthrough()).optional(),

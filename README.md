@@ -1,4 +1,4 @@
-# Shopee Bulk Listing Workspace
+# ListingStudio
 
 [![Node.js 24](https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white)](.node-version)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.base.json)
@@ -6,17 +6,17 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](infra/local/compose.yaml)
 [![Application checks](https://github.com/HoangDuong-DH/shopee_update/actions/workflows/check.yml/badge.svg)](https://github.com/HoangDuong-DH/shopee_update/actions/workflows/check.yml)
 
-Ứng dụng nội bộ để chuẩn hóa dữ liệu sản phẩm, chuẩn bị lô và đăng hoặc cập nhật nhiều listing Shopee qua OpenAPI. Hệ thống giữ liên kết từ dữ liệu trên sàn về đúng Word, ảnh và dòng SKU/giá nguồn để người vận hành có thể kiểm tra, phục hồi và tiếp tục công việc mà không phải nhập lại từng sản phẩm.
+ListingStudio là ứng dụng nội bộ để chuẩn hóa dữ liệu sản phẩm, chuẩn bị lô và đăng hoặc cập nhật nhiều listing Shopee qua OpenAPI. Hệ thống giữ liên kết từ dữ liệu trên sàn về đúng Word, ảnh và dòng SKU/giá nguồn để người vận hành có thể kiểm tra, phục hồi và tiếp tục công việc mà không phải nhập lại từng sản phẩm.
 
-> **Trạng thái:** đang được phát triển và vận hành có kiểm soát. Các thao tác ghi production bị khóa theo shop, quyền và cấu hình máy chủ. Kết quả chạy thử tại máy không được coi là bằng chứng sản phẩm đã được Shopee chấp nhận.
+> **Trạng thái ngày 01/10/2026:** mã nâng cấp đã được tích hợp vào nhánh release; sao lưu, kiểm tra phục hồi và triển khai sang bản vận hành đang tiến hành. Đăng hàng, sao chép và sửa listing thật vẫn tạm dừng. Kết quả chạy thử tại máy không được coi là bằng chứng sản phẩm đã được Shopee chấp nhận.
 
 ## Bài toán hệ thống giải quyết
 
 Đăng hàng loạt không chỉ là lặp một lệnh tạo sản phẩm. Mỗi listing còn phải khớp ảnh, nội dung, phân loại, SKU, giá, tồn kho, ngành hàng, thuộc tính và kênh vận chuyển của đúng shop. Một request thành công cũng chưa đủ: dữ liệu có thể chỉ được tạo một phần hoặc được Shopee chuẩn hóa khác với dữ liệu gửi lên.
 
-Workspace xây dựng một quy trình có thể kiểm chứng:
+ListingStudio xây dựng một quy trình có thể kiểm chứng:
 
-1. Nhận Word, ảnh và bảng giá từ thư mục nguồn.
+1. Nhận Word, ảnh, Excel nội dung và bảng giá từ thư mục hoặc ZIP nguồn.
 2. Ghép từng lựa chọn bán với SKU và giá có bằng chứng.
 3. Cho người vận hành xem và sửa mapping trước khi đăng.
 4. Đóng băng một bản chuẩn bị có phiên bản cho đúng shop.
@@ -36,6 +36,17 @@ Workspace xây dựng một quy trình có thể kiểm chứng:
 - **Đối chiếu sau ghi:** kiểm tra lại tiêu đề, ảnh, phân loại, SKU, giá, tồn và trạng thái; phản hồi chưa rõ không được tự động gửi lại.
 - **Nhập bộ cập nhật:** chuẩn bị thay đổi có phạm vi cho giá, tồn, nội dung hoặc ảnh mà không cần nhập lại toàn bộ listing.
 - **Kho kiến thức Shopee:** tra tài liệu Open Platform và Seller Education đã lưu tại máy, kèm nguồn và ngày thu thập.
+
+Giao diện có bốn mục chính:
+
+| Mục | Công việc |
+| --- | --- |
+| **Tổng quan** | Xem trạng thái dữ liệu, công việc và các việc cần xử lý; lỗi đọc dữ liệu được hiển thị riêng, không biến thành số 0. |
+| **Bộ listing** | Tìm và mở bản đã lưu theo trang, đối chiếu nguồn, chỉnh phân loại hàng loạt và xác nhận lại mapping/giá theo phiên bản. |
+| **Đăng hàng** | Chuẩn bị lô cho đúng shop, theo dõi journal, phục hồi và xuất Excel QC. |
+| **Shop** | Quản lý kết nối và cấp quyền; giữ đúng shop được chọn, không tự chuyển sang shop khác. |
+
+**Công cụ** giữ Kho nguồn, nhập bộ cập nhật, các luồng kiểm tra và kho lưu trữ. Luồng cấp quyền dùng địa chỉ API/giao diện trong cấu hình, hỗ trợ phục hồi và thử lại khi đọc trạng thái lỗi. Xem [review tích hợp ngày 01/10](docs/reviews/2026-10-01-product-integration.md) và [hướng dẫn thao tác](docs/runbooks/internal-manual-review.md).
 
 ## Luồng tổng thể
 
@@ -84,6 +95,8 @@ Hệ thống ưu tiên tính đúng và khả năng phục hồi hơn tốc đ�
 
 PostgreSQL là nguồn trạng thái công việc có thẩm quyền. Tệp gốc nằm trong blob store; UI không giữ một bản trạng thái riêng để thay thế server.
 
+Các projection gọn phục vụ tìm kiếm và phân trang; raw observations, bản nguồn và biên nhận bất biến vẫn được giữ riêng để đối chiếu. API, worker và các package cùng một ứng dụng modular để giữ transaction, khóa và journal nhất quán.
+
 ## Yêu cầu
 
 - Windows 10/11 hoặc môi trường tương thích PowerShell
@@ -125,6 +138,8 @@ Sao chép từ [`.env.example`](.env.example) khi cần cấu hình thủ công.
 | `DATA_ROOT`                | Nơi lưu blob và dữ liệu runtime riêng |
 | `APP_ENCRYPTION_KEY`       | Mã hóa credentials đã lưu             |
 | `ALLOWED_ORIGINS`          | Danh sách origin được phép gọi API    |
+| `API_PORT` / `WEB_PORT`    | Cổng API và giao diện tại máy         |
+| `PUBLIC_API_ORIGIN` / `PUBLIC_WEB_ORIGIN` | Địa chỉ callback và quay lại ứng dụng khi dùng origin riêng |
 | `SHOPEE_PRODUCTION_WRITES` | Cờ bảo vệ các lệnh ghi production     |
 
 Không commit `.env`, `.local/`, dữ liệu nguồn hoặc khóa API.
@@ -143,11 +158,13 @@ npm run test:e2e        # Kiểm tra trình duyệt khi app local đang chạy
 
 Test integration dùng PostgreSQL thật trong schema riêng. Browser fixtures chặn kết nối ngoài localhost và không gửi lệnh lên Shopee.
 
+Trên máy có dữ liệu vận hành, dùng [môi trường cách ly](docs/runbooks/internal-development.md) và `node scripts/verify-internal.mjs --browser`. Lượt `run-1bwVTX` ngày 01/10 đạt **2740/2740 unit/integration, 7/7 legacy, 1/1 intake browser**, cùng typecheck và build. **7/7 workspace browser** được chạy riêng; không cộng thành một lượt full mới. Các phản hồi Shopee trong những ca này là fixture, chưa nghiệm thu API Shopee thật hoặc vận hành 24 giờ.
+
 ## Cách sử dụng
 
-1. Vào **Kho listing → Nhập Word / ảnh / bảng giá** để nhận nguồn.
-2. Kiểm tra ảnh bìa, ảnh mô tả, ảnh phân loại, cấu trúc lựa chọn bán và SKU/giá.
-3. Lưu bộ listing; bản lưu có thể mở lại mà không cần chọn lại thư mục.
+1. Vào **Công cụ → Kho nguồn → Nhập Word / ảnh / bảng giá** để nhận nguồn.
+2. Mở **Bộ listing** để kiểm tra ảnh bìa, ảnh mô tả, ảnh phân loại, cấu trúc lựa chọn bán và SKU/giá.
+3. Lưu bộ listing; sau chỉnh phân loại, xác nhận mapping đúng nguồn rồi xác nhận giá cho phiên bản mới trước khi chuẩn bị. Bản lưu có thể mở lại mà không cần chọn lại thư mục.
 4. Vào **Đăng hàng → Chuẩn bị lô mới**, chọn shop và các listing cần tạo.
 5. Xem các trường còn thiếu hoặc bị chặn, sau đó đăng ký lô.
 6. Theo dõi **Đợt đang làm**; hệ thống hiển thị trạng thái riêng cho từng listing.
@@ -161,6 +178,7 @@ Hướng dẫn chi tiết: [Đăng hàng từ bộ listing đã lưu](docs/opera
 
 Các phần chưa nên suy rộng từ kết quả hiện có:
 
+- Một đợt chuẩn bị cũ đang hiển thị có bốn bộ nguồn thiếu tệp. Giữ đợt này tạm dừng, bổ sung đúng nguồn trước khi tiếp tục; không tự tạo lại tệp hoặc tự chạy lại.
 - Chưa coi hệ thống là đã nghiệm thu cho mọi shop, mọi ngành hàng hoặc vận hành liên tục 24 giờ.
 - Một số kiểu cập nhật listing hiện có vẫn cần quy trình riêng.
 - Size chart, video, chứng từ và các ngành hạn chế có thể cần thao tác hoặc phê duyệt bổ sung.
@@ -171,6 +189,8 @@ Xem [handoff hiện hành](docs/handoffs/PROJECT_HANDOFF.md) để biết ranh g
 
 ## Tài liệu
 
+- [Review tích hợp ListingStudio ngày 01/10](docs/reviews/2026-10-01-product-integration.md)
+- [Phát triển và kiểm thử cách ly](docs/runbooks/internal-development.md)
 - [Hướng dẫn chạy và điều tra lỗi](docs/runbooks/local-development.md)
 - [Đăng hàng từ bộ listing đã lưu](docs/operator-guides/dang-hang-tu-bo-listing-da-luu.md)
 - [Chuẩn bị bộ listing](docs/operator-guides/chuan-bi-bo-listing.md)

@@ -26,6 +26,7 @@ export type InputBatchState = {
     { coverPath?: string; galleryPaths: string[]; descriptionPaths: string[] }
   >;
   wordPaths: Record<string, string>;
+  contentSelections?: Record<string, import('./content-workbook.js').ContentSelection>;
   wordRule: {
     titleHeader: string;
     descriptionHeader: string;

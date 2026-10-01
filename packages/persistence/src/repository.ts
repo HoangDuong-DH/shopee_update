@@ -21,6 +21,9 @@ export type ImportRecord = {
   createdAt: string;
   body: unknown;
 };
+export type ImportLease = { id: string; leaseEpoch: number; workerId: string };
+export type ClaimedImport = ImportRecord & ImportLease & { leaseUntil: string };
+const importMetadataColumns = 'id,sha256,filename,kind,bytes,status,message,created_at';
 const importRow = (r: any): ImportRecord => ({
   id: r.id,
   sha256: r.sha256,
@@ -74,7 +77,7 @@ export class Repository {
   }
   async listImports(lifecycle: LocalLifecycle = 'active') {
     const rows = (
-      await this.pool.query('SELECT *,NULL AS body FROM source_files ORDER BY created_at DESC')
+      await this.pool.query(`SELECT ${importMetadataColumns},NULL AS body FROM source_files ORDER BY created_at DESC,id DESC`)
     ).rows.map(importRow);
     // Only pricebooks have archive controls; other imported files remain historical evidence.
     const marked = await localArchiveList(this.pool, 'pricebook', rows, r => r.kind === 'xlsx' ? r.id : '', 'all');
@@ -84,17 +87,38 @@ export class Repository {
     const r = await this.pool.query('SELECT * FROM source_files WHERE id=$1', [id]);
     return r.rows[0] ? importRow(r.rows[0]) : null;
   }
-  async claimImport(): Promise<ImportRecord | null> {
-    const r = await this.pool
-      .query(`UPDATE source_files SET status='running',lease_until=now()+interval '5 minutes',updated_at=now()
-      WHERE id=(SELECT id FROM source_files WHERE status='queued' OR (status='running' AND lease_until<now()) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`);
-    return r.rows[0] ? importRow(r.rows[0]) : null;
+  async claimImport(workerId = `source-import:${process.pid}`): Promise<ClaimedImport | null> {
+    if (!workerId || workerId.length>200) throw Error('IMPORT_WORKER_INVALID');
+    const r = await this.pool.query(`UPDATE source_files SET status='running',
+      lease_until=clock_timestamp()+interval '5 minutes',lease_epoch=lease_epoch+1,worker_id=$1,updated_at=now()
+      WHERE id=(SELECT id FROM source_files WHERE status='queued' OR
+       (status='running' AND COALESCE(lease_until,'-infinity'::timestamptz)<=clock_timestamp())
+       ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
+      RETURNING ${importMetadataColumns},NULL AS body,lease_epoch,worker_id,lease_until`, [workerId]);
+    const row = r.rows[0];
+    return row ? { ...importRow(row), leaseEpoch: row.lease_epoch, workerId: row.worker_id,
+      leaseUntil: row.lease_until.toISOString() } : null;
   }
+  async renewImportLease(claim: ImportLease): Promise<boolean> {
+    const r = await this.pool.query(`UPDATE source_files SET lease_until=clock_timestamp()+interval '5 minutes'
+      WHERE id=$1 AND status='running' AND lease_epoch=$2 AND worker_id=$3 AND lease_until>clock_timestamp()`,
+      [claim.id,claim.leaseEpoch,claim.workerId]);
+    return r.rowCount===1;
+  }
+  async finishClaimedImport(claim: ImportLease, body: unknown, message = ''): Promise<boolean> {
+    const r = await this.pool.query(`UPDATE source_files SET status=$4,body=$5,message=$6,
+      lease_until=NULL,worker_id=NULL,updated_at=now()
+      WHERE id=$1 AND status='running' AND lease_epoch=$2 AND worker_id=$3 AND lease_until>clock_timestamp()`,
+      [claim.id,claim.leaseEpoch,claim.workerId,message ? 'failed' : 'ready',body,message]);
+    return r.rowCount===1;
+  }
+  /** Fixture/admin parser results for unleased records. Workers must complete their claim. */
   async finishImport(id: string, body: unknown, message = '') {
-    await this.pool.query(
-      'UPDATE source_files SET status=$2,body=$3,message=$4,lease_until=NULL,updated_at=now() WHERE id=$1',
+    const r = await this.pool.query(
+      "UPDATE source_files SET status=$2,body=$3,message=$4,lease_until=NULL,worker_id=NULL,updated_at=now() WHERE id=$1 AND status<>'running'",
       [id, message ? 'failed' : 'ready', body, message],
     );
+    if (r.rowCount!==1) throw Error('IMPORT_CURRENT_LEASE_REQUIRED');
   }
   async saveProduct(
     draft: ListingDraft,

@@ -36,7 +36,7 @@ BEGIN
  IF TG_OP='UPDATE' OR NOT (
   EXISTS(SELECT 1 FROM production_pilot_qc_wait_receipts r JOIN production_pilot_operations o ON o.id=r.operation_id
    WHERE o.id=OLD.operation_id AND o.owner_key=OLD.owner_key AND r.operation_revision=o.revision
-    AND r.source_fingerprint=o.source_fingerprint AND r.item_id=o.item_id AND production_pilot_can_wait_for_qc(o.id)) OR
+    AND r.source_fingerprint=o.source_fingerprint AND r.item_id=o.item_id AND production_pilot_can_wait_for_qc(o.id)) OR 
   EXISTS(SELECT 1 FROM production_pilot_operations o JOIN production_pilot_verifications v ON v.operation_id=o.id
    WHERE o.id=OLD.operation_id AND o.owner_key=OLD.owner_key AND o.state='verified' AND v.operation_revision=o.revision-1)
   OR EXISTS(SELECT 1 FROM production_pilot_operations o

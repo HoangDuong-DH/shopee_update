@@ -617,7 +617,7 @@ it('backfills old listing evidence and keeps the summary correct for an older wr
       await db.query('INSERT INTO seller_knowledge_observations(id,connection_id,kind,body) VALUES($1,$2,$3,$4)', [id, connectionId, 'listing', { ...body, title }]);
     }
     await db.query('INSERT INTO seller_knowledge_items(connection_id,item_id,evidence_id,last_seen_at) VALUES($1,$2,$3,now())', [connectionId, '123', originalId]);
-    for (const name of ['038_seller_knowledge_compact_projection.sql', '039_seller_knowledge_summary_trigger.sql']) {
+    for (const name of ['047_seller_knowledge_compact_projection.sql', '048_seller_knowledge_summary_trigger.sql']) {
       await db.query(await readFile(resolve(process.cwd(), 'packages/persistence/migrations', name), 'utf8'));
     }
     const summary = async () => (await db.query('SELECT summary FROM seller_knowledge_items WHERE connection_id=$1', [connectionId])).rows[0].summary;

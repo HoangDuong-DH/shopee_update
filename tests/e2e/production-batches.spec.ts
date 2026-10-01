@@ -53,6 +53,11 @@ async function fixture(page: Page, initial: any = ready(), drop = false) {
       return route.fulfill({
         json: { batches: Array.isArray(current) ? current : current ? [current] : [] },
       });
+    if (path === '/v1/shops')
+      return route.fulfill({ json: [{
+        id: 'production-fixture-shop', name: 'vuatinhdau.vn', state: 'connected',
+        scope: { environment: 'production', partnerId: '2010476', shopId: '1423724897', connectionRevision: 1, capabilityRevision: 1 },
+      }] });
     if (path === '/v1/production-preparations/context')
       return route.fulfill({
         json: { scope: { shopId: '1423724897' }, products: [], pricebooks: [], preparations: [] },
@@ -476,6 +481,20 @@ test('held source batches remain inspectable and hide all execution actions', as
   await region.getByText('Công cụ của đợt', { exact: true }).click();
   await region.getByRole('button', { name: 'Kiểm tra nguồn', exact: true }).click();
   expect(f.starts[0].mode).toBe('inspect');
+});
+test('legacy batch without source mapping proof shows a write stop before any click', async ({ page }) => {
+  const f = await fixture(page, {
+    ...ready(),
+    sourceProofRequired: true,
+    canExecute: false,
+  });
+  const region = page.getByRole('region', { name: 'Đợt đăng mới' });
+  await region.getByText('Công cụ của đợt', { exact: true }).click();
+  const detail = region.getByRole('region', { name: 'Chi tiết đợt đăng' });
+  await expect(detail.getByText('Thiếu xác nhận nguồn cho lô cũ')).toBeVisible();
+  await expect(detail.getByText('Đã khóa thao tác ghi cho lô cũ thiếu xác nhận nguồn.')).toBeVisible();
+  await expect(detail.getByRole('button', { name: 'Tiếp tục 1 listing còn lại' })).toBeDisabled();
+  expect(f.writes).toEqual([]);
 });
 test('mobile layout keeps source titles and action buttons within the viewport', async ({
   page,

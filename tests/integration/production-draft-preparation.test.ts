@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -22,11 +23,13 @@ import {
   productionBatchPass1Root,
 } from '../../apps/api/src/production-batch-source.js';
 import type { ProductionDraftSourceInput } from '../../apps/api/src/production-draft-source.js';
+import { folderDraftSelection } from '../../packages/domain/src/folder-source-identity.js';
+import { assertProductionBatchMappingProof } from '../../apps/api/src/production-batch-provenance.js';
+import { confirmListingPriceMapping, reviewListingPriceMapping } from '../../apps/api/src/listing-price-mapping.js';
 
 const schema = 'test_draft_preparation_' + randomUUID().replaceAll('-', '');
 const database = new URL(process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(database.hostname) || database.port !== '5442')
-  throw Error('This acceptance requires isolated schemas on local PostgreSQL 5442.');
+assertLocalIntegrationDatabase(database);
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -142,6 +145,12 @@ async function sources(count: number) {
         imageId: images[2]!.id,
       })),
     });
+    draft.sourceSelection!.mappingConfirmation = {
+      kind: 'user_decision',
+      fileSha256: digest({ productKey: draft.productKey, mapping: folderDraftSelection(draft) }),
+      locator: `listing-mapping-confirmation:${draft.productKey}`,
+      observedAt: new Date().toISOString(),
+    };
     const fact = <T>(value: T): Fact<T> => ({
       value,
       confirmed: true,
@@ -159,6 +168,12 @@ async function sources(count: number) {
     draft.attributes = { [String(100 + (i % 3))]: fact([String(200 + (i % 3))]) };
     draft.logistics = { '50': fact(true) };
     await repo.saveProduct(draft, 0);
+    // This fixture models an explicit operator review after the draft is saved.
+    const priceReview = await reviewListingPriceMapping(repo, blobs, draft.productKey);
+    expect(priceReview.issues).toEqual([]);
+    await confirmListingPriceMapping(repo, blobs, draft.productKey, {
+      expectedRevision: draft.revision, expectedFingerprint: priceReview.fingerprint,
+    });
     drafts.push(draft);
     entries.push({
       productKey: draft.productKey,
@@ -218,13 +233,22 @@ it('imports eighty original Word/image source sets and a shared pricebook throug
         (await loadProductionBatchSource(call.manifestPath, call.expectedSha256)).value,
     ),
   );
+  await assertProductionBatchMappingProof(
+    await loadProductionBatchSource(f.register.mock.calls[0]![0].manifestPath, f.register.mock.calls[0]![0].expectedSha256),
+    [manifests[0]!.listings[0]!.sourceKey], repo, blobs,
+  );
   expect(manifests.map((m) => m.listings.length)).toEqual(Array.from({ length: 20 }, () => 4));
   const listings = manifests.flatMap((m) => m.listings);
   expect(new Set(listings.map((l) => l.document.categoryId)).size).toBe(3);
   for (const [i, listing] of listings.entries()) {
     const before = f.drafts[i]!;
     expect(listing.document.title).toBe(before.title.value);
-    expect(listing.document.description).toEqual(before.description);
+    // This source explicitly selected no description images. Gallery membership
+    // cannot authorize adding the same image to a different role.
+    expect(listing.document.description).toEqual([
+      { type:'text', text:`Mở đầu ${i}\n\n` },
+      { type:'text', text:'\n\n\nGiữ nguyên nội dung đã chuẩn bị.\nKhông tự thay đặc tính.' },
+    ]);
     expect(
       listing.document.models.map((m) => [
         m.sku,

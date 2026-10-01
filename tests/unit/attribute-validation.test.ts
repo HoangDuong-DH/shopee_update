@@ -136,6 +136,7 @@ it('requires returned units for quantitative values and rejects changed predefin
     validateAttributeSelection([node], [selection(7, { value_id: 70, value_unit: 'kg' })]).valid,
   ).toBe(true);
   expect(validateAttributeSelection([node], [selection(7, 70)]).valid).toBe(true);
+  expect(validateAttributeSelection([node], [selection(7, { value_id: 70, original_value_name: '5', value_unit: 'kg' })]).valid).toBe(true);
   expect(validateAttributeSelection([node], [selection(7, custom('12', 'g'))]).valid).toBe(true);
   for (const value of [
     custom('12'),

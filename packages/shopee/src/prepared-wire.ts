@@ -21,6 +21,20 @@ export type ResolvedPreparedImage = {
 };
 export type PreparedWireContext = {
   images: ResolvedPreparedImage[];
+  /** Independently parsed source, not inferred from the listing being sent. */
+  sourceContract?: {
+    tierNames: string[];
+    optionLabelsBySku: Record<string, string[]>;
+    originalPriceBySku: Record<string, string>;
+    /** Exact independently recorded operating decision; omitted by historical contracts. */
+    stockBySku?: Record<string,number>;
+    approvedMediaSha256: string[];
+    /** Independently observed image.image_ratio from the source item. */
+    galleryRatio?: '3:4';
+    approvedMediaByRole?: Record<PreparedWireImageRole, string[]>;
+    /** Full ordered selection: allowed membership alone cannot detect omitted gallery images. */
+    approvedMediaSequenceByRole?: Partial<Record<PreparedWireImageRole, string[]>>;
+  };
   brandName?: string;
   condition?: 'NEW' | 'USED';
   preOrder?: { is_pre_order: boolean; days_to_ship?: number };
@@ -168,7 +182,12 @@ function resolve(media: PreparedMedia, role: PreparedWireImageRole, context: Pre
   positiveInt(media.height, role + '.height');
   if ((role === 'cover' || role === 'variation') && media.width !== media.height)
     fail('MEDIA_RATIO', role);
-  if (role === 'gallery' && media.width * 4 !== media.height * 3) fail('MEDIA_RATIO', role);
+  if (role === 'gallery' && media.width * 4 !== media.height * 3) {
+    const verifiedRounding = context.sourceContract?.galleryRatio === '3:4' &&
+      context.sourceContract.approvedMediaSequenceByRole?.gallery?.includes(media.sha256) &&
+      Math.abs(media.width - media.height * 3 / 4) <= 1;
+    if (!verifiedRounding) fail('MEDIA_RATIO', role);
+  }
   const found = context.images.filter(
     (r) => r.importId === media.importId && r.sha256 === media.sha256 && r.role === role,
   );
@@ -257,8 +276,69 @@ function structure(document: PreparedDocument) {
     return { name, options: sorted.map(([, option]) => option) };
   });
 }
+function sourceContract(document: PreparedDocument, context: PreparedWireContext) {
+  const contract = context.sourceContract;
+  if (!contract) return;
+  if (!same(contract.tierNames, document.tierNames))
+    fail('SOURCE_TIER_MISMATCH', 'tierNames');
+  const expectedSkus = Object.keys(contract.optionLabelsBySku);
+  if (
+    expectedSkus.length !== document.models.length ||
+    document.models.some(
+      (model) => !same(contract.optionLabelsBySku[model.sku], model.optionLabels),
+    )
+  )
+    fail('SOURCE_MODEL_MISMATCH', 'models');
+  if (
+    Object.keys(contract.originalPriceBySku).length !== document.models.length ||
+    document.models.some(
+      (model) => contract.originalPriceBySku[model.sku] !== model.originalPrice,
+    )
+  )
+    fail('SOURCE_PRICE_MISMATCH', 'models.originalPrice');
+  if(contract.stockBySku!==undefined && (Object.keys(contract.stockBySku).length!==document.models.length
+    || document.models.some(model=>!Object.hasOwn(contract.stockBySku!,model.sku)
+      || !Number.isSafeInteger(contract.stockBySku![model.sku]) || contract.stockBySku![model.sku]!<0
+      || contract.stockBySku![model.sku]!==model.stock)))
+    fail('SOURCE_STOCK_MISMATCH','models.stock');
+  const approved = new Set(contract.approvedMediaSha256);
+  if (!approved.size || [...approved].some((hash) => !/^[a-f0-9]{64}$/.test(hash)))
+    fail('SOURCE_MEDIA_INVALID', 'sourceContract.approvedMediaSha256');
+  if (
+    preparedWireMediaRequirements(document).some(
+      ({ media, role }) =>
+        !approved.has(media.sha256) ||
+        (contract.approvedMediaByRole !== undefined &&
+          !contract.approvedMediaByRole[role]?.includes(media.sha256)),
+    )
+  )
+    fail('SOURCE_MEDIA_OUT_OF_SCOPE', 'images');
+  const sequence = contract.approvedMediaSequenceByRole;
+  if (sequence) {
+    const actual: Partial<Record<PreparedWireImageRole, string[]>> = {
+      cover: [document.cover.sha256],
+      gallery: document.gallery.map((media) => media.sha256),
+      description: document.description.flatMap((block) =>
+        block.type === 'image' ? [block.image.sha256] : [],
+      ),
+    };
+    for (const role of ['cover', 'gallery', 'description'] as const)
+      if (sequence[role] && !same(sequence[role], actual[role]))
+        fail('SOURCE_MEDIA_SEQUENCE_MISMATCH', role);
+  }
+}
 function description(document: PreparedDocument, context: PreparedWireContext) {
   if (!document.description.length) fail('DESCRIPTION_REQUIRED', 'description');
+  for (let index = 1; index < document.description.length - 1; index++) {
+    const block = document.description[index]!;
+    if (
+      block.type === 'text' &&
+      !block.text.trim() &&
+      document.description[index - 1]?.type === 'image' &&
+      document.description[index + 1]?.type === 'image'
+    )
+      fail('DESCRIPTION_EMPTY_GAP', 'description.' + index);
+  }
   const images = document.description.filter((b) => b.type === 'image');
   const value = document.description
     .filter((b) => b.type === 'text')
@@ -333,7 +413,8 @@ function gallery(document: PreparedDocument, context: PreparedWireContext) {
 }
 function attributes(document: PreparedDocument, context: PreparedWireContext) {
   const selected = Object.entries(document.attributes).map(([attribute, values]) => {
-    if (!values.length || new Set(values).size !== values.length)
+    if (!values.length || values.some((value, index) =>
+      value !== '0' && values.indexOf(value) !== index))
       fail('ATTRIBUTE_INVALID', attribute);
     return {
       attribute_id: id(attribute, 'attribute_id'),
@@ -374,7 +455,13 @@ function attributes(document: PreparedDocument, context: PreparedWireContext) {
         })),
       }))
       .sort((a, b) => a.attribute_id - b.attribute_id);
-  if (!same(identity(resolved.data), identity(selected)))
+  for (const row of resolved.data) {
+    const zeroValues = row.attribute_value_list.filter((value) => value.value_id === 0);
+    if (zeroValues.length > 1 && new Set(zeroValues.map((value) =>
+      JSON.stringify([value.original_value_name?.trim(), value.value_unit ?? '']))).size !==
+      zeroValues.length)
+      fail('ATTRIBUTE_INVALID', String(row.attribute_id));
+  }  if (!same(identity(resolved.data), identity(selected)))
     fail('ATTRIBUTE_SELECTION_MISMATCH', 'attributeList');
   return resolved.data;
 }
@@ -419,7 +506,7 @@ function channelRelationRules(value: unknown, channelId: string): Record<string,
   });
 }
 function shipping(document: PreparedDocument, context: PreparedWireContext) {
-  const dimensions = {
+  const dimensions = document.dimensionCm === undefined ? undefined : {
     package_length: positiveInt(document.dimensionCm.length, 'length'),
     package_width: positiveInt(document.dimensionCm.width, 'width'),
     package_height: positiveInt(document.dimensionCm.height, 'height'),
@@ -486,6 +573,7 @@ function shipping(document: PreparedDocument, context: PreparedWireContext) {
       if (
         limit &&
         limit.unit &&
+        document.dimensionCm !== undefined &&
         limit.unit.toLowerCase() !== 'cm' &&
         !['height', 'width', 'length', 'dimension_sum'].every((key) => limit[key] === 0)
       )
@@ -496,17 +584,19 @@ function shipping(document: PreparedDocument, context: PreparedWireContext) {
           (key) =>
             typeof limit[key] === 'number' &&
             limit[key] > 0 &&
-            document.dimensionCm[key] > limit[key],
+            document.dimensionCm !== undefined && document.dimensionCm[key] > limit[key],
         )
       )
         fail('LOGISTICS_DIMENSION_LIMIT', channel.channelId);
       if (
         limit?.dimension_sum > 0 &&
+        document.dimensionCm !== undefined &&
         Object.values(document.dimensionCm).reduce((a, b) => a + b, 0) > limit.dimension_sum
       )
         fail('LOGISTICS_DIMENSION_LIMIT', channel.channelId);
       if (
         metadata.volume_limit &&
+        document.dimensionCm !== undefined &&
         Object.values(metadata.volume_limit).some((n) => typeof n === 'number' && n > 0)
       )
         fail('LOGISTICS_VOLUME_UNIT_UNVERIFIED', channel.channelId);
@@ -519,7 +609,7 @@ function shipping(document: PreparedDocument, context: PreparedWireContext) {
   });
   return {
     weight: preparedWeightKilograms(document.weightGrams),
-    dimension: dimensions,
+    ...(dimensions ? { dimension: dimensions } : {}),
     logistic_info: logistics,
   };
 }
@@ -543,6 +633,7 @@ export function planPreparedWireCreate(
 ): PreparedWirePlan {
   try {
     const tiers = structure(document);
+    sourceContract(document, context);
     if (
       !context.brandName ||
       !['NEW', 'USED'].includes(context.condition ?? '') ||
@@ -698,6 +789,7 @@ export function planPreparedWireUpdate(
   try {
     checkUpdateSelection(baseline, expected, fields, selectedSkus);
     const tiers = structure(expected.document);
+    sourceContract(expected.document, context);
     // update_item weight/dimension overwrites all model shipping (announcement908).
     // A dedicated model update plan is required before permitting this group on overrides.
     if (
@@ -712,6 +804,18 @@ export function planPreparedWireUpdate(
     if (!raw || id(raw.item.item_id, 'baseline.item_id') !== itemId)
       fail('BASELINE_REQUIRED', 'baseline');
     normalizePreparedWireSnapshot(raw);
+    // Numeric tier indices are meaningful only with the same option labels. An external
+    // reorder may preserve every model ID/SKU/index while silently changing its product.
+    if (
+      raw.models.tier_variation.length !== tiers.length ||
+      tiers.some((tier, index) => {
+        const live = raw.models.tier_variation[index];
+        return live?.name !== tier.name ||
+          !Array.isArray(live.option_list) ||
+          !same(live.option_list.map((option: any) => option.option), tier.options.map((option) => option.label));
+      })
+    )
+      fail('MODEL_OPTION_LABEL_DRIFT', 'tier_variation');
     if (fields.includes('price')) {
       // Wholesale prices impose additional ratio and cross-model requirements. This codec
       // does not yet model those rules; do not dispatch a price change under an unknown rule.
@@ -1095,3 +1199,4 @@ export function normalizePreparedWireSnapshot(raw: FieldSnapshot): FieldSnapshot
     }
   return snapshot;
 }
+

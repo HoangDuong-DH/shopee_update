@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,8 +13,7 @@ import { assembleProduct } from '../../apps/api/src/product-service.js';
 import { importNext } from '../../apps/worker/src/imports.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(database.hostname) || database.port !== '5442')
-  throw Error('Price projection tests require isolated local PostgreSQL.');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_price_projection_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: database.href });
 const pool = new Pool({ connectionString: database.href, options: `-c search_path=${schema}` });
@@ -87,7 +87,7 @@ it.each([false, true])(
     const list = await http.inject({ method: 'GET', url: '/v1/products' });
     const context = await http.inject({
       method: 'GET',
-      url: '/v1/production-preparations/context',
+      url: '/v1/production-preparations/context?partnerId=2010476&shopId=1423724897',
     });
     expect(detail.statusCode).toBe(200);
     expect(list.statusCode).toBe(200);

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { canonicalJson } from '../../packages/domain/src/index.js';
@@ -11,8 +12,7 @@ import {
   type SourceCatalogEvidenceBody,
 } from '../../packages/persistence/src/source-catalog-evidence.js';
 const url = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['localhost', '127.0.0.1'].includes(url.hostname) || url.port !== '5442')
-  throw Error('LOCAL_TEST_DATABASE_REQUIRED');
+assertLocalIntegrationDatabase(url);
 const schema = 'test_catalog_evidence_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: url.href }),
   pool = new Pool({ connectionString: url.href, options: `-c search_path=${schema}` });

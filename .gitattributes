@@ -5,3 +5,4 @@
 *.jpeg -text
 *.webp -text
 *.woff2 -text
+packages/persistence/migrations/*.sql -text

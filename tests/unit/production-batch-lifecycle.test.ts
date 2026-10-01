@@ -9,7 +9,7 @@ import { runPass1ProductionBatch } from '../../apps/api/src/production-batch-run
 async function fixture() {
   await mkdir(productionBatchPass1Root,{recursive:true});
   const root=await mkdtemp(resolve(productionBatchPass1Root,'lifecycle-test-'));
-  const loaded:any={manifestPath:resolve(root,'manifest.json'),sha256:'a'.repeat(64),value:{version:1,batchId:randomUUID(),authorizationReference:'User-approved source',assets:{},listings:[{sourceIdentity:'local-product',sourceRevision:1,sourceKey:'source-a',document:{title:'Tinh dầu Cam Sả',models:[{sku:'SKU-A'}]}}]}};
+  const loaded:any={manifestPath:resolve(root,'manifest.json'),sha256:'a'.repeat(64),value:{version:1,batchId:randomUUID(),scope:{environment:'production',partnerId:'2010476',shopId:'1423724897'},authorizationReference:'User-approved source',assets:{},listings:[{sourceIdentity:'local-product',sourceRevision:1,sourceKey:'source-a',document:{title:'Tinh dầu Cam Sả',publication:'unlisted',description:[],gallery:[],models:[{sku:'SKU-A'}]}}]}};
   const data={revision:1 as number|null,archived:false,operation:null as any};
   const query=vi.fn(async(sql:string)=>{
     if(sql.includes('SELECT to_jsonb(o) AS operation'))return {rows:data.operation?[{operation:data.operation,steps:[]}]:[]};
@@ -30,7 +30,7 @@ async function fixture() {
   await registerProductionBatch({manifestPath:loaded.manifestPath,expectedSha256:loaded.sha256},options);
   return {root,loaded,data,repo,run,service,batchId:loaded.value.batchId};
 }
-it('blocks stale first dispatch while preserving eligible siblings and legacy identities',async()=>{
+it('blocks stale and archived sources while keeping legacy batches read-only',async()=>{
   const f=await fixture();f.data.revision=2;
   let status=await f.service.status(f.batchId);
   expect(status.listings[0]).toMatchObject({currentSource:'source_changed',currentRevision:2,canExclude:true});
@@ -41,10 +41,10 @@ it('blocks stale first dispatch while preserving eligible siblings and legacy id
   expect(f.run).not.toHaveBeenCalled();
   f.loaded.value.listings.push({...f.loaded.value.listings[0],sourceIdentity:'legacy-source',sourceKey:'legacy-source'});
   status=await f.service.status(f.batchId);
-  expect(status.canExecute).toBe(true);
-  expect(status.listings).toMatchObject([{currentSource:'archived',canExecute:false},{currentSource:'current',canExecute:true,excluded:false}]);
+  expect(status.canExecute).toBe(false);
+  expect(status.listings).toMatchObject([{currentSource:'archived',canExecute:false},{currentSource:'current',canExecute:false,excluded:false}]);
   await expect(f.service.start(f.batchId,{mode:'execute',sourceKey:'source-a',expectedStatusFingerprint:status.statusFingerprint})).rejects.toThrow('PRODUCTION_BATCH_SOURCE_ARCHIVED');
-  await expect(f.service.start(f.batchId,{mode:'execute',expectedStatusFingerprint:status.statusFingerprint})).resolves.toMatchObject({state:'accepted'});
+  await expect(f.service.start(f.batchId,{mode:'execute',expectedStatusFingerprint:status.statusFingerprint})).rejects.toThrow('PRODUCTION_BATCH_SOURCE_ARCHIVED');
 });
 it('excludes only an untouched source with a durable receipt and distinct completion count',async()=>{
   const f=await fixture(),before=await f.service.status(f.batchId),snapshot=JSON.stringify(f.loaded);
@@ -62,11 +62,10 @@ it('excludes only an untouched source with a durable receipt and distinct comple
   expect(status.listings[0]?.canExclude).toBe(false);
   await expect(reserved.service.exclude(reserved.batchId,{sourceKey:'source-a',expectedStatusFingerprint:status.statusFingerprint})).rejects.toThrow('PRODUCTION_BATCH_EXCLUSION_NOT_ALLOWED');
 });
-it('the direct runner skips an excluded source without collecting or dispatching',async()=>{
+it('the direct runner rejects a legacy batch even when its source was excluded',async()=>{
   const f=await fixture(),before=await f.service.status(f.batchId);
   await f.service.exclude(f.batchId,{sourceKey:'source-a',expectedStatusFingerprint:before.statusFingerprint});
   const collect=vi.fn(),createRunner=vi.fn();
-  const result=await runPass1ProductionBatch({mode:'execute',manifestPath:f.loaded.manifestPath,expectedSha256:f.loaded.sha256},{repo:f.repo,blobs:{} as any,load:async()=>f.loaded,collect,createRunner,outputRoot:f.root});
-  expect(result).toMatchObject({stopped:false,listings:[{sourceKey:'source-a',state:'excluded'}]});
+  await expect(runPass1ProductionBatch({mode:'execute',manifestPath:f.loaded.manifestPath,expectedSha256:f.loaded.sha256},{repo:f.repo,blobs:{} as any,load:async()=>f.loaded,collect,createRunner,outputRoot:f.root})).rejects.toThrow('PRODUCTION_SOURCE_MAPPING_PROOF_REQUIRED');
   expect(collect).not.toHaveBeenCalled();expect(createRunner).not.toHaveBeenCalled();
 });

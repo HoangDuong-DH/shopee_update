@@ -63,7 +63,11 @@ describe('bounded production authorization exchange', () => {
   });
 
   it('handles main-account response and preserves shop identifiers as exact strings', async () => {
-    const transport = reply({ ...success, shop_id_list: [1423724897, 227418363] });
+    const transport = reply({
+      ...success,
+      shop_id_list: ['1423724897', 227418363],
+      merchant_id_list: ['12345'],
+    });
     const result = await exchangeProductionAuthorization(
       { ...credentials, shopId: undefined, mainAccountId: '12345' },
       transport,
@@ -153,7 +157,6 @@ describe('bounded production authorization exchange', () => {
     { ...success, access_token: 'bad\ntoken' },
     { ...success, shop_id_list: [9007199254740992] },
     { ...success, request_id: 'bad\nrequest' },
-    { ...success, shop_id_list: ['1423724897'] },
   ])('refuses incomplete or ambiguous success responses (%j)', async (body) => {
     expect(await exchangeProductionAuthorization(credentials, reply(body))).toEqual({
       kind: 'unknown',
@@ -173,7 +176,7 @@ describe('bounded production authorization exchange', () => {
     },
   );
 
-  it.each(['merchant_id_list', 'supplier_id_list', 'user_id_list', 'principal_id_list'])(
+  it.each(['supplier_id_list', 'user_id_list', 'principal_id_list'])(
     'rejects additional grant types in %s for this shop-only connector',
     async (field) => {
       expect(

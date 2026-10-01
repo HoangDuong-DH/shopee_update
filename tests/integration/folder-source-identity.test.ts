@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertLocalIntegrationDatabase } from '../helpers/integration-database.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import {
@@ -13,8 +14,7 @@ import { saveAssembledProduct, type ProductInput } from '../../apps/api/src/prod
 import { fact } from '../helpers/fixtures.js';
 
 const database = new URL(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL!);
-if (!['127.0.0.1', 'localhost'].includes(database.hostname) || database.port !== '5442')
-  throw new Error('LOCAL_TEST_DATABASE_REQUIRED');
+assertLocalIntegrationDatabase(database);
 const schema = 'test_folder_identity_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: database.href });
 const pool = new Pool({ connectionString: database.href, options: `-c search_path=${schema}` });

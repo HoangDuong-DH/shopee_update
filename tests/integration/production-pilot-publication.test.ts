@@ -332,20 +332,13 @@ it('claims the exact durable publication only once and refuses a forged payload 
 it('uses the shared create lane to block another listing during a pending publication', async () => {
   const source = await created();
   await authorize(source.operation.id);
-  const other = await createJournal.authorizeOperation({
-    ...sources[1]!,
-    connectionId,
-    expectedConnectionRevision: 1,
-    sourcePayload: { metadata: { expiresAt: new Date(Date.now() + 600000).toISOString() } },
-    expectedProjection: desired,
-  });
   await expect(
-    createJournal.authorizeWrite({
-      operationId: other.operation.id,
-      expectedRevision: 1,
-      stepKey: 'create',
-      kind: 'create',
-      payload: { item_status: 'UNLIST' },
+    createJournal.authorizeOperation({
+      ...sources[1]!,
+      connectionId,
+      expectedConnectionRevision: 1,
+      sourcePayload: { metadata: { expiresAt: new Date(Date.now() + 600000).toISOString() } },
+      expectedProjection: desired,
     }),
   ).rejects.toThrow('SHOP_BUSY');
   await expect(pool.query('DELETE FROM production_pilot_lanes')).rejects.toThrow('PUBLICATION');

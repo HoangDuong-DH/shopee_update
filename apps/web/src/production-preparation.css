@@ -4,6 +4,31 @@
   padding: 24px 12px;
   color: var(--text);
 }
+.preparation-source-difference pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+}
+.preparation-source-changes {
+  padding: 16px;
+  margin: 16px 0;
+  border: 1px solid #d4a079;
+  border-radius: 8px;
+  background: #fff8f1;
+}
+.preparation-source-changes li {
+  overflow-wrap: anywhere;
+}
+.preparation-source-changes button {
+  max-width: 100%;
+  white-space: normal;
+}
 .preparation-step-guide {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

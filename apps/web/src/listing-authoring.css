@@ -1,0 +1,26 @@
+.authoring-source-notice { color: var(--muted); background: var(--accent-soft); padding: 1rem; border-radius: .75rem; overflow-wrap: anywhere; }
+.image-file-evidence { grid-column: 1 / -1; min-width: 0; font-size: .85rem; color: var(--muted); }
+.image-file-evidence dl { margin: .5rem 0 0; display: grid; gap: .4rem; }
+.image-file-evidence dl > div { display: grid; grid-template-columns: minmax(7rem, .3fr) minmax(0, 1fr); gap: .75rem; }
+.image-file-evidence dd { margin: 0; overflow-wrap: anywhere; }
+.image-file-evidence code { white-space: normal; }
+.editor-recovery { display: grid; gap: .6rem; margin-block: 1rem; padding: 1rem 1.25rem; border: 1px solid var(--line); background: var(--surface, #fff); border-radius: .85rem; }
+.editor-recovery p { margin: 0; max-width: 68ch; }
+.editor-recovery .actions { flex-wrap: wrap; }
+.editor-recovery-stale { display: grid; gap: .6rem; }
+.editor-recovery-stale textarea { width: 100%; box-sizing: border-box; }
+.editor-workspace .editor-tabs { gap: .4rem; }
+.editor-workspace .editor-tabs button { border-radius: .65rem; }
+.preview-source-review .authoring-shop-context { margin-block: 1rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem 1.5rem; align-items: end; }
+.authoring-shop-context label { min-width: 0; }
+.authoring-shop-context select { width: 100%; }
+.preview-layout, .preview-layout > section, .editor-workspace > section { min-width: 0; }
+.preview-layout .filmstrip button:focus-visible, .editor-workspace button:focus-visible, .image-picker button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.editor-save-bar { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+@media (max-width: 680px) {
+  .preview-source-review .authoring-shop-context { grid-template-columns: minmax(0, 1fr); }
+  .image-file-evidence dl > div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  .editor-recovery { padding: 1rem; }
+  .editor-recovery .actions > button { flex: 1 1 12rem; }
+}
+@media (prefers-reduced-motion: reduce) { .editor-workspace *, .preview-source-review *, .image-picker * { scroll-behavior: auto; transition: none; animation: none; } }

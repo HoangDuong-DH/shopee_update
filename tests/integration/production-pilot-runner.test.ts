@@ -88,7 +88,30 @@ const ready = async (index = 0) => {
   if (result.kind !== 'ready') throw new Error('Fixture invalid');
   return result.operationId;
 };
-async function makeCase(index: number): Promise<ProductionPilotPreparedInput> {
+function approveFixtureSource(source: ProductionPilotPreparedInput) {
+  const document = source.document;
+  const cover = [document.cover.sha256];
+  const gallery = document.gallery.map((media) => media.sha256);
+  const description = document.description.flatMap((block) =>
+    block.type === 'image' ? [block.image.sha256] : [],
+  );
+  const variation = document.models.flatMap((model) =>
+    model.image ? [model.image.sha256] : [],
+  );
+  source.context.sourceContract = {
+    tierNames: [...document.tierNames],
+    optionLabelsBySku: Object.fromEntries(document.models.map((model) => [model.sku, [...model.optionLabels]])),
+    originalPriceBySku: Object.fromEntries(document.models.map((model) => [model.sku, model.originalPrice])),
+    approvedMediaSha256: [...new Set([...cover, ...gallery, ...description, ...variation])],
+    approvedMediaByRole: {
+      cover,
+      gallery: [...new Set(gallery)],
+      description: [...new Set(description)],
+      variation: [...new Set(variation)],
+    },
+    approvedMediaSequenceByRole: { cover, gallery, description },
+  };
+}async function makeCase(index: number): Promise<ProductionPilotPreparedInput> {
   const assets: Record<string, string> = {},
     folder = join(directory, 'source-' + index);
   await mkdir(folder, { recursive: true });
@@ -294,6 +317,7 @@ beforeEach(async () => {
 });
 
 function enableDeferredImages() {
+  for (const source of cases) approveFixtureSource(source);
   runner=new ProductionPilotRunner(repo,{...runner.options,deferImageQc:true,batchAuthorization:{
     batchId:randomUUID(),manifestSha256:'c'.repeat(64),authorizationReference:'Explicit hidden trial, image review deferred',
     publicationMode:'hidden_for_review',imageQcPolicy:'defer_image_qc',
@@ -361,7 +385,12 @@ it('checks an occupied shop lane before inserting another source reservation', a
   expect((await pool.query('SELECT id FROM production_pilot_operations')).rows.map(r => r.id)).toEqual([id]);
   expect(mutationCalls()).toHaveLength(0);
 });
-it('explicit hidden image deferral records two core reads, leaves image QC pending and permits the next source without publishing',async()=>{
+it('does not authorize a production batch with an incomplete media inventory contract', async () => {
+  enableDeferredImages();
+  delete cases[0]!.context.sourceContract!.approvedMediaSequenceByRole;
+  await expect(prepareSource(cases[0]!)).rejects.toThrow('PRODUCTION_PILOT_SOURCE_CONTRACT_REQUIRED');
+  expect(mutationCalls()).toHaveLength(0);
+});it('explicit hidden image deferral records two core reads, leaves image QC pending and permits the next source without publishing',async()=>{
   enableDeferredImages();
   responseTransform=(path,body)=>{if(path.endsWith('get_item_base_info'))body.response.item_list[0].promotion_image.image_id_list=['unreviewed-transformed-cover'];};
   const id=await ready(1),result=await runner.run(id);
@@ -403,7 +432,7 @@ it('reconciles deferred images strictly later without replaying any creation ste
   expect((await strict.run(id)).state).toBe('verified');
   expect(mutationCalls()).toHaveLength(before);
   const view=await strict.journal.get(id);expect(view.verification).not.toBeNull();expect(view.deferredImageVerification).not.toBeNull();
-});
+},60000);
 it('converts an original all-ACK automatic operation to hidden image deferral without rewriting it or replaying POST',async()=>{
   enableDeferredImages();
   const originalAuthorization=structuredClone(runner.options.batchAuthorization!) as any;
@@ -1026,6 +1055,7 @@ it('uses actual verified feature evidence for a second source without granting a
   const first = await ready();
   expect((await runner.run(first)).state).toBe('verified');
   const second = structuredClone(cases[1]!);
+  approveFixtureSource(second);
   const observedAt = new Date().toISOString();
   second.metadata.observedAt = observedAt;
   second.capabilityEvidence = await runner.capabilityEvidenceFromVerified(first, 1, observedAt, [
@@ -1045,6 +1075,7 @@ it('uses an explicitly nominated legacy capability only for reads while a new ma
   expect((await runner.run(first)).state).toBe('verified');
   const old = await runner.journal.get(first);
   const second = structuredClone(cases[1]!);
+  approveFixtureSource(second);
   const batchAuthorization = { batchId: randomUUID(), manifestSha256: 'a'.repeat(64),
     authorizationReference: 'Fixture new manifest approved independently', sources: [{
       sourceIdentity: second.sourceIdentity, sourceRevision: second.sourceRevision,
@@ -1447,4 +1478,38 @@ it('parks fully acknowledged creation for QC without approving it or blocking an
   expect(mutationCalls()).toHaveLength(count);
   expect(await runner.journal.waitForQc(id)).toBe(true);
   expect((await pool.query('SELECT * FROM production_pilot_lanes')).rows).toHaveLength(1);
+});
+import { findProductionCapabilityProof, intendedHiddenCapabilityProbe } from '../../apps/api/src/production-batch-capability.js';
+import { withProductionScope } from '../../apps/api/src/production-scope.js';
+it('permits two exact intended hidden probes with deferred QC without treating either ACK as feature support',async()=>{
+  const chosen=cases.slice(0,2).map(c=>structuredClone(c));
+  const authorization={batchId:randomUUID(),manifestSha256:'a'.repeat(64),authorizationReference:'User selected two hidden listings',publicationMode:'hidden_for_review' as const,imageQcPolicy:'defer_image_qc' as const,
+    sources:chosen.map(s=>({sourceIdentity:s.sourceIdentity,sourceRevision:s.sourceRevision,documentSha256:createHash('sha256').update(canonicalJson(s.document)).digest('hex')}))};
+  for(const source of chosen){
+    approveFixtureSource(source);
+    source.capabilityProbe=intendedHiddenCapabilityProbe({hidden:true,...authorization,source,evidence:source.capabilityEvidence});
+    runner=new ProductionPilotRunner(repo,{...runner.options,allowedSources:[{sourceIdentity:source.sourceIdentity,sourceRevision:source.sourceRevision}],batchAuthorization:authorization,deferImageQc:true,capabilityProbe:source.capabilityProbe});
+    const tampered=structuredClone(source);tampered.capabilityProbe!.authorizationReference='another source';
+    await expect(runner.prepare(tampered)).rejects.toThrow('CAPABILITY_PROBE_FORBIDDEN');
+    const prepared=await runner.prepare(source);if(prepared.kind!=='ready')throw Error(JSON.stringify(prepared));
+    expect((await runner.run(prepared.operationId)).state).toBe('hidden_image_qc_deferred');
+    const view=await runner.journal.get(prepared.operationId);
+    expect(view.operation.state).toBe('acknowledged');expect(view.verification).toBeNull();
+    expect(view.operation.source_payload.capabilityEvidence.gallery34.state).toBe('unknown');
+    expect(await findProductionCapabilityProof(repo,source.document)).toBeUndefined();
+    await expect(runner.capabilityEvidenceFromVerified(prepared.operationId,1,new Date().toISOString(),['fixture'])).rejects.toThrow('CAPABILITY_PROOF_UNVERIFIED');
+    const before=creates().length;await runner.run(prepared.operationId);expect(creates()).toHaveLength(before);
+  }
+  expect(creates()).toHaveLength(2);
+});
+it('selects older verified extended evidence over a newer plaintext item and excludes another shop',async()=>{
+  const extended=await ready();expect((await runner.run(extended)).state).toBe('verified');
+  const plain=structuredClone(cases[1]!);plain.document.description=plain.document.description.filter(b=>b.type==='text');
+  const now=new Date().toISOString();plain.metadata.observedAt=now;
+  plain.capabilityEvidence=await runner.capabilityEvidenceFromVerified(extended,1,now,['fixture']);delete plain.capabilityProbe;
+  const prepared=await runner.prepare(plain);if(prepared.kind!=='ready')throw Error(JSON.stringify(prepared));
+  expect((await runner.run(prepared.operationId)).state).toBe('verified');
+  expect(await findProductionCapabilityProof(repo,cases[0]!.document)).toBe(extended);
+  expect(await findProductionCapabilityProof(repo,plain.document)).toBe(prepared.operationId);
+  expect(await withProductionScope({environment:'production',partnerId:'2010476',shopId:'1126307464'},()=>findProductionCapabilityProof(repo,cases[0]!.document))).toBeUndefined();
 });

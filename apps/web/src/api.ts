@@ -9,6 +9,12 @@ export class RequestError extends Error {
   }
 }
 const requestMessages: Record<string, string> = {
+  BULK_EDIT_PREVIEW_CHANGED: 'Bản xem trước hoặc nguồn đã thay đổi. Lựa chọn của bạn vẫn giữ; đọc lại nguồn và xem trước lần nữa trước khi lưu.',
+  BULK_EDIT_BLOCKED: 'Có bộ nguồn chưa sửa được an toàn. Xem vấn đề trong từng bộ hoặc chỉ giữ các bộ sửa được để xem trước lại.',
+  BULK_EDIT_PARTIAL_STATE: 'Chưa đối chiếu được đầy đủ lần lưu trước. Giữ mã lần lưu và nhờ người phụ trách kiểm tra; không tạo thao tác mới.',
+  PRODUCTION_BATCH_SCOPE_MISMATCH: 'Đợt này không thuộc shop đang chọn. Chọn lại đúng shop hoặc mở đợt của shop hiện tại; chưa gửi thêm thay đổi.',
+  PASS1_CAPABILITY_SETUP_REQUIRED: 'Shop này chưa hoàn tất kiểm tra khả năng đăng ảnh và mô tả. Nguồn đã chuẩn bị vẫn được giữ. Nhờ người phụ trách hoàn tất thiết lập kết nối trước khi đăng.',
+  PREPARATION_PARTIAL_REVIEW_REQUIRED: 'Các đợt độc lập đủ điều kiện đã được xử lý; còn đợt cần sửa hoặc đối chiếu riêng. Mở Đợt đang làm để xem từng bộ, rồi tiếp tục phần chưa hoàn tất; không tạo lại link đã có.',
   PRODUCTION_BATCH_SOURCE_CHANGED: 'Nguồn đã có phiên bản mới. Loại mục chưa gửi khỏi đợt cũ rồi chuẩn bị lại từ bản mới; không đăng bản cũ.',
   PRODUCTION_BATCH_SOURCE_ARCHIVED: 'Nguồn đã được lưu trữ. Loại mục chưa gửi khỏi đợt này hoặc khôi phục nguồn để chuẩn bị lại.',
   PRODUCTION_BATCH_EXCLUSION_NOT_ALLOWED: 'Chỉ loại được listing chưa có lần gửi và khi đợt đã dừng. Link đã tạo hoặc lần gửi chưa rõ kết quả cần đối chiếu trước.',
@@ -153,7 +159,36 @@ const requestMessages: Record<string, string> = {
   SERVICE_UNAVAILABLE:
     'Ứng dụng chưa xử lý được yêu cầu. Phần đang nhập vẫn ở màn hình này; kiểm tra kết nối và thử lại.',
 };
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
+/** A deadline bounds the response body as well as connection setup. Never retry a write here. */
+export async function api<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  const { timeoutMs = ['GET', 'HEAD'].includes((init?.method ?? 'GET').toUpperCase()) ? 60_000 : 180_000,
+    signal: callerSignal, ...requestInit } = init ?? {};
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid request deadline');
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+  });
+  const cancel = () => controller.abort(callerSignal?.reason ?? new DOMException('Aborted', 'AbortError'));
+  callerSignal?.addEventListener('abort', cancel, { once: true });
+  if (callerSignal?.aborted) cancel();
+  else timer = setTimeout(() => controller.abort(new RequestError(
+    'Quá thời gian chờ phản hồi; chưa xác nhận được kết quả. Đọc lại công việc hoặc bản đã lưu trước khi gửi lại. Việc ngừng chờ không hủy tác vụ trên máy chủ.',
+    'REQUEST_TIMEOUT',
+  )), timeoutMs);
+  try {
+    // The race also covers response.json() and transports which do not promptly settle on abort.
+    return await Promise.race([interrupted, request<T>(path, { ...requestInit, signal: controller.signal })]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', cancel);
+  }
+}
+
+async function request<T>(path: string, init: RequestInit): Promise<T> {
+  init.signal?.throwIfAborted();
   let response: Response;
   try {
     response = await fetch(path, {
@@ -167,6 +202,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch (error) {
+    init.signal?.throwIfAborted();
     if (error instanceof Error && error.name === 'AbortError') throw error;
     throw new RequestError(
       'Mất kết nối với ứng dụng; chưa xác nhận được kết quả. Giữ phần đang nhập, kiểm tra bản đã lưu trước khi thử lại.',
@@ -177,6 +213,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     body = await response.json();
   } catch {
+    init.signal?.throwIfAborted();
     throw new RequestError(
       'Ứng dụng trả về kết quả chưa đọc được. Kiểm tra bản đã lưu trước khi thử lại.',
       'INVALID_RESPONSE',
@@ -190,7 +227,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         : `HTTP_${response.status}`;
     // These error families are translated by our API; unknown payloads stay out of the UI.
     const knownTranslated =
-      (code.startsWith('KNOWLEDGE_') || code.startsWith('PATCH_') || code.startsWith('PREPARED_') || code.startsWith('IMAGE_QC_') ||
+      (code.startsWith('CONTENT_') || code.startsWith('KNOWLEDGE_') || code.startsWith('PATCH_') || code.startsWith('PREPARED_') || code.startsWith('IMAGE_QC_') ||
         code.startsWith('PREPARATION_') || code.startsWith('PRODUCTION_PREPARATION_') || code.startsWith('PRODUCTION_BATCH_') ||
         code.startsWith('SELLER_KNOWLEDGE_') || code.startsWith('PRODUCTION_EXECUTION_POLICY_') ||
         code.startsWith('PRODUCTION_PILOT_') || code.startsWith('PRODUCTION_AUTHORIZATION_') || code.startsWith('PRODUCTION_CONNECTION_')) &&

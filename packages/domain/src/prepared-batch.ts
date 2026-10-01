@@ -70,7 +70,8 @@ export type PreparedDocument = {
   attributes: Record<string, string[]>;
   logistics: { channelId: string; enabled: boolean }[];
   weightGrams: number;
-  dimensionCm: { length: number; width: number; height: number };
+  /** Omit when the source does not declare package dimensions. */
+  dimensionCm?: { length: number; width: number; height: number };
   publication: 'unlisted';
 };
 export type PreparedField =

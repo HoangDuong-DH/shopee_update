@@ -1,3 +1,4 @@
+import { currentProductionScope, productionOwner, assertProductionScope, type ProductionScope } from './production-scope.js';
 import { z } from 'zod';
 import type { PreparedDocument } from '@shopee/domain';
 import type { FieldSnapshot } from '../../../packages/shopee/src/field-client.js';
@@ -85,8 +86,8 @@ export async function reconcileProductionPilotCover(
     return fail('OBSERVED_URL_MISSING');
   const binding: ImageQcBinding = {
     environment: 'production',
-    partnerId: '2010476',
-    shopId: '1423724897',
+    partnerId: currentProductionScope().partnerId,
+    shopId: currentProductionScope().shopId,
     itemId: input.itemId,
     operationId: input.operationId,
     role: 'cover',

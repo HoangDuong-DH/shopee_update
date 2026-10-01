@@ -23,6 +23,7 @@ function fixture() {
       sha256: 'a'.repeat(64),
       value: {
         batchId,
+        scope: {environment:'production',partnerId:'2010476',shopId:'1423724897'},
         authorizationReference: 'Explicit user batch approval',
         assets: {},
         listings: [
@@ -30,7 +31,7 @@ function fixture() {
             sourceIdentity: 'pass1:a',
             sourceRevision: 1,
             sourceKey: 'a',
-            document: { title: 'Listing có sẵn', models: [{ sku: 'SKU-A' }] },
+            document: { title: 'Listing có sẵn', publication:'unlisted', description:[{type:'text',text:'Original body'}], gallery:[], models: [{ sku: 'SKU-A' }] },
           },
         ],
       },
@@ -45,7 +46,7 @@ function fixture() {
   const connect = vi.fn(async () => {
     const token = Symbol('session');
     return {
-      query: vi.fn(async (sql: string, values: string[]) => {
+      query: vi.fn(async (sql: string, values: string[] = []) => {
         const key = values[0]!;
         if (sql.includes('pg_try_advisory_lock')) {
           const held = locks.get(key);
@@ -62,7 +63,7 @@ function fixture() {
     };
   });
   const repo = { pool: { query, connect } };
-  const options: any = { root, load, run, enabled: true };
+  const options: any = { root, load, run, enabled: true, assertSourceProof: vi.fn(async () => undefined) };
   return {
     loaded,
     load,
@@ -336,6 +337,7 @@ async function realCoordinatorDeferredOrphan() {
   await writeFile(checkpointPath,JSON.stringify({version:1,batchId:f.loaded.value.batchId,manifestSha256:f.loaded.sha256,
     sourceIdentity:op.source_identity,sourceRevision:op.source_revision,operationId:op.id,sourceFingerprint:op.source_fingerprint}));
   f.query.mockImplementation(async(sql:string)=>{
+    if(sql.startsWith('SELECT o.id FROM production_pilot_operations o'))return {rows:[]};
     if(sql.includes('to_jsonb(o)'))return {rows:[f.row]};
     if(sql.includes('FROM connections'))return {rows:[{...f.row.current_connection,expires_at:new Date(Date.now()+3600000)}]};
     if(sql.includes('FROM production_pilot_lanes'))return {rows:[]};
@@ -347,7 +349,7 @@ async function realCoordinatorDeferredOrphan() {
   const runner={
     journal:{waitForQc:vi.fn(async()=>false),get:vi.fn(async()=>({operation:op,steps:f.row.steps,verification:null,deferredImageVerification:receipt}))},
     publications:{getForCreate:vi.fn(async()=>null as any)},
-    capabilityEvidenceFromVerified:vi.fn(async()=>({})),
+    capabilityEvidenceFromVerified:vi.fn(async()=>({gallery34:{state:'supported'},extendedDescription:{state:'supported'}})),
     prepare:vi.fn(async()=>{throw Error('Unexpected create preparation');}),
     run:vi.fn(async()=>({state:'unresolved',operationId:op.id,itemId:op.item_id,code:'PRODUCTION_PILOT_COVER_CASE_UNVERIFIED'})),
     publish:vi.fn(async()=>{throw Error('Unexpected publication');}),
@@ -601,8 +603,10 @@ it('observes a live coordinator in another instance and refuses a concurrent rea
   ).rejects.toThrow('IN_PROGRESS');
   expect(f.run).toHaveBeenCalledTimes(1);
 });
-it('allows explicit GET-only recovery after coordinator loss but does not clear a no-operation orphan', async () => {
+it.each(['completed','reserved-before-binding','sent-after-binding','tampered-binding'])(
+  'recovers an unsent orphan durably and handles successor %s without rewriting history', async (outcome) => {
   const f = fixture();
+  completeFixture(f);f.query.mockResolvedValue({rows:[]}); // Materialize the complete source before its immutable claim.
   await registerProductionBatch(
     { manifestPath: f.loaded.manifestPath, expectedSha256: f.loaded.sha256 },
     f.options,
@@ -634,7 +638,54 @@ it('allows explicit GET-only recovery after coordinator loss but does not clear 
     ),
   );
   expect(f.run.mock.calls.at(-1)?.[0].mode).toBe('reconcile');
-  expect((await peer.status(f.loaded.value.batchId)).canExecute).toBe(false);
+  await vi.waitFor(async()=>expect((await peer.status(f.loaded.value.batchId)).canExecute).toBe(true));
+  const receiptPath=resolve(root,'web-jobs',f.loaded.value.batchId,recovered.requestId+'.recovery.json');
+  const recoveryBytes=await readFile(receiptPath,'utf8');
+  expect(JSON.parse(recoveryBytes)).toMatchObject({version:3,noDispatchProofs:[{sourceKey:'a',basis:'empty_historical_journal'}]});
+  // Simulate restart after recovery, before a successor exists.
+  const reopened=new ProductionBatchService(f.repo as any,{} as any,f.options);
+  expect(await reopened.status(f.loaded.value.batchId)).toMatchObject({interrupted:false,canExecute:true,recoveredRequestIds:[original.requestId]});
+  let row:any;
+  f.run.mockImplementation(async(_args:any,deps:any)=>{
+    row=completeFixture(f);const op=row.operation,prior={state:op.state,item_id:op.item_id};
+    Object.assign(op,{state:'authorized',item_id:null});
+    if(outcome==='reserved-before-binding') {
+      op.revision=1;row.steps=[];row.verification=null;row.publication=null;row.publication_verification=null;
+      return new Promise(()=>{});
+    }
+    await deps.bindSuccessor('a',op);
+    if(outcome==='sent-after-binding') {
+      op.state='sent';row.steps=[{step_key:'create',state:'sent'}];row.verification=null;row.publication=null;row.publication_verification=null;
+      return new Promise(()=>{});
+    }
+    Object.assign(op,prior);
+    return {stopped:false,listings:[{sourceKey:'a',state:'published',operationId:op.id}]} as any;
+  });
+  const next=await reopened.status(f.loaded.value.batchId);
+  const successor=await reopened.start(f.loaded.value.batchId,{mode:'execute',expectedStatusFingerprint:next.statusFingerprint});
+  if(['reserved-before-binding','sent-after-binding'].includes(outcome)) {
+    await vi.waitFor(()=>expect(row).toBeDefined());
+    // Wait until the simulated dispatcher has reached its crash point.
+    if(outcome==='sent-after-binding')await vi.waitFor(()=>expect(row.operation.state).toBe('sent'));
+    f.crash();
+    const crashed=await new ProductionBatchService(f.repo as any,{} as any,f.options).status(f.loaded.value.batchId);
+    expect(crashed).toMatchObject({canExecute:false,interrupted:true,recoveredRequestIds:[original.requestId]});
+    expect(await readFile(receiptPath,'utf8')).toBe(recoveryBytes);
+    return;
+  }
+  await vi.waitFor(async()=>expect((await reopened.status(f.loaded.value.batchId)).lastResult?.requestId).toBe(successor.requestId));
+  await vi.waitFor(async()=>expect((await reopened.status(f.loaded.value.batchId)).busy).toBe(false));
+  const final=await new ProductionBatchService(f.repo as any,{} as any,f.options).status(f.loaded.value.batchId);
+  expect(final).toMatchObject({state:'completed',interrupted:false,recoveredRequestIds:[original.requestId]});
+  expect(await readFile(receiptPath,'utf8')).toBe(recoveryBytes);
+  const request=JSON.parse(await readFile(resolve(root,'web-jobs',f.loaded.value.batchId,successor.requestId+'.request.json'),'utf8'));
+  expect(request.noDispatchRecoveryRefs).toMatchObject([{requestId:recovered.requestId,sourceKeys:['a']}]);
+  if(outcome==='tampered-binding') {
+    const directory=resolve(root,'web-jobs',f.loaded.value.batchId),name=(await readdir(directory)).find(name=>name.startsWith(successor.requestId) && name.endsWith('.successor.json'))!;
+    const binding=JSON.parse(await readFile(resolve(directory,name),'utf8'));binding.sourceFingerprint='f'.repeat(64);
+    await writeFile(resolve(directory,name),JSON.stringify(binding));
+    expect(await new ProductionBatchService(f.repo as any,{} as any,f.options).status(f.loaded.value.batchId)).toMatchObject({canExecute:false,listings:[{state:'needs_review'}],recoveredRequestIds:[original.requestId]});
+  }
   expect(
     await readFile(
       resolve(root, 'web-jobs', f.loaded.value.batchId, original.requestId + '.request.json'),
@@ -669,7 +720,7 @@ it('appends a proof-bound recovery receipt for complete existing items without r
     expectedStatusFingerprint: orphan.statusFingerprint,
   });
   await vi.waitFor(async () =>
-    expect((await peer.status(f.loaded.value.batchId)).interrupted).toBe(false),
+    expect(await peer.status(f.loaded.value.batchId)).toMatchObject({interrupted:false,busy:false}),
   );
   const final = await peer.status(f.loaded.value.batchId);
   expect(final.state).toBe('completed');
@@ -729,6 +780,26 @@ it('keeps unknown journal outcomes held after readonly recovery and forbids a pa
   expect(after.interrupted).toBe(true);
   expect(after.canExecute).toBe(false);
   expect(after.recoveredRequestIds).toEqual([]);
+});
+it('keeps the execute button disabled until a finished coordinator has actually released its lease',async()=>{
+  const f=fixture();await registerProductionBatch({manifestPath:f.loaded.manifestPath,expectedSha256:f.loaded.sha256},f.options);
+  const before=await f.service.status(f.loaded.value.batchId),connect=f.repo.pool.connect.getMockImplementation()!;
+  let release!:()=>void,reached!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;}),cleanup=new Promise<void>(resolve=>{reached=resolve;});
+  f.repo.pool.connect.mockImplementation(async()=>{
+    const client=await connect(),query=client.query.getMockImplementation()!;let coordinator=false;
+    client.query.mockImplementation(async(sql:string,values:string[]=[])=>{
+      if(sql.includes('pg_try_advisory_lock') && values[0]==='production-batch-coordinator:production:2010476:1423724897')coordinator=true;
+      if(coordinator && sql.includes('pg_advisory_unlock') && values[0]?.endsWith(':'+f.loaded.value.batchId)){reached();await gate;}
+      return query(sql,values);
+    });return client;
+  });
+  const peer=new ProductionBatchService(f.repo as any,{} as any,f.options);
+  try {
+    await f.service.start(f.loaded.value.batchId,{mode:'execute',expectedStatusFingerprint:before.statusFingerprint});await cleanup;
+    expect(await peer.status(f.loaded.value.batchId)).toMatchObject({busy:true,canExecute:false,interrupted:false});
+  }finally{release();}
+  await vi.waitFor(async()=>expect((await peer.status(f.loaded.value.batchId)).busy).toBe(false));
 });
 it('does not admit two batch coordinators for the same shop across service instances', async () => {
   const f = fixture();

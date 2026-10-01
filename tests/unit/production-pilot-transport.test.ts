@@ -130,6 +130,25 @@ describe('production pilot transport boundary', () => {
     expect(init?.body).toBeUndefined();
   });
 
+  it.each([
+    { path: '/api/v2/discount/get_discount_list', query: { discount_status: 'ongoing', page_no: '1', page_size: '100' } },
+    { path: '/api/v2/discount/get_discount', query: { discount_id: '1234', page_no: '1', page_size: '50' } },
+  ])('allows shop-scoped discount GET $path without a mutation permit', async ({ path, query }) => {
+    const transport = response({ ...envelope, response: { discount_list: [], more: false } });
+    const stringQuery: Record<string, string> = {};
+    for (const [key, value] of Object.entries(query)) if (typeof value === 'string') stringQuery[key] = value;
+    const result = await new ProductionPilotTransport(credentials, { transport }).read(path, stringQuery);
+    expect(result.kind).toBe('success');
+    const [address, init] = transport.mock.calls[0]!;
+    const url = new URL(String(address));
+    expect(url.pathname).toBe(path);
+    expect(url.searchParams.get('shop_id')).toBe(credentials.shopId);
+    expect(url.searchParams.get('partner_id')).toBe(credentials.partnerId);
+    expect(url.searchParams.get('sign')).toBe(signRequest({ ...credentials, path,
+      timestamp: Number(url.searchParams.get('timestamp')) }));
+    expect(init?.method).toBe('GET');
+    expect(init?.body).toBeUndefined();
+  });
   it.each(['partner_id', 'shop_id', 'access_token', 'timestamp', 'sign', 'Partner_Id'])(
     'blocks auth query override %s before network',
     async (key) => {
@@ -520,6 +539,19 @@ describe('production pilot transport boundary', () => {
     },
   );
 
+  it('accepts the documented warehouse array when Shopee omits an empty error field', async () => {
+    const raw = { request_id: 'warehouse-no-error', response: [
+      { warehouse_id: 601, location_id: 'VN1', warehouse_type: 1 },
+    ] };
+    const client = new ProductionPilotTransport(credentials, { transport: response(raw) });
+    expect(await client.read('/api/v2/shop/get_warehouse_detail')).toEqual({
+      kind: 'success', requestId: 'warehouse-no-error',
+      response: { warehouses: raw.response }, envelope: raw,
+    });
+    const unrelated = new ProductionPilotTransport(credentials, { transport: response(raw) });
+    expect((await unrelated.read('/api/v2/product/get_category')).kind).toBe('unknown');
+  });
+
   it.each([{}, null, [null], ['warehouse'], [[{}]]].map((warehouses) => ({ warehouses })))(
     'does not acknowledge malformed warehouse rows and retains safe evidence (%j)',
     async ({ warehouses }) => {
@@ -757,5 +789,61 @@ describe('production pilot transport boundary', () => {
     });
     expect(authorizeMutation).not.toHaveBeenCalled();
     expect(transport).not.toHaveBeenCalled();
+  });
+});
+
+describe('explicit archive clone transport lane', () => {
+  const cloneScope = () => ({
+    archiveId: randomUUID(),
+    sourceShopId: '1340479212',
+    sourceItemId: '29245689222',
+    sourceObservationHash: 'a'.repeat(64),
+    sourceHasVariations: true,
+    targetShopId: '1376860967',
+    connectionId: randomUUID(),
+    connectionRevision: 3,
+  });
+  const targetCredentials = { ...credentials, shopId: '1376860967' };
+  const blankParent = { ...payload, item_sku: '', video_upload_id: ['target-upload-id'] };
+
+  it('permits blank parent SKU only when a source-bound target permit authorizes it', async () => {
+    const clone = cloneScope(), transport = response();
+    const authorizeMutation = vi.fn(async (intent: Readonly<ProductionPilotMutationIntent>) =>
+      intent.cloneScope?.archiveId === clone.archiveId &&
+      intent.cloneScope?.sourceObservationHash === clone.sourceObservationHash &&
+      intent.cloneScope?.targetShopId === targetCredentials.shopId &&
+      intent.fingerprint === productionPilotWriteFingerprint(addPath, blankParent, { environment: 'production',
+        partnerId: targetCredentials.partnerId, shopId: targetCredentials.shopId }));
+    const client = new ProductionPilotTransport(targetCredentials, {
+      transport, cloneScope: clone, authorizeMutation,
+    });
+    expect(await client.write(addPath, blankParent, permit())).toMatchObject({ kind: 'success' });
+    expect(authorizeMutation).toHaveBeenCalledTimes(1);
+    const url = new URL(String(transport.mock.calls[0]![0]));
+    expect(url.searchParams.get('shop_id')).toBe(targetCredentials.shopId);
+    expect(JSON.parse(String(transport.mock.calls[0]![1]?.body)).item_sku).toBe('');
+    await expect(client.write(publishPath, { item_list: [{ item_id: 9001, unlist: false }] },
+      permit())).rejects.toThrow('PRODUCTION_PILOT_WRITE_FORBIDDEN');
+  });
+
+  it('rejects legacy blank SKU, cross-shop clone scope and cross-source journal permit', async () => {
+    const transport = response(), clone = cloneScope();
+    const deny = vi.fn(async (intent: Readonly<ProductionPilotMutationIntent>) =>
+      intent.cloneScope?.sourceObservationHash === 'b'.repeat(64));
+    await expect(new ProductionPilotTransport(targetCredentials, { transport, authorizeMutation: allow() })
+      .write(addPath, blankParent, permit())).rejects.toThrow('PRODUCTION_PILOT_WRITE_FORBIDDEN');
+    expect(() => new ProductionPilotTransport(credentials, { transport,
+      cloneScope: clone, authorizeMutation: allow() })).toThrow('PRODUCTION_PILOT_CLONE_SCOPE_FORBIDDEN');
+    const client = new ProductionPilotTransport(targetCredentials, { transport,
+      cloneScope: clone, authorizeMutation: deny });
+    await expect(client.write(addPath, blankParent, permit())).rejects.toThrow('PRODUCTION_PILOT_PERMIT_DENIED');
+    const noVariation = new ProductionPilotTransport(targetCredentials, { transport,
+      cloneScope: { ...clone, sourceHasVariations: false }, authorizeMutation: allow() });
+    await expect(noVariation.write(addPath, blankParent, permit())).rejects.toThrow(
+      'PRODUCTION_PILOT_WRITE_FORBIDDEN');
+    const malformedVideo = new ProductionPilotTransport(targetCredentials, { transport,
+      cloneScope: clone, authorizeMutation: allow() });
+    await expect(malformedVideo.write(addPath, { ...blankParent, video_upload_id: [] }, permit()))
+      .rejects.toThrow('PRODUCTION_PILOT_WRITE_FORBIDDEN');    expect(transport).not.toHaveBeenCalled();
   });
 });
