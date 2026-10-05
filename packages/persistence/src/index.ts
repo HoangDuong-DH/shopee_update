@@ -11,3 +11,5 @@ export * from './source-catalogs.js';
 export * from './source-catalog-evidence.js';
 export * from './local-archives.js';
 export * from './local-library.js';
+
+export * from './transfer-recovery.js';

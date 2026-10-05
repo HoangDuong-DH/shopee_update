@@ -79,6 +79,8 @@ export function workspaceNavigationUrl(
     url.searchParams.delete('productKey');
     url.searchParams.delete('revision');
   }
+  if (stable !== 'prepared-batches') { url.searchParams.delete('work'); url.searchParams.delete('stage'); }
+  if (stable !== 'archives') url.searchParams.delete('copyTargets');
   if (stable !== 'shops') {
     url.searchParams.delete('connectShop');
     url.searchParams.delete('connectionId');

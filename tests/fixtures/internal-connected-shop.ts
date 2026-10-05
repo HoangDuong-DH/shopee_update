@@ -1,3 +1,4 @@
+import { assertAcceptanceDatabase } from './acceptance-database.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -12,9 +13,8 @@ import { businessCategoryFixtures, businessShopFixtures } from './business-batch
 
 /** Existing, already-connected synthetic shop. Every prerequisite receipt is produced by the
  * real runner; only the external platform is a fixture. This does not test login/new-shop setup. */
-export async function createInternalConnectedShop(repo: Repository, root: string, encryptionKey: string) {
-  if (process.env.INTERNAL_ISOLATED_MODE !== '1' || new URL(process.env.DATABASE_URL!).port !== '5443')
-    throw Error('INTERNAL_ACCEPTANCE_ISOLATION_REQUIRED');
+export async function createInternalConnectedShop(repo: Repository, root: string, encryptionKey: string, installationRoot = process.cwd()) {
+  await assertAcceptanceDatabase(installationRoot);
   const credentials = { environment: 'production' as const, partnerId: '2010476', shopId: '1423724897',
     partnerKey: 'INTERNAL-BROWSER-SYNTHETIC-KEY', accessToken: 'INTERNAL-BROWSER-SYNTHETIC-TOKEN' };
   const scope = { partnerId: credentials.partnerId, shopId: credentials.shopId };

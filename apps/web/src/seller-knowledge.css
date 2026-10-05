@@ -20,7 +20,7 @@
 }
 .seller-knowledge-progress,
 .seller-knowledge-evidence {
-  background: #f6f7f8;
+  background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 18px;
@@ -53,7 +53,7 @@
   margin-top: 12px;
 }
 .seller-knowledge-suggestion {
-  border-left: 3px solid #b0b9b5;
+  border-left: 3px solid var(--line);
   padding: 4px 0 12px 16px;
   margin: 20px 0;
 }

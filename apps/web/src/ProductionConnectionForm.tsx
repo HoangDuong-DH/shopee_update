@@ -1,3 +1,4 @@
+import { notifyWorkspaceDataChange } from './workspace-data-updates.js';
 import { useEffect, useRef, useState } from 'react';
 import { api, post, RequestError } from './api.js';
 import { validAuthorizationAttempt } from './connection-authorization.js';
@@ -285,7 +286,7 @@ export function ProductionConnectionForm({
                 'Đã xác minh kết nối, nhưng chưa tải lại được thông tin shop. Bấm tải lại trạng thái; chưa gửi sản phẩm.',
               );
           }
-          if (!controller.signal.aborted) onConnectedRef.current();
+          if (!controller.signal.aborted) { notifyWorkspaceDataChange('connections'); onConnectedRef.current(); }
         }
       } catch {
         if (controller.signal.aborted) return;
@@ -416,7 +417,7 @@ export function ProductionConnectionForm({
               'Đã lưu kết nối đọc shop. Chưa tải lại được thông tin; bấm tải lại trạng thái.',
             );
         }
-        if (mounted.current) onConnectedRef.current();
+        if (mounted.current) { notifyWorkspaceDataChange('connections'); onConnectedRef.current(); }
       } else if (result.kind === 'rejected') {
         const reasons: Record<string, string> = {
           error_partner_key_expired:
@@ -451,7 +452,7 @@ export function ProductionConnectionForm({
         { expectedRevision: target.connectionRevision },
       );
       await load(undefined, { partnerId: target.partnerId, shopId: target.shopId });
-      onConnectedRef.current();
+      { notifyWorkspaceDataChange('connections'); onConnectedRef.current(); }
       setMessage(
         result.kind === 'success' || result.kind === 'already_saved'
           ? action === 'refresh'
@@ -555,8 +556,8 @@ export function ProductionConnectionForm({
             )}
             <p>
               {target.autoRefresh
-                ? 'Tự gia hạn khi ứng dụng đang chạy. Sau khi tắt máy, hệ thống kiểm tra lại lúc mở ứng dụng.'
-                : 'Tự gia hạn đang tắt.'}
+                ? 'Đã cho phép tự gia hạn cho shop này. Tùy chọn này không xác nhận dịch vụ gia hạn đang chạy.'
+                : 'Chưa cho phép tự gia hạn cho shop này.'}
             </p>
             {target.refreshStatus === 'waiting' && (
               <p>
@@ -609,7 +610,7 @@ export function ProductionConnectionForm({
                     }
                   }}
                 >
-                  {target.autoRefresh ? 'Tắt tự gia hạn' : 'Bật tự gia hạn'}
+                  {target.autoRefresh ? 'Ngừng cho phép tự gia hạn' : 'Cho phép tự gia hạn'}
                 </button>
               </div>
             )}

@@ -8,6 +8,8 @@ import { DraftKnowledgeSuggestions } from './DraftKnowledgeSuggestions.js';
 import { autofillResultSchema, mergeMissingChoices, type AutofillResult } from './preparation-autofill.js';
 import { pendingRead } from './pending-read.js';
 import { initialPreparationSelection } from './editor-source-scope.js';
+import { ArrowLeft, ArrowRight, Check, ListChecks, Package, SlidersHorizontal } from 'lucide-react';
+import { PreparationCategorySelect } from './PreparationCategorySelect.js';
 
 type Summary = {
   productKey: string;
@@ -706,6 +708,7 @@ export function ProductionPreparation({
   onWorking,
   initialProductKey,
   initialSourceRevision,
+  showSavedPreparations = false,
 }: {
   targetScope:{environment:'production';partnerId:string;shopId:string};
   targetShopName?: string;
@@ -715,10 +718,22 @@ export function ProductionPreparation({
   onWorking?: () => void;
   initialProductKey?: string;
   initialSourceRevision?: number;
+  showSavedPreparations?: boolean;
 }) {
   const scoped=(path:string)=>path+(path.includes('?')?'&':'?')+new URLSearchParams({partnerId:targetScope.partnerId,shopId:targetScope.shopId});
   const workingCopyKey='production-preparation-working-copy-v1:'+targetScope.partnerId+':'+targetScope.shopId;
   const pendingKey='production-preparation-pending:'+targetScope.partnerId+':'+targetScope.shopId;
+  const stepKey = 'production-preparation-step-v1:' + targetScope.partnerId + ':' + targetScope.shopId;
+  const [step, setStep] = useState<1 | 2 | 3>(() => {
+    try { const value = sessionStorage.getItem(stepKey); return value === '2' ? 2 : value === '3' ? 3 : 1; } catch { return 1; }
+  });
+  const stepHeading = useRef<HTMLHeadingElement | null>(null);
+  const focusStep = useRef(false);
+  function moveStep(next: 1 | 2 | 3) { focusStep.current = true; setStep(next); }
+  useEffect(() => {
+    try { sessionStorage.setItem(stepKey, String(step)); } catch { /* Navigation remains available without browser storage. */ }
+    if (focusStep.current) { stepHeading.current?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); stepHeading.current?.focus({ preventScroll: true }); focusStep.current = false; }
+  }, [step, stepKey]);
   const [context, setContext] = useState<Context | null>(null),
     [contextLoading, setContextLoading] = useState(true),
     [sourceErrors, setSourceErrors] = useState<Record<string, string>>({}),
@@ -955,18 +970,19 @@ export function ProductionPreparation({
     setEditing({});
     setStock('');
     setOpened(null);
+    moveStep(1);
     setSourceErrors({});
     sessionStorage.removeItem(workingCopyKey);
     setWorkingCopyNotice('Đã bỏ phần nhập tạm. Các listing và bộ nguồn đã lưu vẫn giữ nguyên.');
   }
   useEffect(() => {
-    if (!preview || !focusResult.current) return;
+    if (!preview || !focusResult.current || step !== 3) return;
     focusResult.current = false;
     resultElement.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     resultElement.current?.focus({ preventScroll: true });
-  }, [preview]);
+  }, [preview, step]);
   useEffect(() => {
-    if (!focusField || opened !== focusField.key || !editing[focusField.key]) return;
+    if (step !== 2 || !focusField || opened !== focusField.key || !editing[focusField.key]) return;
     const element = entryElements.current.get(focusField.key);
     if (!element) return;
     const field =
@@ -990,7 +1006,7 @@ export function ProductionPreparation({
     field.scrollIntoView({ block: 'center', behavior: 'smooth' });
     (control ?? field).focus({ preventScroll: true });
     setFocusField(null);
-  }, [focusField, opened, editing]);
+  }, [focusField, opened, editing, step]);
   async function fixIssue(productKey: string, target: IssueTarget | null, field?: string) {
     if (!target || (target === 'priceSelection' && editing[productKey]?.priceSelection)) {
       const sourceField = field ?? target ?? '';
@@ -1002,6 +1018,7 @@ export function ProductionPreparation({
       onSource(productKey);
       return;
     }
+    moveStep(2);
     setSelected((previous) => [...new Set([...previous, productKey])]);
     setOpened(productKey);
     setFocusField({ key: productKey, target });
@@ -1564,6 +1581,7 @@ export function ProductionPreparation({
       if (!currentRequest(request)) return;
       previewGeneration.current = request.generation;
       focusResult.current = true;
+      setStep(3);
       setPreview(result);
       setAnnouncement(
         'Kiểm tra xong: ' +
@@ -1597,6 +1615,7 @@ export function ProductionPreparation({
       });
       if (!currentRequest(request)) return;
       previewGeneration.current = request.generation;
+      setStep(3);
       setPreview(result);
       setSaved(!!result.registration);
       setRecoverable(false);
@@ -1668,10 +1687,9 @@ export function ProductionPreparation({
     <section className="production-preparation" aria-label="Chuẩn bị đợt từ listing đã lưu">
       <header>
         <div>
-          <span className="production-pilot-eyebrow">CHUẨN BỊ NGUỒN</span>
-          <h2>Từ listing đã lưu đến đợt đăng</h2>
-          <p><strong>Shop đích: {shopName} · ID {targetScope.shopId}</strong> · Ứng dụng {targetScope.partnerId}</p>
-          <p>Dùng lại Word, ảnh, phân loại và dòng giá đã ghép. Chỉ bổ sung phần còn thiếu.</p>
+          <span className="production-pilot-eyebrow">CHUẨN BỊ ĐĂNG HÀNG</span>
+          <h2>Chuẩn bị đợt đăng</h2>
+          <p>Chọn sản phẩm, bổ sung phần thiếu rồi kiểm tra.</p>
         </div>
         <div className="production-batch-actions">
           <button
@@ -1687,32 +1705,12 @@ export function ProductionPreparation({
           </button>
         </div>
       </header>
-      <ol className="preparation-step-guide" aria-label="Các bước đăng hàng loạt">
-        {[
-          ['Chọn listing', selected.length ? selected.length + ' đã chọn' : 'Dùng bộ nguồn đã lưu'],
-          ['Bổ sung phần thiếu', 'Giữ nội dung, ảnh, SKU và giá đã có'],
-          [
-            'Kiểm tra nguồn',
-            preview
-              ? sourceChanges.length ? sourceChanges.length + ' nguồn đã đổi · cần đối chiếu' : preview.readyCount + ' đủ nguồn · ' + preview.blockedCount + ' cần bổ sung'
-              : 'Ứng dụng chỉ rõ phần cần sửa',
-          ],
-          ['Đăng qua API', 'Chuẩn bị đợt rồi tự bấm đăng'],
-        ].map(([label, detail], index) => (
-          <li
-            key={label}
-            aria-current={
-              (saved ? 3 : preview ? 2 : selected.length ? 1 : 0) === index ? 'step' : undefined
-            }
-          >
-            <span>{index + 1}</span>
-            <div>
-              <strong>{label}</strong>
-              <small>{detail}</small>
-            </div>
-          </li>
-        ))}
-      </ol>
+      <nav className="preparation-step-nav" aria-label="Các bước chuẩn bị">
+        {([{number: 1, label: 'Chọn sản phẩm', Icon: Package}, {number: 2, label: 'Bổ sung thông tin', Icon: SlidersHorizontal}, {number: 3, label: 'Kiểm tra', Icon: ListChecks}] as const).map(({number, label, Icon}) =>
+          <button key={number} type="button" aria-label={number + '. ' + label} aria-current={step === number ? 'step' : undefined} disabled={(number === 2 && !selected.length) || (number === 3 && !selected.length && !preview)}
+            onClick={() => moveStep(number)}><span className="preparation-step-number">{number < step ? <Check size={16} aria-hidden="true"/> : number}</span><Icon size={17} aria-hidden="true"/><strong>{label}</strong></button>)}
+      </nav>
+      <h3 className="preparation-current-heading" ref={stepHeading} tabIndex={-1}>{step === 1 ? 'Chọn sản phẩm cần đăng' : step === 2 ? 'Bổ sung thông tin' : 'Kiểm tra trước khi tạo đợt'}<span>Bước {step}/3</span></h3>
       <p className="preparation-announcement" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </p>
@@ -1737,8 +1735,8 @@ export function ProductionPreparation({
         !recoverable &&
         !preview &&
         (selected.length > 0 || stock || workingCopyNotice) && (
-          <div className="notice" aria-label="Phần nhập tạm">
-            <p role="status">
+          <details className="preparation-working-copy" aria-label="Phần nhập tạm">
+            <summary>Đã giữ phần nhập tạm</summary><p role="status">
               {workingCopyNotice ||
                 'Phần đang nhập được giữ trong tab này khi tải lại trang. Chưa đăng hoặc mở bán listing.'}
             </p>
@@ -1754,7 +1752,7 @@ export function ProductionPreparation({
             >
               Bỏ phần nhập tạm
             </button>
-          </div>
+          </details>
         )}
       {recoverable && (
         <p role="status" className="notice">
@@ -1771,10 +1769,7 @@ export function ProductionPreparation({
       )}
       {context && (
         <>
-          <p className="preparation-target">
-            Shop đích: <strong>{shopName}</strong> · ID {targetScope.shopId} · Chuẩn bị tại ứng dụng, chưa đăng Shopee.
-          </p>
-          <details className="preparation-history">
+          <details className="preparation-history" open={showSavedPreparations} hidden={!context.preparations.length && !showSavedPreparations}>
             <summary>Bản kiểm tra đã lưu ({context.preparations.length})</summary>
             {context.preparations.map((item) => (
               <button
@@ -1784,6 +1779,7 @@ export function ProductionPreparation({
                 onClick={() => {
                   changed();
                   previewGeneration.current = generation.current;
+                  moveStep(3);
                   setPreview(item);
                   setSaved(!!item.registration);
                   setNeedsRecheck(false);
@@ -1794,8 +1790,10 @@ export function ProductionPreparation({
               </button>
             ))}
           </details>
-          <h3>1. Chọn các listing cần chuẩn bị</h3>
-          <p>{selected.length}/80 listing đã chọn{selected.some(key => !visible.some(row => row.productKey === key)) ? ` · ${selected.filter(key => !visible.some(row => row.productKey === key)).length} listing đã chọn đang ngoài bộ lọc` : ''}. Thay đổi bộ lọc giữ các lựa chọn trước.</p>
+          <section className="preparation-step-panel" aria-label="Chọn sản phẩm" hidden={step !== 1}>
+          <div className="preparation-picker-summary"><strong>{selected.length}/80 sản phẩm đã chọn</strong><small>{visible.length} trong danh sách</small></div>
+          <details className="preparation-selection-help"><summary>Lựa chọn được giữ khi đổi bộ lọc</summary><p>{selected.length}/80 listing đã chọn{selected.some(key => !visible.some(row => row.productKey === key)) ? ` · ${selected.filter(key => !visible.some(row => row.productKey === key)).length} listing đã chọn đang ngoài bộ lọc` : ''}. Thay đổi bộ lọc giữ các lựa chọn trước.</p></details>
+          <div className="preparation-picker-tools">
           {!!sourceGroups.length && <label>Lọc theo đợt nhập<select value={sourceGroup} disabled={busy} onChange={event=>setSourceGroup(event.target.value)}><option value="">Tất cả bộ đã lưu</option><option value="__folders">Các bộ từ thư mục đã nhập</option>{sourceGroups.map(group=><option key={group} value={group}>{group}</option>)}</select></label>}
           <label>
             Tìm theo tên hoặc SKU
@@ -1806,6 +1804,7 @@ export function ProductionPreparation({
               placeholder="Tìm listing đã lưu"
             />
           </label>
+          </div>
           {!visible.length && (
             <p>Chưa có listing phù hợp. Nhập thư mục hoặc mở bộ đã lưu để hoàn tất nguồn.</p>
           )}
@@ -1847,16 +1846,13 @@ export function ProductionPreparation({
               </div>
             ))}
           </div>
+          </section>
           {selected.length > 0 && (
-            <>
-              <h3>2. Bổ sung thông tin cho {selected.length} listing</h3>
-              <p>
-                Chỉ điền phần ứng dụng báo thiếu. Nội dung, ảnh, phân loại và giá đã ghép được dùng
-                lại.
-              </p>
+            <section className="preparation-step-panel" aria-label="Bổ sung thông tin" hidden={step !== 2}>
               <section className="preparation-autofill" aria-label="Điền theo nguồn và kiến thức của shop">
-                <h4>Điền một lần cho cả lô</h4>
-                <p>Ưu tiên tạo link ẩn với ảnh, nội dung, SKU và giá đã ghép. Điền điều kiện đăng cho cả lô; chỉ bổ sung ô trống, giữ lựa chọn bạn đã sửa.</p>
+                <div className="preparation-autofill-intro"><div><h4>Điền nhanh từ nguồn</h4><p>Áp dụng cho {selected.length} sản phẩm · Giữ các ô bạn đã sửa.</p></div></div>
+                <details className="preparation-quick-options"><summary>Cấu hình điền nhanh <small>{sharedCondition === 'NEW' ? 'Hàng mới' : sharedCondition === 'USED' ? 'Hàng đã dùng' : 'Tình trạng riêng'} · {logisticsMode === 'all_eligible' ? 'Kênh phù hợp' : 'Giữ kênh đã chọn'}</small></summary>
+                <div role="group" aria-label="Cấu hình điền nhanh">
                 <label>Thông tin chi tiết<select value={attributeMode} disabled={busy} onChange={event=>{changed();setAttributeMode(event.target.value as typeof attributeMode);}}>
                   <option value="minimum_required">Điền nhanh phần cần để đăng — QC bổ sung sau</option>
                   <option value="source_supported">Bổ sung thêm từ nguồn và listing cũ của shop</option>
@@ -1877,6 +1873,7 @@ export function ProductionPreparation({
                 <label className="preparation-autofill-check"><input type="checkbox" checked={useTestDimensions} disabled={busy} onChange={event=>setUseTestDimensions(event.target.checked)}/>Dùng kích thước kiện ước tính cho lô thử</label>
                 {useTestDimensions && <div className="preparation-autofill-options">{(['length','width','height'] as const).map((field,index)=><label key={field}>{['Dài kiện thử (cm)','Rộng kiện thử (cm)','Cao kiện thử (cm)'][index]}<input type="number" min="0.1" step="any" value={testDimensions[field]} disabled={busy} onChange={event=>setTestDimensions(previous=>({...previous,[field]:event.target.value}))}/></label>)}</div>}
                 {useTestDimensions && <p>Kích thước này là số ước tính do bạn chọn cho lô thử; người QC cần thay bằng số đo trước khi mở bán. Cân nặng vẫn lấy từ từng SKU trong nguồn.</p>}
+                </div></details>
                 <button type="button" disabled={busy || selected.some(key=>!editing[key] || editing[key]?.metadataBusy)} onClick={()=>void autofill()}>{attributeMode==='minimum_required' ? 'Điền nhanh cả lô' : 'Điền thêm từ nguồn'} · {selected.length} listing</button>
                 {busy && activeRequest.current?.kind === 'autofill' && <AutofillWait onCancel={() => {
                   const request = activeRequest.current;
@@ -1906,8 +1903,9 @@ export function ProductionPreparation({
               )}
               <div className="preparation-stock">
                 <label>
-                  Tồn áp dụng cho {selected.reduce((count, key) => count + (editing[key]?.draft.variants.length ?? 0), 0)} dòng SKU trong {selected.length} listing đã chọn
+                  Tồn đăng bán chung <small>{selected.reduce((count, key) => count + (editing[key]?.draft.variants.length ?? 0), 0)} SKU · {selected.length} sản phẩm</small>
                   <input
+                    aria-label="Tồn đăng bán chung cho các SKU đã chọn"
                     inputMode="numeric"
                     value={stock}
                     onChange={(e) => setStock(e.target.value)}
@@ -1923,14 +1921,21 @@ export function ProductionPreparation({
                   Áp dụng {stock || 'mức tồn'} cho các dòng SKU đã chọn
                 </button>
               </div>
-              <p className="caption">Chỉ áp dụng sau khi bạn bấm nút trên, theo từng SKU của đúng {shopName}. Có thể sửa riêng từng dòng bên dưới; chưa gửi tồn lên Shopee.</p>
-              {selectedRows.map((row) => {
+              <p className="caption">Chỉ áp dụng khi bấm nút. Có thể sửa tồn riêng từng SKU.</p>
+              <div className="preparation-editor-layout">
+              <aside className="preparation-product-nav" aria-label="Sản phẩm đang bổ sung"><h4>{selectedRows.length} sản phẩm đã chọn</h4>
+                {selectedRows.map(row => <button type="button" key={row.productKey} aria-label={'Sửa ' + row.title} aria-pressed={opened === row.productKey}
+                  onClick={() => setOpened(row.productKey)}><span>{row.title}</span><small>{row.skus.length} SKU{sourceErrors[row.productKey] ? ' · Chưa đọc được' : !editing[row.productKey] ? ' · Đang đọc' : ''}</small><ArrowRight size={15} aria-hidden="true"/></button>)}
+              </aside><div className="preparation-product-editor">
+              {!opened && <p className="empty">Chọn một sản phẩm để bổ sung thông tin.</p>}
+              {selectedRows.filter(row => row.productKey === opened).map((row) => {
                 const e = editing[row.productKey],
                   key = row.productKey,
                   meta = e?.metadata;
                 return (
                   <details
                     className="preparation-entry"
+                    hidden={opened !== key}
                     key={key}
                     ref={(element) => {
                       if (element) entryElements.current.set(key, element);
@@ -2046,35 +2051,8 @@ export function ProductionPreparation({
                           </label>
                         )}
                         <div className="preparation-fields">
-                          <label data-preparation-field="categoryId" tabIndex={-1}>
-                            Ngành hàng
-                            <select
-                              disabled={!!e.draft.categoryId?.confirmed}
-                              value={e.choices.categoryId ?? ''}
-                              onChange={(event) => {
-                                choice(key, {
-                                  categoryId: event.target.value,
-                                  brandId: undefined,
-                                  brandName: undefined,
-                                  attributeList: undefined,
-                                });
-                                void metadata(key, { categoryId: event.target.value });
-                              }}
-                            >
-                              <option value="">Chọn ngành đúng với sản phẩm</option>
-                              {e.choices.categoryId &&
-                                !meta?.categories.some((c) => c.id === e.choices.categoryId) && (
-                                  <option value={e.choices.categoryId}>
-                                    Ngành đã lưu — cần đối chiếu tên
-                                  </option>
-                                )}
-                              {meta?.categories.map((category) => (
-                                <option key={category.id} value={category.id}>
-                                  {category.path}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                          <PreparationCategorySelect categories={meta?.categories ?? []} value={e.choices.categoryId ?? ''} confirmed={!!e.draft.categoryId?.confirmed}
+                            onChange={categoryId => { choice(key, { categoryId, brandId: undefined, brandName: undefined, attributeList: undefined }); void metadata(key, { categoryId }); }}/>
                           <label data-preparation-field="brandId" tabIndex={-1}>
                             Thương hiệu
                             <select
@@ -2102,9 +2080,10 @@ export function ProductionPreparation({
                               ))}
                             </select>
                           </label>
-                          <label>
+                          <details className="preparation-brand-search"><summary>Tra thương hiệu khác</summary>                          <label>
                             Tìm đúng tên thương hiệu
                             <input
+                              aria-label="Tìm đúng tên thương hiệu"
                               value={e.brandSearch}
                               onChange={(event) => update(key, { brandSearch: event.target.value })}
                             />
@@ -2122,6 +2101,7 @@ export function ProductionPreparation({
                               Tra thương hiệu
                             </button>
                           </label>
+                          </details>
                           <label data-preparation-field="condition" tabIndex={-1}>
                             Tình trạng sản phẩm
                             <select
@@ -2177,6 +2157,8 @@ export function ProductionPreparation({
                               />
                             </label>
                           )}
+                        </div>
+                        <details className="preparation-form-group"><summary>Vận chuyển &amp; kiện hàng</summary><div className="preparation-fields">
                           <label data-preparation-field="weightGrams" tabIndex={-1}>
                             Cân nặng đóng gói (g)
                             <input
@@ -2231,13 +2213,14 @@ export function ProductionPreparation({
                             </label>
                           ))}
                         </div>
+                        </details>
                         {meta?.itemLimits?.sizeChart.mandatory && (
                           <p className="notice warning">
                             Ngành này yêu cầu bảng kích thước. Cần bổ sung bảng đúng sản phẩm; bộ
                             thiếu sẽ được giữ lại.
                           </p>
                         )}
-                        {meta?.attributes && (
+                        {meta?.attributes && (attributeMode !== 'minimum_required' || chosenAttributes(meta.attributes, e.choices.attributeList ?? []).some(attribute => attribute.mandatory || (e.choices.attributeList ?? []).some(value => String(value.attribute_id) === attribute.id))) && (
                           <section data-preparation-field="attributes" tabIndex={-1}>
                             <h4>{attributeMode==='minimum_required' ? 'Thông tin chi tiết bắt buộc' : 'Thuộc tính theo ngành'}</h4>
                             {attributeMode==='minimum_required' && !chosenAttributes(meta.attributes,e.choices.attributeList ?? []).some(a=>a.mandatory) && <p>Ngành này chưa yêu cầu thêm thuộc tính bắt buộc. Người QC có thể bổ sung thông tin chi tiết trực tiếp trên link ẩn.</p>}
@@ -2292,7 +2275,7 @@ export function ProductionPreparation({
                             });
                           }}
                         />}
-                        <h4>Vận chuyển</h4>
+                        <details className="preparation-form-group"><summary>Kênh vận chuyển <small>{e.choices.logistics?.filter(channel => channel.enabled).length ?? 0} đã chọn</small></summary>
                         <p>Nhóm vận chuyển từ Shopee · {meta?.shop.name} · Shop {meta?.shop.id}
                           {meta?.observedAt ? ' · Đọc lúc ' + new Date(meta.observedAt).toLocaleString('vi-VN') : ''}.
                           Chọn nhóm như trên Kênh Người Bán; đơn vị trực thuộc không gửi riêng khi đăng.</p>
@@ -2313,7 +2296,8 @@ export function ProductionPreparation({
                           <p role="alert">Lựa chọn cũ có mã đơn vị trực thuộc hoặc mã không còn trong danh sách. Dùng “Bật tất cả kênh vận chuyển phù hợp” ở Điền nhanh, hoặc
                             <button type="button" className="secondary" disabled={busy} onClick={()=>choice(key,{logistics:e.choices.logistics?.filter(c=>meta?.channels.some(m=>m.id===c.channelId && m.parentId==='0'))})}>Bỏ mã không dùng để đăng</button>.
                           </p>}
-                        <h4>Kho áp dụng</h4>
+                        </details>
+                        <details className="preparation-form-group"><summary>Kho áp dụng <small>{e.choices.stockLocation ? 'Đã đối chiếu' : 'Cần bổ sung'}</small></summary>
                         {e.choices.stockLocation ? (
                           <p>Đã có đối chiếu kho cho đúng shop và các SKU đã chọn.</p>
                         ) : (
@@ -2435,7 +2419,8 @@ export function ProductionPreparation({
                               : 'Đã đọc thông tin; chưa đủ bằng chứng để gán kho ghi cho bộ mới.'}
                           </p>
                         )}
-                        <details data-preparation-field="stocks" tabIndex={-1}>
+                        </details>
+                        <details className="preparation-form-group" data-preparation-field="stocks" tabIndex={-1}>
                           <summary>Tồn riêng cho {e.draft.variants.length} SKU</summary>
                           <div className="preparation-stock-rows">
                             {e.draft.variants.map((variant) => (
@@ -2463,6 +2448,11 @@ export function ProductionPreparation({
                   </details>
                 );
               })}
+              </div></div>
+            </section>
+          )}
+          <section className="preparation-step-panel preparation-review-settings" aria-label="Cách đăng" hidden={step !== 3}>
+            {!preview && selected.length > 0 && <>
               <fieldset className="preparation-publication-mode" disabled={busy}>
                 <legend>Sau khi tạo listing</legend>
                 <label>
@@ -2484,6 +2474,7 @@ export function ProductionPreparation({
                     </small>
                   </span>
                 </label>
+                <details className="preparation-policy-options"><summary>Thay đổi cách đăng &amp; kiểm tra</summary>
                 <label>
                   <input
                     type="radio"
@@ -2521,25 +2512,16 @@ export function ProductionPreparation({
                   </span>
                 </label>
                 {publicationMode === 'hidden_for_review' && <label><input type="checkbox" checked={allowSharedSkus} onChange={event=>{changed();setAllowSharedSkus(event.target.checked);}}/><span><strong>Tạo link thử riêng dù SKU đã có ở link khác</strong><small>Dùng khi chủ ý đăng nhiều bộ nội dung cho cùng SKU. Bộ nguồn có ID listing vẫn phải đi luồng cập nhật; lần gửi chưa rõ kết quả không được gửi lại.</small></span></label>}
+                </details>
               </fieldset>
-              <div className="preparation-footer">
-                <p>Kiểm tra tạo bản xem trước tại ứng dụng, chưa gửi lên Shopee.</p>
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={
-                    busy || selected.some((key) => !editing[key] || editing[key]?.metadataBusy)
-                  }
-                  onClick={() => void inspect()}
-                >
-                  {busy ? 'Đang xử lý…' : 'Kiểm tra ' + selected.length + ' listing đã chọn'}
-                </button>
-              </div>
-            </>
-          )}
+              <p className="caption">Kiểm tra tạo bản xem trước tại ứng dụng, chưa gửi lên Shopee.</p>
+            </>}
+            {!preview && !selected.length && <p className="empty">Chọn sản phẩm trước khi kiểm tra.</p>}
+          </section>
           {preview && (
             <section
               className="preparation-preview"
+              hidden={step !== 3}
               aria-label="Kết quả kiểm tra nguồn"
               ref={resultElement}
               tabIndex={-1}
@@ -2570,7 +2552,7 @@ export function ProductionPreparation({
                 {saved && onWorking ? <button type="button" className="secondary" onClick={onWorking}>Mở Đợt đang làm để xử lý nguồn đổi</button> : <button type="button" className="secondary" disabled={busy || contextLoading} onClick={async () => {
                   const latest = await reload(); if (!latest) return;
                   const rows = preview.entries.flatMap(entry => { const row = latest.products.find(product => product.productKey === entry.productKey); return row ? [row] : []; });
-                  changed(); setSelected(rows.map(row => row.productKey));
+                  changed(); moveStep(2); setSelected(rows.map(row => row.productKey));
                   setEditing(previous => Object.fromEntries(Object.entries(previous).filter(([key, entry]) => rows.some(row => row.productKey === key && row.revision === entry.draft.revision))));
                   void Promise.all(rows.map(row => ensure(row)));
                 }}>Dùng nguồn hiện tại để kiểm tra lại</button>}
@@ -2755,6 +2737,17 @@ export function ProductionPreparation({
               )}
             </section>
           )}
+          <footer className="preparation-action-bar" aria-label="Hành động bước hiện tại">
+            <div><strong>{selected.length} sản phẩm đã chọn</strong><small>{shopName} · {publicationMode === 'hidden_for_review' ? 'Đăng ẩn để QC' : 'Mở bán sau kiểm tra'}</small></div>
+            <div className="preparation-action-buttons">
+              {step > 1 && <button type="button" className="secondary" onClick={() => moveStep(step === 3 && selected.length ? 2 : 1)}><ArrowLeft size={16} aria-hidden="true"/>Quay lại</button>}
+              {step === 1 && <button type="button" disabled={!selected.length || busy} onClick={() => moveStep(2)}>Tiếp tục · Bổ sung thông tin<ArrowRight size={16} aria-hidden="true"/></button>}
+              {step === 2 && <button type="button" disabled={!selected.length || busy} onClick={() => moveStep(3)}>Tiếp tục · Kiểm tra<ArrowRight size={16} aria-hidden="true"/></button>}
+              {step === 3 && !preview && <button type="button" disabled={busy || !selected.length || selected.some(key => !editing[key] || editing[key]?.metadataBusy)} onClick={() => void inspect()}>{busy ? 'Đang kiểm tra…' : 'Kiểm tra ' + selected.length + ' listing đã chọn'}<ListChecks size={16} aria-hidden="true"/></button>}
+              {step === 3 && preview && !saved && selected.length > 0 && <button type="button" className="secondary" onClick={() => changed()}>Thay đổi cách đăng</button>}
+              {step === 3 && preview && <button type="button" className="secondary" onClick={() => moveStep(1)}>Chọn sản phẩm khác</button>}
+            </div>
+          </footer>
         </>
       )}
     </section>

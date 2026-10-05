@@ -1,0 +1,401 @@
+/* The workspace owns its chrome eagerly; feature styles cannot change navigation. */
+.app-shell.focused-workspace {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: 'rail toolbar' 'rail system' 'rail content';
+  min-height: 100dvh;
+  align-items: start;
+}
+.app-shell.focused-workspace .app-header {
+  grid-area: rail;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 32px;
+  padding: 26px 14px 20px;
+  height: 100dvh;
+  min-height: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+.app-shell.focused-workspace .app-brand {
+  padding: 5px 6px;
+  min-width: 0;
+  gap: 10px;
+  font-size: 17px;
+  color: var(--text);
+  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.app-shell.focused-workspace .app-brand strong {
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+.app-shell.focused-workspace .app-brand small {
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.app-shell.focused-workspace .brand-tile {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 9px;
+}
+.app-shell.focused-workspace .brand-tile svg {
+  width: 19px;
+  height: 19px;
+}
+.app-shell.focused-workspace .main-nav {
+  display: grid;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 5px;
+  padding: 0;
+}
+.app-shell.focused-workspace .main-nav button {
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+  gap: 11px;
+  min-height: 44px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  box-shadow: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.app-shell.focused-workspace .main-nav button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.app-shell.focused-workspace .main-nav button.active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+.app-shell.focused-workspace .main-nav button.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.workspace-rail-caption {
+  margin: auto 10px 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.workspace-toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 32px;
+  min-height: 78px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.workspace-location {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.workspace-location > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.workspace-location > strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.workspace-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.app-shell.focused-workspace .workspace-tools {
+  position: relative;
+  margin: 0;
+  font-size: 13px;
+}
+.app-shell.focused-workspace .workspace-tools > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  list-style: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.app-shell.focused-workspace .workspace-tools > summary::-webkit-details-marker {
+  display: none;
+}
+.app-shell.focused-workspace .workspace-tools > summary:hover,
+.app-shell.focused-workspace .workspace-tools[open] > summary {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.workspace-tools-chevron {
+  color: var(--muted);
+  transition: transform 180ms ease;
+}
+.workspace-tools[open] .workspace-tools-chevron {
+  transform: rotate(180deg);
+}
+.app-shell.focused-workspace .workspace-tools > nav {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  top: calc(100% + 8px);
+  display: grid;
+  width: min(264px, calc(100vw - 24px));
+  min-width: 0;
+  max-height: min(520px, 65dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+}
+.app-shell.focused-workspace .workspace-tools[open] > nav {
+  animation: workspace-menu-enter 180ms ease-out;
+}
+.app-shell.focused-workspace .workspace-tools > nav button {
+  display: flex;
+  justify-content: flex-start;
+  text-align: left;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 12px;
+  min-height: 42px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: normal;
+}
+.app-shell.focused-workspace .workspace-tools > nav button:hover {
+  background: var(--surface-hover);
+}
+.app-shell.focused-workspace .workspace-tools > nav button[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.app-shell.focused-workspace .workspace-tools > summary:focus-visible,
+.app-shell.focused-workspace .workspace-tools > nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.app-shell.focused-workspace .environment-bar {
+  grid-area: system;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  min-height: 38px;
+  padding: 8px 32px;
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--line);
+}
+.app-shell.focused-workspace .environment-bar > span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.app-shell.focused-workspace .environment-bar > span:first-child {
+  display: block;
+}
+.app-shell.focused-workspace .environment-bar .text-button {
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.app-shell.focused-workspace .workspace-main {
+  grid-area: content;
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 28px 32px 64px;
+}
+.app-shell.focused-workspace .workspace-main.source-home-main {
+  padding-top: 28px;
+}
+@keyframes workspace-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 1099px) {
+  .app-shell.focused-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'rail' 'toolbar' 'system' 'content';
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+  .app-shell.focused-workspace .app-header {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 24px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .app-shell.focused-workspace .main-nav {
+    display: flex;
+    gap: 3px;
+    margin-left: auto;
+    align-self: auto;
+  }
+  .app-shell.focused-workspace .main-nav button {
+    padding: 10px 12px;
+    gap: 7px;
+    font-size: 13px;
+  }
+  .workspace-rail-caption {
+    display: none;
+  }
+  .workspace-toolbar {
+    min-height: 65px;
+    padding: 12px 24px;
+  }
+  .app-shell.focused-workspace .environment-bar {
+    padding-inline: 24px;
+  }
+  .app-shell.focused-workspace .workspace-main {
+    padding: 24px 24px 56px;
+  }
+}
+@media (max-width: 699px) {
+  .app-shell.focused-workspace .app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px 12px 8px;
+  }
+  .app-shell.focused-workspace .app-brand {
+    justify-self: start;
+    padding: 0 3px;
+    min-height: 36px;
+  }
+  .app-shell.focused-workspace .app-brand small {
+    display: none;
+  }
+  .app-shell.focused-workspace .main-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+    margin: 0;
+    gap: 3px;
+  }
+  .app-shell.focused-workspace .main-nav button {
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px 2px;
+    min-height: 55px;
+    font-size: 11px;
+  }
+  .app-shell.focused-workspace .main-nav button svg {
+    width: 17px;
+    height: 17px;
+  }
+  .app-shell.focused-workspace .main-nav button.active::before {
+    left: 18px;
+    right: 18px;
+    width: auto;
+    height: 2px;
+    top: auto;
+    bottom: 0;
+  }
+  .workspace-toolbar {
+    padding: 10px 12px;
+    min-height: 64px;
+    gap: 8px;
+  }
+  .workspace-location > span {
+    display: none;
+  }
+  .workspace-location > strong {
+    font-size: 13px;
+  }
+  .workspace-controls {
+    gap: 6px;
+  }
+  .app-shell.focused-workspace .workspace-tools > summary {
+    min-height: 44px;
+    padding: 9px;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .app-shell.focused-workspace .workspace-tools > nav button {
+    min-height: 44px;
+  }
+  .app-shell.focused-workspace .environment-bar {
+    justify-content: flex-start;
+    padding: 8px 14px;
+    gap: 5px 10px;
+    font-size: 11px;
+  }
+  .app-shell.focused-workspace .workspace-main,
+  .app-shell.focused-workspace .workspace-main.source-home-main {
+    padding: 20px 14px 48px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.focused-workspace .workspace-tools[open] > nav,
+  .app-shell.focused-workspace .workspace-tools-chevron,
+  .app-shell.focused-workspace .main-nav button,
+  .app-shell.focused-workspace .workspace-tools > summary {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

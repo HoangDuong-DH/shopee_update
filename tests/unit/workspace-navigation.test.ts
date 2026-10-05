@@ -1,3 +1,4 @@
+import { workspaceNavigationUrl } from '../../apps/web/src/workspace-navigation.js';
 import { describe, expect, it } from 'vitest';
 
 describe('workspace navigation and partial loading', () => {
@@ -12,6 +13,12 @@ describe('workspace navigation and partial loading', () => {
     const origin = 'http://127.0.0.1:5273/?page=shops&connectShop=1340479212&partnerId=2010476';
     expect(navigation?.workspaceNavigationUrl(origin, 'products')).toBe('/?page=products');
     expect(navigation?.workspaceNavigationUrl(origin, 'shops')).toContain('connectShop=1340479212');
+  });
+  it('keeps copy target intent only on the archive route', async () => {
+    const navigation = await import('../../apps/web/src/workspace-navigation.js');
+    const origin = 'http://127.0.0.1:5173/?page=archives&copyTargets=%5B%5D';
+    expect(navigation.workspaceNavigationUrl(origin, 'archives')).toContain('copyTargets=');
+    expect(navigation.workspaceNavigationUrl(origin, 'shops')).not.toContain('copyTargets=');
   });
   it('does not request the whole draft and import archive on a connection screen', async () => {
     const navigation = await import('../../apps/web/src/workspace-navigation.js').catch(() => null);
@@ -44,4 +51,10 @@ describe('workspace navigation and partial loading', () => {
     expect(settled?.errors.shops).toBe('Không đọc được kết nối');
     expect(settled?.values).not.toHaveProperty('shops');
   });
+});
+
+
+it('does not leak production step and work filters into another task', () => {
+  expect(workspaceNavigationUrl('http://localhost/?page=prepared-batches&stage=prepare&work=all','shops')).not.toContain('stage=');
+  expect(workspaceNavigationUrl('http://localhost/?page=prepared-batches&stage=prepare&work=all','products')).not.toContain('work=');
 });

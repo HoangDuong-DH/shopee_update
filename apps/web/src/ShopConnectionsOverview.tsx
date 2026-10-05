@@ -1,8 +1,11 @@
+import { useWorkspaceDataUpdates } from './useWorkspaceDataUpdates.js';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Plus, RefreshCw, Search, Store, X } from 'lucide-react';
+import { ChevronRight, Plus, RefreshCw, Search, Store, X, Download, ListChecks, ShieldCheck, Copy, MoreHorizontal } from 'lucide-react';
 import type { ShopConnection } from '@shopee/domain';
 import { ShopNameEditor } from './ShopNameEditor.js';
 import { connectionHealthView, filterShopConnections } from './shop-connections.js';
+import { shopSelectionKey, selectedConnections, toggleVisibleConnections, connectionStatusCsv } from './shop-bulk-selection.js';
+import { BulkConnectionActions } from './BulkConnectionActions.js';
 import './shop-connections.css';
 export type ShopConnectionsOverviewProps = {
   shops: ShopConnection[];
@@ -10,6 +13,8 @@ export type ShopConnectionsOverviewProps = {
   onSelectShop?: (id: string) => void;
   onConnectShop: (id: string | null) => void;
   onRefresh: () => void | Promise<void>;
+  onPrepareCopy?: (shops: ShopConnection[]) => void;
+  onBatchBusyChange?: (busy: boolean) => void;
   loading?: boolean;
 };
 function shopName(shop: ShopConnection) {
@@ -25,9 +30,34 @@ export function ShopConnectionsOverview({
   onSelectShop,
   onConnectShop,
   onRefresh,
+  onPrepareCopy,
+  onBatchBusyChange,
   loading = false,
 }: ShopConnectionsOverviewProps) {
   const [query, setQuery] = useState('');
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [bulkSummary, setBulkSummary] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkAction, setBulkAction] = useState<'check' | 'refresh' | null>(null);
+  const [bulkTargets, setBulkTargets] = useState<ShopConnection[]>([]);
+  function openBulkAction(action: 'check' | 'refresh') {
+    setBulkTargets(selected.map((shop) => ({ ...shop, scope: { ...shop.scope } })));
+    setBulkAction(action);
+  }
+  const selectVisible = useRef<HTMLInputElement>(null);
+  const bulkMore = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      const menu = bulkMore.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      const menu = bulkMore.current;
+      if (event.key === 'Escape' && menu?.open) { menu.open = false; menu.querySelector('summary')?.focus(); }
+    };
+    document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, []);
   const [environment, setEnvironment] = useState<'all' | 'production' | 'sandbox'>('all');
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(selectedShopId ?? null);
@@ -58,6 +88,27 @@ export function ShopConnectionsOverview({
       (environment === 'all' || shop.scope.environment === environment) &&
       (!attentionOnly || health.get(shop.id)?.needsAttention),
   );
+  const selected = selectedConnections(shops, selectedKeys);
+  const visibleSelected = visible.filter((shop) => selectedKeys.has(shopSelectionKey(shop))).length;
+  const hiddenSelected = selected.length - visibleSelected;
+  const allVisibleSelected = visible.length > 0 && visibleSelected === visible.length;
+  useEffect(() => {
+    if (selectVisible.current) selectVisible.current.indeterminate = visibleSelected > 0 && !allVisibleSelected;
+  }, [visibleSelected, allVisibleSelected]);
+  useEffect(() => {
+    const available = new Set(shops.map(shopSelectionKey));
+    setSelectedKeys((current) => {
+      const next = new Set([...current].filter((key) => available.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [shops]);
+  function exportSelected() {
+    if (!selected.length) return;
+    const url = URL.createObjectURL(new Blob([connectionStatusCsv(selected, Date.now())], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = 'trang-thai-shop-da-chon.csv';
+    anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   const productionCount = shops.filter((shop) => shop.scope.environment === 'production').length;
   const attentionCount = [...health.values()].filter((view) => view.needsAttention).length;
   const detail = detailId ? shops.find((shop) => shop.id === detailId) : undefined;
@@ -85,6 +136,7 @@ export function ShopConnectionsOverview({
       if (mounted.current) setRefreshing(false);
     }
   }
+  useWorkspaceDataUpdates(refresh, ['connections'], busy || bulkRunning);
   function openDetail(shop: ShopConnection) {
     setDetailId(shop.id);
     requestAnimationFrame(() => detailElement.current?.focus({ preventScroll: true }));
@@ -167,9 +219,37 @@ export function ShopConnectionsOverview({
               Chỉ kết nối cần kiểm tra
             </label>
           </div>
-          <p className="shop-overview-result-count" role="status">
-            {visible.length} / {shops.length} shop trong danh sách
-          </p>
+          <div className="shop-selection-heading">
+            <label className="shop-select-visible">
+              <input type="checkbox" ref={selectVisible} disabled={!visible.length || busy}
+                checked={allVisibleSelected} aria-label="Chọn các shop đang hiển thị"
+                onChange={() => setSelectedKeys((current) => toggleVisibleConnections(current, visible))} />
+              Chọn tất cả đang hiển thị
+            </label>
+            <span className="shop-overview-result-count" role="status">{visible.length} / {shops.length} shop</span>
+          </div>
+          {selected.length > 0 && (
+            <div className="shop-bulk-bar">
+              <span role="status"><strong>{selected.length}</strong> shop đã chọn{hiddenSelected > 0 && <small> · {hiddenSelected} ngoài bộ lọc</small>}</span>
+              <button type="button" disabled={bulkRunning} onClick={() => openBulkAction('check')}><ShieldCheck size={16} aria-hidden="true" />Kiểm tra kết nối</button>
+              <button type="button" disabled={bulkRunning} onClick={() => openBulkAction('refresh')}><RefreshCw size={16} aria-hidden="true" />Gia hạn kết nối</button>
+              {onPrepareCopy && <button type="button" disabled={bulkRunning} onClick={() => onPrepareCopy(selected)}><Copy size={16} aria-hidden="true" />Chuẩn bị sao chép</button>}
+              <details className="shop-bulk-more" ref={bulkMore}>
+                <summary><MoreHorizontal size={16} aria-hidden="true" />Thêm</summary>
+                <div>
+                  <button type="button" aria-expanded={bulkSummary} onClick={() => setBulkSummary((value) => !value)}><ListChecks size={16} aria-hidden="true" />Tóm tắt</button>
+                  <button type="button" onClick={exportSelected}><Download size={16} aria-hidden="true" />Xuất trạng thái</button>
+                  <button type="button" disabled={busy} onClick={() => void refresh()}><RefreshCw size={16} aria-hidden="true" />Đọc lại dữ liệu đã lưu</button>
+                </div>
+              </details>
+              <button type="button" className="text-button" onClick={() => { setSelectedKeys(new Set()); setBulkSummary(false); }}>Bỏ chọn</button>
+              {bulkSummary && <section className="shop-bulk-summary" aria-label="Tóm tắt shop đã chọn">
+                <p>Trạng thái đã lưu trong ứng dụng; không kiểm tra mới với Shopee.</p>
+                <ul>{selected.map((shop) => <li key={shopSelectionKey(shop)}><strong>{shopName(shop)}</strong><span className={'shop-connection-health is-' + health.get(shop.id)!.tone}>{health.get(shop.id)!.label}</span><small>{shop.scope.environment === 'production' ? 'Shop thật' : 'Thử nghiệm'} · {shop.scope.shopId} · Partner {shop.scope.partnerId}</small></li>)}</ul>
+              </section>}
+            </div>
+          )}
+          {bulkAction && <BulkConnectionActions shops={bulkTargets} initialAction={bulkAction} onRefresh={onRefresh} onConnectShop={onConnectShop} onBusyChange={(value) => { setBulkRunning(value); onBatchBusyChange?.(value); }} />}
           <div className={'shop-overview-layout' + (detail ? ' has-detail' : '')}>
             <div>
               {visible.length ? (
@@ -177,12 +257,22 @@ export function ShopConnectionsOverview({
                   {visible.map((shop) => {
                     const view = health.get(shop.id)!;
                     return (
-                      <li key={shop.id}>
+                      <li key={shop.id} className={selectedKeys.has(shopSelectionKey(shop)) ? 'is-selected' : undefined}>
+                        <label className="shop-row-select">
+                          <input type="checkbox" aria-label={`Chọn shop: ${shopName(shop)} · ${shop.scope.shopId} · ${shop.scope.environment} · Partner ${shop.scope.partnerId}`}
+                            checked={selectedKeys.has(shopSelectionKey(shop))} disabled={busy}
+                            onChange={() => setSelectedKeys((current) => {
+                              const next = new Set(current), key = shopSelectionKey(shop);
+                              if (next.has(key)) next.delete(key); else next.add(key);
+                              return next;
+                            })} />
+                        </label>
                         <button
                           type="button"
                           className={
                             'shop-connection-row' + (detailId === shop.id ? ' is-open' : '')
                           }
+                          aria-label={`${shopName(shop)} · Shop ${shop.scope.shopId} · Partner ${shop.scope.partnerId} · ${view.label}`}
                           aria-expanded={detailId === shop.id}
                           aria-controls={id + '-detail'}
                           onClick={() => openDetail(shop)}
@@ -190,16 +280,14 @@ export function ShopConnectionsOverview({
                           <span className="shop-connection-identity">
                             <strong>{shopName(shop)}</strong>
                             <small>
-                              Shop {shop.scope.shopId} · Partner {shop.scope.partnerId}
+                              {shop.scope.shopId}
                             </small>
                           </span>
                           <span className="shop-connection-state">
                             <span className={'shop-connection-health is-' + view.tone}>
                               {view.label}
                             </span>
-                            <small>
-                              {shop.scope.environment === 'production' ? 'Shop thật' : 'Thử nghiệm'}
-                            </small>
+                            {shop.scope.environment === 'sandbox' && <small>Thử nghiệm</small>}
                           </span>
                           <ChevronRight size={17} aria-hidden="true" />
                         </button>
@@ -278,16 +366,20 @@ export function ShopConnectionsOverview({
                     <dd>{timeLabel(detailHealth.expiresAt)}</dd>
                   </div>
                   <div>
-                    <dt>Tự gia hạn</dt>
+                    <dt>Cho phép tự gia hạn</dt>
                     <dd>
                       {detail.autoRefresh === true
-                        ? 'Đã bật'
+                        ? 'Đã cho phép cho shop này'
                         : detail.autoRefresh === false
-                          ? 'Đang tắt'
+                          ? 'Chưa cho phép cho shop này'
                           : 'Chưa có thông tin'}
                     </dd>
                   </div>
                 </dl>
+                <p className="shop-connection-guidance">
+                  Tùy chọn riêng của shop. Tự gia hạn chỉ chạy khi dịch vụ gia hạn của ứng dụng
+                  đang hoạt động.
+                </p>
                 <div className="actions">
                   <button
                     type="button"

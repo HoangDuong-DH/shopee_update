@@ -1,21 +1,25 @@
-import { existsSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-const git = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { encoding: 'utf8' });
-const docker = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], {
-  encoding: 'utf8',
-});
-console.log(
-  JSON.stringify(
-    {
-      node: process.version,
-      nodeTarget: 24,
-      gitRepository: git.status === 0,
-      dockerServer: docker.status === 0 ? docker.stdout.trim() : 'unavailable',
-      environmentConfigured: existsSync('.env'),
-      sourceKnowledgePresent: existsSync('knowledge-base/shopee-open-platform/AGENT_GUIDE.md'),
-    },
-    null,
-    2,
-  ),
-);
-if (Number(process.versions.node.split('.')[0]) !== 24) process.exitCode = 1;
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { inspectDoctor, parseBootstrapArgs, formatPlan, safeError, isMain } from './onboarding-core.mjs';
+
+export { inspectDoctor };
+if (isMain(import.meta.url)) {
+  try {
+    const args = process.argv.slice(2);
+    if (args.includes('--apply') || args.includes('--skip-install')) throw Error('DOCTOR_INSPECT_ONLY');
+    const options = parseBootstrapArgs(args);
+    if (options.help) console.log('Usage: node scripts/doctor.mjs [--json]. Inspect-only local checks; no installation, service start or migration.');
+    else {
+      const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+      const result = await inspectDoctor(root, options);
+      console.log(options.json ? JSON.stringify(result, null, 2) : formatPlan(result));
+      if (!result.ready) process.exitCode = 1;
+    }
+  } catch (error) {
+    const code = safeError(error, 'DOCTOR_CHECK_FAILED');
+    if (process.argv.includes('--json')) console.log(JSON.stringify({ version: 1, mode: 'doctor', ready: false,
+      checks: [{ id: 'command', status: 'blocked', code, action: 'Resolve the local check before retrying. No changes were made.' }] }, null, 2));
+    else console.error(`${code}: No changes were made.`);
+    process.exitCode = 1;
+  }
+}

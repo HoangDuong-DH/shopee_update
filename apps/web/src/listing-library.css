@@ -3,7 +3,7 @@
 }
 .library-toolbar {
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: 1rem;
   margin-bottom: 1.25rem;
   flex-wrap: wrap;
@@ -30,7 +30,7 @@
 .library-board {
   border: 1px solid var(--line);
   border-radius: 0.9rem;
-  background: #fff;
+  background: var(--surface);
 }
 .library-columns,
 .library-row {
@@ -46,7 +46,7 @@
 .library-columns {
   font-size: 0.78rem;
   color: var(--muted);
-  background: #f9fbf9;
+  background: var(--surface-soft);
   border-bottom: 1px solid var(--line);
   border-radius: 0.9rem 0.9rem 0 0;
 }
@@ -72,9 +72,9 @@
   height: 65px;
   object-fit: contain;
   flex-shrink: 0;
-  border: 1px solid #edf1ed;
+  border: 1px solid var(--line);
   border-radius: 0.5rem;
-  background: #f4f7f4;
+  background: var(--surface-soft);
 }
 .library-cover-placeholder {
   display: grid;
@@ -97,7 +97,7 @@
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
-  color: #244d35;
+  color: var(--text);
   padding: 0;
   border: 0;
   background: transparent;
@@ -222,4 +222,15 @@
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+
+/* Reset shared form-label margins inside the single-line list toolbar. */
+.library-toolbar > label { margin: 0; }
+.library-toolbar .local-lifecycle-filter { margin: 0; gap: 0.65rem; flex-wrap: nowrap; }
+.library-toolbar :is(input, select, button) { min-height: 44px; }
+.library-toolbar .library-search { max-width: none; }
+@media (max-width: 600px) {
+  .library-toolbar .library-search { flex-basis: 100%; min-width: 0; }
+  .library-toolbar .local-lifecycle-filter { flex: 1; min-width: 0; }
+  .library-toolbar .local-lifecycle-filter select { min-width: 0; flex: 1; }
 }

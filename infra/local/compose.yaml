@@ -1,4 +1,4 @@
-name: shopee-product-uploader-dev
+name: ${COMPOSE_PROJECT_NAME:-shopee-product-uploader-dev}
 services:
   postgres:
     image: postgres:17.11-alpine
@@ -7,7 +7,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run setup:local first}
       POSTGRES_DB: shopee_uploader
     ports:
-      - "127.0.0.1:5442:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5442}:5432"
+    labels:
+      com.shopee-uploader.onboarding.root: ${ONBOARDING_ROOT_HASH:-legacy}
+      com.shopee-uploader.onboarding.config: ${ONBOARDING_CONFIG_ID:-legacy}
     volumes:
       - database:/var/lib/postgresql/data
     healthcheck:
@@ -18,3 +21,6 @@ services:
     restart: unless-stopped
 volumes:
   database:
+    labels:
+      com.shopee-uploader.onboarding.root: ${ONBOARDING_ROOT_HASH:-legacy}
+      com.shopee-uploader.onboarding.config: ${ONBOARDING_CONFIG_ID:-legacy}

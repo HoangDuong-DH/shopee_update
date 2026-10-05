@@ -1,3 +1,5 @@
+import { useWorkspaceDataUpdates } from './useWorkspaceDataUpdates.js';
+import type { ProductionWorkFilter } from './operations-presentation.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
@@ -380,7 +382,7 @@ function batchRowCounts(item: Batch) {
   return counts;
 }
 type ProductionTargetScope={environment:'production';partnerId:string;shopId:string};
-export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSource, active = true }: { targetScope:ProductionTargetScope;targetShopName?:string;onImageQc?: () => void; onSource?: (key: string) => void; active?: boolean }) {
+export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSource, active = true, initialFilter = 'active' }: { targetScope:ProductionTargetScope;targetShopName?:string;onImageQc?: () => void; onSource?: (key: string) => void; active?: boolean; initialFilter?: ProductionWorkFilter }) {
   const [batches, setBatches] = useState<Batch[]>([]),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
@@ -389,13 +391,14 @@ export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSo
     [pending, setPending] = useState<string | null>(null),
     [held, setHeld] = useState<Record<string, string>>({}),
     [publicationConfirmations, setPublicationConfirmations] = useState<Record<string, string>>({}),
-    [filter, setFilter] = useState('active'),
+    [filter, setFilter] = useState<ProductionWorkFilter>(initialFilter),
     [search, setSearch] = useState(''),
     [selectedId, setSelectedId] = useState<string | null>(null),
     [hidePublished, setHidePublished] = useState(false),
     [reviewing, setReviewing] = useState<string | null>(null),
     [exporting, setExporting] = useState<string | null>(null),
     [exportError, setExportError] = useState<{ batchId: string; message: string } | null>(null);
+  useEffect(() => setFilter(initialFilter), [initialFilter]);
   const exportRequest = useRef<AbortController | null>(null);
   useEffect(() => () => exportRequest.current?.abort(), []);
   const mounted = useRef(true),
@@ -499,6 +502,7 @@ export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSo
       controller.current?.abort();
     };
   }, [refresh, active]);
+  useWorkspaceDataUpdates(refresh, ['production', 'connections', 'sources'], !active || pending !== null || reviewing !== null || exporting !== null);
   const pollingDelay = batches.some((item) => item.busy) ? 3000 : 15000;
   useEffect(() => {
     if (!active) return;
@@ -606,6 +610,7 @@ export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSo
     );
   const filters = [
     { key: 'active', label: 'Chưa hoàn tất', accept: (item: Batch) => !['completed', 'completed_with_exclusions'].includes(item.state) || needsQc(item) },
+    { key: 'paused', label: 'Tạm dừng', accept: (item: Batch) => item.state === 'paused' },
     { key: 'all', label: 'Tất cả', accept: (_item: Batch) => true },
     {
       key: 'ready',
@@ -685,7 +690,7 @@ export function ProductionBatches({ targetScope, targetShopName, onImageQc, onSo
                   type="button"
                   className="secondary"
                   aria-pressed={filter === option.key}
-                  onClick={() => setFilter(option.key)}
+                  onClick={() => setFilter(option.key as ProductionWorkFilter)}
                 >
                   {option.label} <span>{batches.filter(option.accept).length}</span>
                 </button>

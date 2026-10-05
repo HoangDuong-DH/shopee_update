@@ -54,7 +54,7 @@ describe('connection status shown to an operator', () => {
   it('shows a successful check only with its recorded time and healthy result', () => {
     expect(connectionHealthView(shop({ refreshStatus: 'healthy', healthCheckedAt: '2026-10-01T07:59:00.000Z', tokenExpiresAt: '2026-10-01T10:00:00.000Z' }), now))
       .toMatchObject({ code: 'checked', checkedAt: '2026-10-01T07:59:00.000Z', tone: 'success' });
-    expect(connectionHealthView(shop({ refreshStatus: 'healthy' }), now).code).toBe('saved');
+    expect(connectionHealthView(shop({ refreshStatus: 'healthy' }), now).code).toBe('unverified');
     expect(connectionHealthView(shop({ healthCheckedAt: '2026-10-01T07:59:00.000Z', refreshStatus: 'waiting' }), now))
       .toMatchObject({ code: 'waiting', tone: 'warning', needsAttention: true });
   });
@@ -70,7 +70,7 @@ describe('connection status shown to an operator', () => {
   });
   it('never displays invalid dates or invents a missing check or expiry', () => {
     expect(connectionHealthView(shop({ healthCheckedAt: 'bad', tokenExpiresAt: 'bad' }), now))
-      .toMatchObject({ code: 'saved', checkedAt: null, expiresAt: null });
+      .toMatchObject({ code: 'unverified', checkedAt: null, expiresAt: null, needsAttention: true });
   });
 });
 
@@ -100,11 +100,26 @@ describe('shop overview states', () => {
     expect(html).toContain('shop-name-shop-b');
     expect(html).not.toContain('shop-name-saved-shop-a');
     expect(html).toContain('1126307464');
-    expect(html).toContain('Đã lưu kết nối');
+    expect(html).toContain('Chưa xác minh');
   });
   it('keeps a missing selection unresolved without opening another shop', () => {
     const html = renderToStaticMarkup(createElement(ShopConnectionsOverview, { shops: [shop()], selectedShopId: 'missing', ...callbacks }));
     expect(html).toContain('Shop đang chọn không còn trong danh sách');
     expect(html).not.toContain('shop-name-saved-shop-a');
   });
+});
+
+
+it('does not present stale, future or expiring checks as currently verified', () => {
+  const good = shop({ state: 'connected', refreshStatus: 'healthy', healthCheckedAt: '2026-10-01T07:44:59.000Z', tokenExpiresAt: '2026-10-01T10:00:00.000Z' });
+  expect(connectionHealthView(good, now)).toMatchObject({ code: 'stale', needsAttention: true, label: 'Cần kiểm tra lại' });
+  expect(connectionHealthView({ ...good, healthCheckedAt: '2026-10-01T08:01:00.000Z' }, now).code).toBe('stale');
+  expect(connectionHealthView({ ...good, healthCheckedAt: '2026-10-01T07:45:00.000Z' }, now).code).toBe('checked');
+  expect(connectionHealthView({ ...good, tokenExpiresAt: '2026-10-01T08:05:00.000Z' }, now).code).toBe('expiring');
+});
+
+
+it('does not show a fresh healthy timestamp as verified when token expiry is missing', () => {
+  expect(connectionHealthView(shop({state:'connected',refreshStatus:'healthy',healthCheckedAt:'2026-10-01T07:59:00.000Z'}),now))
+    .toMatchObject({code:'unverified',label:'Chưa xác minh',needsAttention:true});
 });

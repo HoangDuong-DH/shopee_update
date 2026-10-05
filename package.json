@@ -27,7 +27,14 @@
     "test:e2e": "playwright test",
     "test:eval": "node scripts/evaluate-harness.mjs",
     "test:skills": "node scripts/validate-repository-skills.mjs",
-    "test": "npm run test:legacy && npm run test:unit && npm run test:integration"
+    "test": "npm run test:legacy && npm run test:unit && npm run test:integration",
+    "onboarding:setup": "node scripts/bootstrap.mjs --apply",
+    "stop:local": "node scripts/local-launcher.mjs stop",
+    "test:onboarding": "node --test tests/onboarding-release.test.mjs tests/onboarding-launcher.test.mjs tests/onboarding-managed-process.test.mjs tests/onboarding-transfer.test.mjs tests/onboarding-reference.test.mjs tests/onboarding-windows-installer.test.mjs && vitest run tests/unit/onboarding.test.ts tests/unit/internal-verifier.test.ts tests/unit/transfer-recovery.test.ts",
+    "start:local": "node scripts/local-launcher.mjs start",
+    "release:package": "node scripts/release-package.mjs",
+    "onboarding:check": "node scripts/doctor.mjs --json",
+    "onboarding:plan": "node scripts/bootstrap.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

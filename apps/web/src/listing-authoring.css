@@ -4,7 +4,7 @@
 .image-file-evidence dl > div { display: grid; grid-template-columns: minmax(7rem, .3fr) minmax(0, 1fr); gap: .75rem; }
 .image-file-evidence dd { margin: 0; overflow-wrap: anywhere; }
 .image-file-evidence code { white-space: normal; }
-.editor-recovery { display: grid; gap: .6rem; margin-block: 1rem; padding: 1rem 1.25rem; border: 1px solid var(--line); background: var(--surface, #fff); border-radius: .85rem; }
+.editor-recovery { display: grid; gap: .6rem; margin-block: 1rem; padding: 1rem 1.25rem; border: 1px solid var(--line); background: var(--surface); border-radius: .85rem; }
 .editor-recovery p { margin: 0; max-width: 68ch; }
 .editor-recovery .actions { flex-wrap: wrap; }
 .editor-recovery-stale { display: grid; gap: .6rem; }

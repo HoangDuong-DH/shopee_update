@@ -215,6 +215,7 @@ test('archive navigation retains real stored evidence and connection metadata us
   await openWorkspaceTool(page, 'Kho sao chép');
   await expect(page).toHaveURL(/page=archives/);
   await expect(page.getByRole('heading', { name: 'Kho nguồn để sao chép', exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Kho đã lưu' }).selectOption(fixture.archiveId);
   const archiveReply = page.waitForResponse(reply => new URL(reply.url()).pathname.endsWith('/items/' + fixture.archiveItemId));
   await page.getByRole('button', { name: /^Xịt mũ bảo hiểm QA lưu trữ/ }).click();
   const evidence = await (await archiveReply).json();
@@ -276,4 +277,316 @@ test('small-screen tasks stay within the viewport and primary navigation works w
     }).toBeLessThanOrEqual(1);
   }
   await page.screenshot({ path: resolve(evidenceRoot, 'product-workspace-mobile.png'), fullPage: true });
+});
+
+
+test('appearance persists and follows device changes only when system is selected', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto(baseURL + '/?page=overview');
+  const appearance = page.getByRole('combobox', { name: 'Giao diện', exact: true });
+  await expect(page.getByRole('region', { name: 'Tóm tắt từ dữ liệu đã lưu', exact: true })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await appearance.selectOption('dark');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveAttribute('data-appearance', 'dark');
+  await page.reload();
+  await expect(appearance).toHaveValue('dark');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await appearance.selectOption('system');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  for (const theme of ['light', 'dark']) {
+    await appearance.selectOption(theme);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const pairs = await page.evaluate(() => {
+      const rgb = (value: string) => {
+        const values = value.match(/[\d.]+/g)?.map(Number) ?? [];
+        if (values.length < 3) throw Error('COLOR_NOT_RESOLVED:' + value);
+        return values;
+      };
+      const background = (element: Element): number[] => {
+        const values = rgb(getComputedStyle(element).backgroundColor);
+        if (values.length === 3 || values[3]! > .99) return values;
+        if (!element.parentElement) throw Error('BACKGROUND_NOT_RESOLVED');
+        return background(element.parentElement);
+      };
+      const luminance = (values: number[]) => {
+        const linear = values.slice(0, 3).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+        return .2126 * linear[0]! + .7152 * linear[1]! + .0722 * linear[2]!;
+      };
+      const selectors = ['.operations-import', '.main-nav button.active', '#operations-shop', '.appearance-control select', '.operations-issue-copy strong'];
+      return selectors.map(selector => {
+        const element = document.querySelector(selector);
+        if (!element) throw Error('CONTRAST_TARGET_MISSING:' + selector);
+        const foreground = luminance(rgb(getComputedStyle(element).color)), back = luminance(background(element));
+        return { selector, ratio: (Math.max(foreground, back) + .05) / (Math.min(foreground, back) + .05) };
+      });
+    });
+    for (const pair of pairs) expect(pair.ratio, `${theme} ${pair.selector} normal text contrast`).toBeGreaterThanOrEqual(4.5);
+    await page.screenshot({ path: resolve(evidenceRoot, 'focused-overview-' + theme + '.png'), fullPage: true });
+  }
+});
+
+test('focused shell and tools reflow at four widths before and after lazy source styles', async ({ page }) => {
+  test.setTimeout(120000);
+  await page.goto(baseURL + '/?page=overview');
+  const appearance = page.getByRole('combobox', { name: 'Giao diện', exact: true });
+  for (const theme of ['light', 'dark']) {
+    await appearance.selectOption(theme);
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await primary(page).getByRole('button', { name: 'Tổng quan', exact: true }).click();
+      await expect(page.getByRole('region', { name: 'Tóm tắt từ dữ liệu đã lưu', exact: true })).toBeVisible();
+      const tools = page.locator('details.workspace-tools');
+      const summary = tools.locator('summary');
+      const toolbar = page.locator('.workspace-toolbar');
+      const before = (await toolbar.boundingBox())!;
+      await summary.click();
+      await expect(tools).toHaveAttribute('open', '');
+      const menu = page.getByRole('navigation', { name: 'Công cụ bổ sung', exact: true });
+      await expect(menu).toBeVisible();
+      const opened = (await toolbar.boundingBox())!, menuBox = (await menu.boundingBox())!;
+      expect(Math.abs(opened.height - before.height)).toBeLessThanOrEqual(1);
+      expect(menuBox.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(width + 1);
+      await summary.press('Escape');
+      await expect(tools).not.toHaveAttribute('open', '');
+      await expect(summary).toBeFocused();
+      for (const [name, destination] of [['Bộ listing', 'products'], ['Đăng hàng', 'prepared-batches'], ['Shop', 'shops'], ['Tổng quan', 'overview']] as const) {
+        await primary(page).getByRole('button', { name, exact: true }).click();
+        await expect(page).toHaveURL(new RegExp('page=' + destination));
+        if (destination === 'products') await expect(page.getByText('Bộ nguồn QA từ file', { exact: true }).first()).toBeVisible();
+        else if (destination === 'prepared-batches') await expect(page.getByLabel('Đăng vào shop', { exact: true })).toBeVisible();
+        else if (destination === 'shops') await expect(page.getByRole('region', { name: 'Danh sách kết nối shop', exact: true })).toBeVisible();
+        else await expect(page.getByRole('region', { name: 'Tóm tắt từ dữ liệu đã lưu', exact: true })).toBeVisible();
+        await expect.poll(() => page.evaluate(() => Math.max(document.documentElement.scrollWidth - window.innerWidth,
+          document.getElementById('workspace-main')!.scrollWidth - document.getElementById('workspace-main')!.clientWidth)), { message: `${theme} ${destination} at ${width}px must preserve reflow` }).toBeLessThanOrEqual(1);
+      }
+      await expect(page.locator('.environment-bar > span').first()).toBeVisible();
+    }
+  }
+  await openWorkspaceTool(page, 'Kho nguồn');
+  await expect(page).toHaveURL(/page=sources/);
+  await openWorkspaceTool(page, 'Theo dõi công việc');
+  await expect(page).toHaveURL(/page=workbench/);
+  await primary(page).getByRole('button', { name: 'Tổng quan', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Tóm tắt từ dữ liệu đã lưu', exact: true })).toBeVisible();
+  const tools = page.locator('details.workspace-tools');
+  const before = (await page.locator('.workspace-toolbar').boundingBox())!;
+  await tools.locator('summary').click();
+  const after = (await page.locator('.workspace-toolbar').boundingBox())!;
+  expect(after.height).toBe(before.height);
+  expect(await tools.locator('nav').evaluate(element => getComputedStyle(element).position)).toBe('absolute');
+  await page.getByRole('heading', { name: 'Hôm nay cần xử lý gì?', exact: true }).click();
+  await expect(tools).not.toHaveAttribute('open', '');
+  // Outside pointer clicks keep native destination focus; only Escape restores
+  // focus to the menu trigger (asserted above and in the keyboard test).
+  await page.setViewportSize({ width: 320, height: 900 });
+  await expect(primary(page).getByRole('button', { name: 'Tổng quan', exact: true }).locator('svg')).toBeVisible();
+  await page.screenshot({ path: resolve(evidenceRoot, 'focused-overview-mobile-dark.png'), fullPage: true });
+});
+
+test('reduced motion disables menu and pressed movement without blocking keyboard tasks', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
+  await page.goto(baseURL + '/?page=overview');
+  await expect(page.getByRole('region', { name: 'Tóm tắt từ dữ liệu đã lưu', exact: true })).toBeVisible();
+  const summary = page.locator('details.workspace-tools > summary');
+  await summary.press('Enter');
+  await expect(page.locator('details.workspace-tools')).toHaveAttribute('open', '');
+  const motion = await page.locator('details.workspace-tools nav').evaluate(element => ({
+    animation: getComputedStyle(element).animationName, transition: getComputedStyle(element).transitionDuration,
+  }));
+  expect(motion.animation).toBe('none');
+  expect(motion.transition).toBe('0s');
+  await summary.press('Escape');
+  await expect(summary).toBeFocused();
+  const button = primary(page).getByRole('button', { name: 'Bộ listing', exact: true });
+  await button.focus();
+  const box = (await button.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  expect(await button.evaluate(element => getComputedStyle(element).transform)).toBe('none');
+  await page.mouse.up();
+  await expect(page).toHaveURL(/page=products/);
+  await expect(page.getByText('Bộ nguồn QA từ file', { exact: true }).first()).toBeVisible();
+});
+
+test('compact shop indicators retain full reasons and navigate to the exact connection', async ({ page }) => {
+  await control('second-shop-unknown');
+  await page.goto(baseURL + '/?page=overview');
+  const row = page.locator('.operations-connection-row').filter({ hasText: fixture.shops[1]!.name });
+  await expect(row).toBeVisible();
+  await expect(row.locator('.operations-connection-detail')).not.toBeVisible();
+  const summary = row.locator('summary').first();
+  expect((await summary.boundingBox())!.height).toBeLessThanOrEqual(90);
+  await summary.click();
+  await expect(row.locator('.operations-connection-detail')).toContainText(fixture.shops[1]!.scope.shopId);
+  await expect(row.locator('.operations-connection-detail')).toContainText('Kết nối shop đang cần xử lý.');
+  await summary.click();
+  await row.getByRole('button', { name: /^Mở kết nối:/ }).click();
+  await expect(page).toHaveURL(new RegExp('connectShop=' + fixture.shops[1]!.scope.shopId));
+  await expect(page).toHaveURL(new RegExp('partnerId=' + fixture.shops[1]!.scope.partnerId));
+});
+
+test('shop batch selection respects filters, exports chosen rows and preserves keyboard and layout', async ({ page }) => {
+  await page.goto(baseURL + '/?page=shops');
+  const region = page.getByRole('region', { name: 'Danh sách kết nối shop', exact: true });
+  const rowChecks = region.getByRole('checkbox', { name: /^Chọn shop:/ });
+  await expect(rowChecks).toHaveCount(3);
+  const a = fixture.shops[0]!, b = fixture.shops[1]!, sandbox = fixture.shops[2]!;
+  await region.getByRole('checkbox', { name: new RegExp('^Chọn shop: ' + a.name) }).check();
+  await region.getByRole('searchbox', { name: 'Tìm kết nối shop', exact: true }).fill(b.scope.shopId);
+  await region.getByRole('checkbox', { name: 'Chọn các shop đang hiển thị', exact: true }).check();
+  const bar = region.locator('.shop-bulk-bar');
+  await expect(bar).toContainText('2 shop đã chọn');
+  await expect(bar).toContainText('1 ngoài bộ lọc');
+  await bar.locator('.shop-bulk-more > summary').click();
+  await bar.getByRole('button', { name: 'Tóm tắt', exact: true }).click();
+  const selected = region.getByRole('region', { name: 'Tóm tắt shop đã chọn', exact: true });
+  await expect(selected).toContainText(a.name);
+  await expect(selected).toContainText(b.name);
+  await expect(selected).not.toContainText(sandbox.name);
+  const download = page.waitForEvent('download');
+  await bar.getByRole('button', { name: 'Xuất trạng thái', exact: true }).click();
+  const exported = await download;
+  const csv = await import('node:fs/promises').then(fs => exported.path().then(path => fs.readFile(path!, 'utf8')));
+  expect(csv).toContain(a.scope.shopId);
+  expect(csv).toContain(b.scope.shopId);
+  expect(csv).not.toContain(sandbox.scope.shopId);
+  await bar.locator('.shop-bulk-more > summary').click();
+  await region.getByRole('searchbox', { name: 'Tìm kết nối shop', exact: true }).fill('');
+  await expect(region.getByRole('checkbox', { name: 'Chọn các shop đang hiển thị', exact: true })).toHaveJSProperty('indeterminate', true);
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+    expect(overflow, 'selected shop toolbar at ' + width).toBeLessThanOrEqual(1);
+  }
+  await bar.getByRole('button', { name: 'Bỏ chọn', exact: true }).click();
+  await expect(bar).not.toBeVisible();
+  await primary(page).getByRole('button', { name: 'Bộ listing', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Tìm listing', exact: true })).toBeVisible();
+  const controls = ['.library-search input', '.library-toolbar select', '.library-toolbar > button'];
+  const boxes = await Promise.all(controls.map(selector => page.locator(selector).boundingBox()));
+  expect(Math.max(...boxes.map(box => box!.y)) - Math.min(...boxes.map(box => box!.y))).toBeLessThanOrEqual(1);
+});
+
+
+test('selected shops hand off exact targets and require explicit archive source without writes', async ({ page }) => {
+  await page.goto(baseURL + '/?page=shops');
+  const region = page.getByRole('region', { name: 'Danh sách kết nối shop', exact: true });
+  const a = fixture.shops[0]!, b = fixture.shops[1]!;
+  await region.getByRole('checkbox', { name: new RegExp('^Chọn shop: ' + a.name) }).check();
+  await region.getByRole('checkbox', { name: new RegExp('^Chọn shop: ' + b.name) }).check();
+  const from = apiRequests.length;
+  await region.getByRole('button', { name: 'Chuẩn bị sao chép', exact: true }).click();
+  await expect(page).toHaveURL(/page=archives.*copyTargets=/);
+  const targets = JSON.parse(new URL(page.url()).searchParams.get('copyTargets')!);
+  expect(targets).toEqual([a, b].map(shop => ({ connectionId: shop.id, ...shop.scope })));
+  await expect(page.getByRole('heading', { name: 'Kho nguồn để sao chép', exact: true })).toBeVisible();
+  expect(apiRequests.slice(from).filter(request => request.method !== 'GET')).toEqual([]);
+  await primary(page).getByRole('button', { name: 'Shop', exact: true }).click();
+  await openWorkspaceTool(page, 'Kho sao chép');
+  await expect(page).not.toHaveURL(/copyTargets=/);
+  await expect(page.getByRole('region', { name: 'Shop đã chọn để chuẩn bị sao chép', exact: true })).toHaveCount(0);
+});
+
+
+test('bulk connection UI sends each reviewed shop once, holds sandbox and retains unknown outcomes', async ({ page }) => {
+  const a = fixture.shops[0]!, b = fixture.shops[1]!, sandbox = fixture.shops[2]!;
+  const writes: { id: string; action: string; body: unknown }[] = [];
+  await page.route('**/v1/connections/production?*', async route => {
+    const url = new URL(route.request().url());
+    const shop = [a, b].find(row => row.scope.shopId === url.searchParams.get('shopId'));
+    if (!shop) return route.continue();
+    await route.fulfill({ json: { connectionId: shop.id, ...shop.scope,
+      connectionRevision: 1, state: 'connected', refreshStatus: 'saved', refreshReason: null,
+      hasSavedKey: true, tokenExpiresAt: new Date(Date.now() + 3600000).toISOString(), officialName: shop.name } });
+  });
+  await page.route('**/v1/connections/*/check', async route => {
+    const id = new URL(route.request().url()).pathname.split('/')[3]!;
+    writes.push({ id, action: 'check', body: route.request().postDataJSON() });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    await route.fulfill({ json: { kind: id === a.id ? 'success' : 'unknown' } });
+  });
+  await page.goto(baseURL + '/?page=shops');
+  const region = page.getByRole('region', { name: 'Danh sách kết nối shop', exact: true });
+  await region.getByRole('checkbox', { name: 'Chọn các shop đang hiển thị', exact: true }).check();
+  await region.getByRole('button', { name: 'Kiểm tra kết nối', exact: true }).click();
+  const actions = page.getByRole('region', { name: 'Thao tác kết nối đã chọn', exact: true });
+  expect(writes).toEqual([]);
+  await expect(actions.getByRole('list', { name: 'Các bước thao tác nhóm' })).toContainText('Xem trước');
+  await expect(actions.locator('[aria-current=step]')).toHaveText('1Xem trước');
+  await actions.getByRole('button', { name: 'Xem trước 3 shop', exact: true }).click();
+  await expect(actions).toContainText('3 shop · 2 đủ điều kiện');
+  await expect(actions).toContainText('Giữ riêng shop thử nghiệm');
+  const run = actions.getByRole('button', { name: 'Kiểm tra 2 shop', exact: true });
+  await run.dblclick();
+  await expect(actions).toContainText('Đã kết thúc nhóm thao tác');
+  await expect(actions.locator('[aria-current=step]')).toHaveText('3Kết quả');
+  expect(writes).toEqual(expect.arrayContaining([a,b].map(shop => ({id: shop.id, action: 'check', body: {expectedRevision: 1}}))));
+  expect(writes).toHaveLength(2);
+  expect(writes.some(row => row.id === sandbox.id)).toBe(false);
+  await expect(actions).toContainText('Chưa rõ kết quả');
+  await expect(actions.getByText(a.name, { exact: true })).not.toBeVisible();
+  const results = actions.locator('details').filter({ has: page.locator('summary', { hasText: 'Xem toàn bộ kết quả' }) }).first();
+  await expect(results).not.toHaveAttribute('open', '');
+  await results.locator('summary').first().click();
+  await expect(actions.getByText(a.name, { exact: true })).toBeVisible();
+  await expect(actions.getByText('Shopee xác nhận quyền truy cập ở lần kiểm tra này.', { exact: true })).not.toBeVisible();
+  await results.locator('.bulk-connections__row').filter({ hasText: a.name }).locator('summary').click();
+  await expect(actions.getByText('Shopee xác nhận quyền truy cập ở lần kiểm tra này.', { exact: true })).toBeVisible();
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  }
+  await region.getByRole('button', { name: 'Bỏ chọn', exact: true }).click();
+  await expect(actions).toContainText(b.name);
+  await expect(actions).toContainText('Chưa rõ kết quả');
+});
+
+
+test('a saved connection change in another tab updates overview without reloading or waiting for polling', async ({page}) => {
+  await control('second-shop-unknown');
+  await page.goto(baseURL + '/?page=overview');
+  await expect(page.locator('.operations-connection-row').filter({hasText:fixture.shops[1]!.name})).toBeVisible();
+  const other = await page.context().newPage();
+  try {
+    await other.goto(baseURL + '/?page=shops');
+    await other.getByRole('button',{name:new RegExp(fixture.shops[1]!.name + ' · Shop')}).click();
+    await other.getByText('Chỉnh tên gợi nhớ trong ứng dụng',{exact:true}).click();
+    await other.getByLabel('Tên gợi nhớ trong ứng dụng').fill('Kết nối vừa cập nhật QA');
+    const update = page.waitForResponse(reply => new URL(reply.url()).pathname === '/v1/operations/overview',{timeout:5000});
+    await other.getByRole('button',{name:'Lưu tên gợi nhớ',exact:true}).click();
+    await update;
+    await expect(page.locator('.operations-connection-row').filter({hasText:'Kết nối vừa cập nhật QA'})).toBeVisible();
+    await expect(page).toHaveURL(/page=overview/);
+    await other.getByLabel('Tên gợi nhớ trong ứng dụng').fill(fixture.shops[1]!.name);
+    await other.getByRole('button',{name:'Lưu tên gợi nhớ',exact:true}).click();
+    await expect(other.getByText('Đã lưu tên gợi nhớ trong ứng dụng.',{exact:true})).toBeVisible();
+  } finally {await other.close();}
+});
+
+test('the journey and workload actions open the correct tab and retain exact shop scope across reload', async ({page}) => {
+  await page.goto(baseURL + '/?page=overview');
+  await expect(page.getByText('Một phần dữ liệu chưa đọc được.',{exact:false})).not.toBeVisible();
+  const second = fixture.shops[1]!;
+  await page.getByRole('combobox',{name:/^Phạm vi công việc/}).selectOption(JSON.stringify(second.scope));
+  await expect(heldMetric(page)).toHaveText('2');
+  await page.getByRole('navigation',{name:'Quy trình đăng hàng'}).getByRole('button',{name:/3. Chuẩn bị/}).click();
+  await expect(page.getByRole('tab',{name:'Chuẩn bị lô mới'})).toHaveAttribute('aria-selected','true');
+  await expect(page.getByLabel('Đăng vào shop',{exact:true})).toHaveValue(key(second));
+  await primary(page).getByRole('button',{name:'Tổng quan',exact:true}).click();
+  await page.getByRole('combobox',{name:/^Phạm vi công việc/}).selectOption(JSON.stringify(second.scope));
+  await expect(heldMetric(page)).toHaveText('2');
+  await page.getByRole('button',{name:/^Xem nguồn cần bổ sung:/}).click();
+  await expect(page).toHaveURL(/work=all/);
+  await expect(page.getByRole('tab',{name:'Chuẩn bị lô mới'})).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('.preparation-history')).toHaveAttribute('open','');
+  await expect(page.locator('.preparation-history')).toContainText('Bản kiểm tra đã lưu (2)');
+  await page.reload();
+  await expect(page.getByLabel('Đăng vào shop',{exact:true})).toHaveValue(key(second));
+  await expect(page.locator('.preparation-history')).toHaveAttribute('open','');
+  await expect(page.locator('.preparation-history')).toContainText('Bản kiểm tra đã lưu (2)');
+  expect(apiRequests.filter(request => request.method !== 'GET' && request.path.startsWith('/v1/production-'))).toEqual([]);
 });

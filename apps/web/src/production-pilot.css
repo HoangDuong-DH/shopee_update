@@ -117,7 +117,7 @@
 }
 .production-batch-row-status svg {
   vertical-align: middle;
-  color: #497052;
+  color: var(--text-secondary);
 }
 .production-batch-actions {
   display: flex;
@@ -193,9 +193,9 @@
   align-items: center;
   gap: 24px;
   padding: 20px 24px;
-  border: 1px solid #dacfc3;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fffaf4;
+  background: var(--warning-soft);
 }
 .production-pilot-shop {
   display: flex;
@@ -232,7 +232,7 @@
   margin: 22px 0 14px;
 }
 .production-pilot-status svg {
-  color: #64736c;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 .production-pilot-status span {
@@ -246,7 +246,7 @@
 }
 .production-pilot-card {
   min-width: 0;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 22px;
@@ -264,7 +264,7 @@
   place-items: center;
   border-radius: 8px;
   overflow: hidden;
-  background: #f3f4f2;
+  background: var(--surface-soft);
   border: 1px solid var(--line);
   color: var(--muted);
 }
@@ -288,18 +288,18 @@
   display: inline-block;
   font-size: 12px;
   font-weight: 600;
-  background: #eff2f3;
-  color: #465565;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
   border-radius: 5px;
   padding: 4px 9px;
 }
 .production-pilot-badge.is-verified {
-  background: #e9f4eb;
-  color: #276c39;
+  background: var(--success-soft);
+  color: var(--success);
 }
 .production-pilot-badge.is-attention {
-  background: #fff2df;
-  color: #79501a;
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 .production-pilot-facts {
   display: flex;
@@ -325,21 +325,21 @@
 .production-pilot-notice {
   padding: 14px 17px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   border-radius: 7px;
 }
 .production-pilot-notice.is-error,
 .production-pilot-notice.is-attention {
-  background: #fff7e9;
-  border-color: #e9d4ae;
-  color: #775021;
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
 .production-pilot-card-message {
   margin: 18px 0 0;
   padding: 12px 14px;
-  background: #fff7e9;
-  border-left: 3px solid #bc904f;
-  color: #775021;
+  background: var(--warning-soft);
+  border-left: 3px solid var(--warning-border);
+  color: var(--warning);
 }
 .production-pilot-receipts {
   display: flex;
@@ -357,7 +357,7 @@
   padding: 13px 0 0;
   cursor: pointer;
   font-weight: 600;
-  color: #4a5b53;
+  color: var(--text-secondary);
 }
 .production-pilot-table-scroll {
   max-width: 100%;
@@ -376,8 +376,8 @@
   border-bottom: 1px solid var(--line);
 }
 .production-pilot-table-scroll thead th {
-  background: #f5f7f5;
-  color: #58675e;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 .production-pilot-table-scroll tbody th {
@@ -424,7 +424,7 @@
 }
 .production-pilot-history article {
   padding: 17px;
-  background: #fafaf8;
+  background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
   margin-bottom: 12px;
@@ -458,7 +458,7 @@
   margin: 16px auto 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
 }
 .production-pilot-legacy > summary {
   padding: 16px 20px;
@@ -473,16 +473,16 @@
   margin: 0 0 20px;
 }
 .production-batch-filters button[aria-pressed='true'] {
-  border-color: var(--accent, #b54c31);
-  background: #fff1e9;
-  color: #963c25;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 .production-weight-review {
   grid-column: 1/-1;
   min-width: 0;
   width: 100%;
   padding: 18px;
-  background: #f7f8f5;
+  background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
@@ -554,7 +554,7 @@
   }
   .production-pilot-source-count {
     text-align: left;
-    border-top: 1px solid #eadfd1;
+    border-top: 1px solid var(--warning-border);
     padding-top: 12px;
   }
   .production-pilot-status {

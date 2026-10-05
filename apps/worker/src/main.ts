@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { transferRecoveryRequired } from '@shopee/persistence';
+if (transferRecoveryRequired()) throw new Error('TRANSFER_WORKER_HELD');
 import { hostname } from 'node:os';
 import { Pool, Repository, BlobStore, SandboxCreateTrialStore, runtimePoolConfig } from '@shopee/persistence';
 import { importNext } from './imports.js';

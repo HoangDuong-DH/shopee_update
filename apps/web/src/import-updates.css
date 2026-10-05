@@ -10,13 +10,13 @@
 .patch-workbook-use {
   padding: 14px;
   margin: 12px 0;
-  border: 1px solid #dce4d9;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .patch-workbook-targets {
   padding: 12px;
-  border: 1px solid #d9e3d4;
+  border: 1px solid var(--line);
   border-radius: 6px;
   margin: 12px 0;
 }
@@ -28,7 +28,7 @@
 }
 .patch-workbook-targets small {
   display: block;
-  color: #687864;
+  color: var(--text-secondary);
   margin-top: 4px;
   font-size: 12px;
 }
@@ -50,8 +50,8 @@
 }
 .patch-role-tags > span {
   font-size: 12px;
-  background: #e9f1e4;
-  color: #385c35;
+  background: var(--surface-inset);
+  color: var(--text);
   padding: 5px 7px;
   border-radius: 4px;
   display: flex;
@@ -69,7 +69,7 @@
   max-height: 580px;
   overflow: auto;
   margin-top: 16px;
-  border: 1px solid #dce3dc;
+  border: 1px solid var(--line);
   border-radius: 6px;
 }
 .patch-table {
@@ -81,13 +81,13 @@
 .patch-table th {
   position: sticky;
   top: 0;
-  background: #f1f5ef;
+  background: var(--surface-inset);
   text-align: left;
   padding: 12px 10px;
   z-index: 1;
   font-size: 12px;
-  color: #4f6757;
-  border-bottom: 1px solid #cfd9cf;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
 }
 .patch-table th:first-child {
   width: 54px;
@@ -104,15 +104,15 @@
 .patch-table td {
   padding: 10px;
   vertical-align: top;
-  border-bottom: 1px solid #e3e9e1;
+  border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
 }
 .patch-table td:nth-child(5) {
-  background: #f0f6ec;
+  background: var(--surface-inset);
 }
 .patch-table td small {
   display: block;
-  color: #69796b;
+  color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.4;
   margin-top: 3px;
@@ -139,8 +139,8 @@
   grid-template-columns: 1.4fr 1.2fr auto;
   gap: 10px;
   padding: 14px;
-  background: #f0f4ed;
-  border: 1px solid #d8e0d5;
+  background: var(--surface-inset);
+  border: 1px solid var(--line);
   border-radius: 6px;
   align-items: end;
   margin: 14px 0;
@@ -188,7 +188,7 @@
     clip-path: inset(50%);
   }
   .patch-table tr {
-    border: 1px solid #dce3dc;
+    border: 1px solid var(--line);
     border-radius: 6px;
     margin-bottom: 12px;
     padding: 10px;
@@ -203,7 +203,7 @@
   .patch-table td:before {
     content: attr(data-label);
     font-size: 11px;
-    color: #627460;
+    color: var(--text-secondary);
   }
   .patch-table td small {
     grid-column: 2;
@@ -228,22 +228,22 @@
 .patch-heading p,
 .patch-section > p,
 .patch-section .section-heading p {
-  color: #5e6b66;
+  color: var(--text-secondary);
   margin: 8px 0;
   line-height: 1.6;
 }
 .patch-local {
   flex-shrink: 0;
-  background: #e9eeeb;
-  color: #38594a;
+  background: var(--surface-inset);
+  color: var(--text);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 12px;
 }
 .patch-section,
 .patch-saved-list {
-  background: #fff;
-  border: 1px solid #dce2dd;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 24px;
   margin: 20px 0;
@@ -268,15 +268,15 @@
   display: flex !important;
   align-items: center;
   gap: 8px;
-  border: 1px solid #b6c1b9;
+  border: 1px solid var(--line);
   padding: 12px 14px;
   border-radius: 6px;
   cursor: pointer;
-  background: #f6f8f6;
+  background: var(--surface-soft);
   overflow: hidden;
 }
 .patch-file-button:focus-within {
-  outline: 3px solid #b85d3e;
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 .patch-file-button input {
@@ -289,8 +289,8 @@
 }
 .patch-empty {
   padding: 28px 16px;
-  background: #f6f8f6;
-  border: 1px dashed #ccd6ce;
+  background: var(--surface-soft);
+  border: 1px dashed var(--line);
   border-radius: 6px;
   text-align: center;
 }
@@ -302,7 +302,7 @@
   display: flex;
   gap: 12px;
   align-items: center;
-  border-top: 1px solid #e4e8e4;
+  border-top: 1px solid var(--line);
   padding: 12px 0;
 }
 .patch-file-list li > div {
@@ -318,7 +318,7 @@
 .patch-target small,
 .patch-saved-list small {
   display: block;
-  color: #637269;
+  color: var(--text-secondary);
   font-size: 12px;
   margin-top: 5px;
 }
@@ -353,13 +353,13 @@
   align-items: flex-start;
   gap: 10px !important;
   padding: 14px;
-  border: 1px solid #dae2db;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fafbf9;
+  background: var(--surface-soft);
 }
 .patch-target:has(input:checked) {
-  background: #eef4ed;
-  border-color: #859f8d;
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
 }
 .patch-target input {
   margin-top: 4px;
@@ -373,7 +373,7 @@
 .patch-media {
   margin-top: 22px;
   padding-top: 20px;
-  border-top: 1px solid #dfe5df;
+  border-top: 1px solid var(--line);
 }
 .patch-workbook > label {
   max-width: 650px;
@@ -381,7 +381,7 @@
 .patch-paragraphs {
   max-height: 380px;
   overflow: auto;
-  border: 1px solid #dbe1dd;
+  border: 1px solid var(--line);
   border-radius: 6px;
   margin: 14px 0;
 }
@@ -390,7 +390,7 @@
   grid-template-columns: 24px minmax(0, 1fr) 90px;
   gap: 12px;
   padding: 14px;
-  border-bottom: 1px solid #e5e9e5;
+  border-bottom: 1px solid var(--line);
   align-items: start;
 }
 .patch-paragraph:last-child {
@@ -406,7 +406,7 @@
 }
 .patch-paragraph-number {
   font-size: 12px;
-  color: #7b857e;
+  color: var(--muted);
 }
 .patch-paragraph > div label,
 .patch-filter-row .inline {
@@ -422,7 +422,7 @@
 }
 .patch-image-card {
   min-width: 0;
-  border: 1px solid #dce3dc;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 12px;
   display: grid;
@@ -433,7 +433,7 @@
   width: 100%;
   height: 150px;
   object-fit: contain;
-  background: #f3f5f2;
+  background: var(--surface-soft);
 }
 .patch-image-card > strong {
   overflow-wrap: anywhere;
@@ -447,7 +447,7 @@
 .patch-image-order > span {
   margin-right: auto;
   font-size: 12px;
-  color: #69766c;
+  color: var(--text-secondary);
 }
 .patch-image-order button {
   padding: 7px;
@@ -457,8 +457,8 @@
   gap: 10px !important;
   margin-top: 20px;
   padding: 14px;
-  background: #f7f6ee;
-  border: 1px solid #e7e1c6;
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
   border-radius: 6px;
 }
 .patch-layout input {
@@ -478,7 +478,7 @@
 }
 .patch-actions span {
   font-size: 12px;
-  color: #67786b;
+  color: var(--text-secondary);
 }
 .patch-issues {
   margin: 12px 0;
@@ -500,7 +500,7 @@
 }
 .patch-preview-targets span {
   font-size: 12px;
-  background: #eef2ed;
+  background: var(--surface-inset);
   border-radius: 4px;
   padding: 8px;
   overflow-wrap: anywhere;
@@ -509,7 +509,7 @@
   min-width: 200px;
 }
 .patch-operation {
-  border: 1px solid #d9e1da;
+  border: 1px solid var(--line);
   border-radius: 7px;
   margin-top: 14px;
   padding: 16px;
@@ -525,13 +525,13 @@
 }
 .patch-operation-title > span {
   font-size: 12px;
-  color: #657966;
+  color: var(--text-secondary);
 }
 .patch-operation-title small {
   display: block;
   margin: 5px 0;
   font-size: 12px;
-  color: #65746a;
+  color: var(--text-secondary);
 }
 .patch-before-after {
   display: grid;
@@ -542,17 +542,17 @@
 .patch-before-after > div {
   min-width: 0;
   padding: 14px;
-  background: #f5f7f4;
+  background: var(--surface-soft);
   border-radius: 4px;
 }
 .patch-before-after > div:last-child {
-  background: #edf4ec;
+  background: var(--surface-inset);
 }
 .patch-before-after small {
   display: block;
   margin-bottom: 10px;
   font-size: 12px;
-  color: #607364;
+  color: var(--text-secondary);
 }
 .patch-value-image {
   width: 120px;
@@ -579,13 +579,13 @@
 }
 .patch-operation details {
   font-size: 12px;
-  color: #627168;
+  color: var(--text-secondary);
 }
 .patch-operation details p {
   overflow-wrap: anywhere;
 }
 .patch-unset {
-  color: #717c72;
+  color: var(--muted);
   font-size: 13px;
 }
 .patch-save {
@@ -597,21 +597,21 @@
 .patch-save > small,
 .patch-local-note {
   font-size: 12px;
-  color: #657268;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 .patch-receipt-note {
   padding: 14px;
-  background: #e7f1e5;
+  background: var(--surface-inset);
   border-radius: 6px;
-  color: #325837;
+  color: var(--text);
 }
 .patch-saved-list article {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-top: 1px solid #dfe5df;
+  border-top: 1px solid var(--line);
   padding: 14px 0;
 }
 .patch-saved-list article > div {
@@ -624,7 +624,7 @@
 .patch-execution-limits {
   margin-top: 20px;
   padding: 12px;
-  background: #f7f3e7;
+  background: var(--warning-soft);
   border-radius: 6px;
   font-size: 13px;
 }
@@ -639,7 +639,7 @@
   margin-top: 16px;
 }
 .patch-role-order {
-  border: 1px solid #dfe5df;
+  border: 1px solid var(--line);
   padding: 14px;
   border-radius: 6px;
   min-width: 0;
@@ -681,11 +681,11 @@
 .import-updates input:focus-visible,
 .import-updates select:focus-visible,
 .import-updates summary:focus-visible {
-  outline: 3px solid #b86242;
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .patch-advanced {
-  border-top: 1px solid #dde3dc;
+  border-top: 1px solid var(--line);
   margin-top: 18px;
   padding-top: 14px;
 }

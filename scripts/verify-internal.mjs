@@ -1,3 +1,4 @@
+import { buildEnvironment } from './onboarding-core.mjs';
 import { spawnSync } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -105,7 +106,7 @@ async function main() {
   for (const [name, ...args] of buildCommands(output, options.browser)) {
     console.log(`\nChecking ${name}`);
     const started = Date.now();
-    const result = spawnSync(process.execPath, args, { cwd: root, env, stdio: 'inherit', windowsHide: true });
+    const result = spawnSync(process.execPath, args, { cwd: root, env: name === 'build-web' ? buildEnvironment(env) : env, stdio: 'inherit', windowsHide: true });
     results.push({ name, exitCode: result.status, signal: result.signal, spawnError: result.error?.code ?? null, durationMs: Date.now() - started });
     // Save progress after each step, including the first failure. Never include environment/credentials.
     await writeFile(resolve(output, 'verification.json'), JSON.stringify({ startedAt, observedAt: new Date().toISOString(),

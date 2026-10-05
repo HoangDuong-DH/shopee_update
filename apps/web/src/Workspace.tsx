@@ -1,3 +1,4 @@
+import { readProductionWorkFilter, type ProductionWorkFilter } from './operations-presentation.js';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -10,6 +11,8 @@ import {
   Store,
   CircleHelp,
   Gauge,
+  SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import type {
   ChangePlan,
@@ -21,6 +24,7 @@ import type {
 import { api, date, RequestError, type ImportRecord } from './api.js';
 import type { EditorSeed } from './Editor.js';
 import { ShopConnectionsOverview } from './ShopConnectionsOverview.js';
+import { buildArchiveCopyPreparationUrl } from './archive-copy-selection.js';
 import {
   productionShopKey as savedShopKey,
   resolveExplicitProductionShop,
@@ -28,6 +32,8 @@ import {
 import { OperationsCenter } from './OperationsCenter.js';
 import { deriveDraftSourceImportIds } from './editor-source-scope.js';
 import './product-theme.css';
+import { AppearanceControl } from './AppearanceControl.js';
+import './workspace-shell.css';
 import {
   readWorkspacePage,
   readWorkspaceDraftRoute,
@@ -161,6 +167,8 @@ function applyWorkspaceReset(status: { workspaceResetId?: string }) {
   }
 }
 function restoredProductionView(): 'working' | 'new' {
+  const stage = new URLSearchParams(window.location.search).get('stage');
+  if (stage === 'prepare' || stage === 'working') return stage === 'prepare' ? 'new' : 'working';
   try {
     return sessionStorage.getItem('workspace-production-view') === 'new' ? 'new' : 'working';
   } catch {
@@ -204,6 +212,7 @@ export default function Workspace() {
     [status, setStatus] = useState<{
       worker: string;
       isolatedMode?: boolean;
+      transferReadOnly?: boolean;
       productionBatchWorkflow?: { enabled: boolean };
     } | null>(null),
     [loadError, setLoadError] = useState(''),
@@ -247,6 +256,7 @@ export default function Workspace() {
   const [intakeSessionNotice, setIntakeSessionNotice] = useState('');
   const [showLegacyPrepared, setShowLegacyPrepared] = useState(false);
   const [productionBatchVersion, setProductionBatchVersion] = useState(0);
+  const [productionWorkFilter, setProductionWorkFilter] = useState<ProductionWorkFilter>(() => readProductionWorkFilter(window.location.search));
   const [productionView, setProductionView] = useState<'working' | 'new'>(restoredProductionView);
   const [productionShopKey, setProductionShopKey] = useState(() => {
     const query = new URLSearchParams(window.location.search);
@@ -265,15 +275,55 @@ export default function Workspace() {
     revision: number;
   } | null>(null);
   const [unavailableConnectionId, setUnavailableConnectionId] = useState<string | null>(null);
+  const [archiveRouteSearch, setArchiveRouteSearch] = useState(() => window.location.search);
+  const [connectionBatchBusy, setConnectionBatchBusy] = useState(false);
   const [routeSearch, setRouteSearch] = useState(() => window.location.search);
   const [routeBusy, setRouteBusy] = useState(false),
     [routeError, setRouteError] = useState(''),
     [routeRetry, setRouteRetry] = useState(0);
   const [editorHydrating, setEditorHydrating] = useState(false);
+  useEffect(() => {
+    if (page !== 'prepared-batches') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('work', productionWorkFilter);
+    url.searchParams.set('stage', productionView === 'new' ? 'prepare' : 'working');
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    setRouteSearch(url.search);
+  }, [page, productionWorkFilter, productionView]);
+
   const toolsDisclosure = useRef<HTMLDetailsElement>(null);
   const navigationHistory = useRef(true);
   useEffect(() => {
-    if (toolsDisclosure.current) toolsDisclosure.current.open = false;
+    const closeTools = () => {
+      const tools = toolsDisclosure.current;
+      if (!tools?.open) return;
+      const hadFocus = tools.contains(document.activeElement);
+      tools.open = false;
+      if (hadFocus) tools.querySelector('summary')?.focus();
+    };
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !toolsDisclosure.current?.contains(event.target))
+        closeTools();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && toolsDisclosure.current?.open) {
+        event.preventDefault();
+        closeTools();
+      }
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, []);
+  useEffect(() => {
+    if (toolsDisclosure.current?.open) {
+      const hadFocus = toolsDisclosure.current.contains(document.activeElement);
+      toolsDisclosure.current.open = false;
+      if (hadFocus) toolsDisclosure.current.querySelector('summary')?.focus();
+    }
     try {
       sessionStorage.setItem('workspace-page', page);
       sessionStorage.setItem('workspace-production-view', productionView);
@@ -371,6 +421,7 @@ export default function Workspace() {
             worker: string;
             workspaceResetId?: string;
             isolatedMode?: boolean;
+            transferReadOnly?: boolean;
             productionBatchWorkflow?: { enabled: boolean };
           }>('/v1/status', options),
       };
@@ -600,6 +651,10 @@ export default function Workspace() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty, uploadBusy, saveBusy, folderBusy, folderDirty]);
   function go(next: Page) {
+    if (connectionBatchBusy && next !== page) {
+      setError('Đang xử lý yêu cầu. Đợi kết quả hoàn tất trước khi chuyển màn hình; với nhóm kết nối, có thể bỏ các shop chưa gửi khỏi hàng chờ.');
+      return false;
+    }
     if ((saveBusy || folderBusy || openingBatchRef.current) && next !== page) return false;
     if (uploadBusy && next !== page) {
       setError('Đang nhập tệp. Đợi tải xong để xem đủ kết quả trước khi chuyển màn hình.');
@@ -612,8 +667,16 @@ export default function Workspace() {
     setError('');
     setPendingPage(null);
     if (next === 'folder') setFolderStarted(true);
+    if (next !== 'archives') setArchiveRouteSearch('');
     setPage(next);
     return true;
+  }
+  function prepareArchiveCopy(targets: ShopConnection[]) {
+    if (!go('archives')) return;
+    const route = buildArchiveCopyPreparationUrl(targets);
+    window.history.pushState({}, '', route);
+    setRouteSearch(window.location.search);
+    setArchiveRouteSearch(window.location.search);
   }
   function openConnection(
     id: string | null,
@@ -642,7 +705,7 @@ export default function Workspace() {
       const next = readWorkspacePage(window.location.search, null);
       const changedRoute = window.location.search !== routeSearch;
       if (next === livePage.current && !changedRoute) return;
-      if (dirty || folderDirty || saveBusy || uploadBusy || folderBusy || openingBatchRef.current) {
+      if (connectionBatchBusy || dirty || folderDirty || saveBusy || uploadBusy || folderBusy || openingBatchRef.current) {
         const source =
           livePage.current === 'editor' && editor?.productKey
             ? { productKey: editor.productKey, revision: editor.expectedRevision }
@@ -662,6 +725,7 @@ export default function Workspace() {
       }
       navigationHistory.current = false;
       setRouteSearch(window.location.search);
+      setArchiveRouteSearch(next === 'archives' ? window.location.search : '');
       const query = new URLSearchParams(window.location.search);
       if (next === 'shops')
         setConnectionDetail(
@@ -670,6 +734,8 @@ export default function Workspace() {
             : (query.get('connectionId') ?? undefined),
         );
       if (next === 'prepared-batches') {
+        setProductionWorkFilter(readProductionWorkFilter(window.location.search));
+        setProductionView(restoredProductionView());
         const partner = query.get('partnerId'),
           shop = query.get('shopId');
         setProductionShopKey(
@@ -689,6 +755,7 @@ export default function Workspace() {
     saveBusy,
     uploadBusy,
     folderBusy,
+    connectionBatchBusy,
     routeSearch,
     editor?.productKey,
     editor?.expectedRevision,
@@ -897,8 +964,21 @@ export default function Workspace() {
     : ['preview', 'editor'].includes(page)
       ? 'products'
       : page;
+  const pageLabel =
+    [...navigation, ...secondaryNavigation].find((item) => item.id === page)?.label ??
+    (
+      {
+        folder: 'Nhập bộ nguồn',
+        import: 'Nhập listing',
+        editor: 'Chỉnh sửa listing',
+        preview: 'Xem trước listing',
+        handoff: 'Nhận bộ bàn giao',
+        results: 'Kết quả',
+      } as Partial<Record<Page, string>>
+    )[page] ??
+    'Không gian làm việc';
   return (
-    <div className="app-shell">
+    <div className="app-shell focused-workspace">
       <a className="skip-link" href="#workspace-main">
         Đến nội dung chính
       </a>
@@ -924,36 +1004,54 @@ export default function Workspace() {
               className={parent === id ? 'active' : ''}
               onClick={() => go(id)}
             >
-              <Icon size={17} />
+              <Icon size={17} aria-hidden="true" />
               {label}
             </button>
           ))}
         </nav>
-        <details
-          className="workspace-tools"
-          ref={toolsDisclosure}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape' && toolsDisclosure.current) {
-              toolsDisclosure.current.open = false;
-              toolsDisclosure.current.querySelector('summary')?.focus();
-            }
-          }}
-        >
-          <summary>Công cụ</summary>
-          <nav aria-label="Công cụ bổ sung">
-            {secondaryNavigation.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => go(id)}
-                aria-current={page === id ? 'page' : undefined}
-              >
-                <Icon size={17} />
-                {label}
-              </button>
-            ))}
-          </nav>
-        </details>
+        <p className="workspace-rail-caption">
+          Nguồn rõ ràng.
+          <br />
+          Kết quả có đối chiếu.
+        </p>
       </header>
+      <div className="workspace-toolbar">
+        <div className="workspace-location">
+          <span>Không gian làm việc</span>
+          <strong>{pageLabel}</strong>
+        </div>
+        <div className="workspace-controls">
+          <AppearanceControl />
+          <details
+            className="workspace-tools"
+            ref={toolsDisclosure}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && toolsDisclosure.current) {
+                toolsDisclosure.current.open = false;
+                toolsDisclosure.current.querySelector('summary')?.focus();
+              }
+            }}
+          >
+            <summary>
+              <SlidersHorizontal size={16} aria-hidden="true" />
+              Công cụ
+              <ChevronDown className="workspace-tools-chevron" size={14} aria-hidden="true" />
+            </summary>
+            <nav aria-label="Công cụ bổ sung">
+              {secondaryNavigation.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => go(id)}
+                  aria-current={page === id ? 'page' : undefined}
+                >
+                  <Icon size={17} aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </details>
+        </div>
+      </div>
       <div className="environment-bar">
         <span>
           <span className={'dot ' + (status?.worker === 'online' ? 'online' : '')} />
@@ -961,6 +1059,8 @@ export default function Workspace() {
             ? 'Tình trạng hệ thống chưa được cập nhật'
             : loading
               ? 'Đang đọc tình trạng hệ thống…'
+              : status?.worker === 'held'
+                ? 'Công việc được giữ tạm dừng sau chuyển máy'
               : status?.worker === 'online'
                 ? 'Bộ đọc nguồn đang hoạt động'
                 : status?.worker === 'offline'
@@ -982,8 +1082,14 @@ export default function Workspace() {
       </div>
       <main
         id="workspace-main"
+        tabIndex={-1}
         className={'workspace-main' + (page === 'sources' ? ' source-home-main' : '')}
       >
+        {status?.transferReadOnly && (
+          <div role="status" className="banner warning">
+            <span>Dữ liệu đã chuyển máy · Đang xem để kiểm tra. Các thao tác sửa và chạy công việc tạm khóa.</span>
+          </div>
+        )}
         {uploadProgress}
         {intakeSessionNotice && (
           <p role="status" className="context-note">
@@ -1115,11 +1221,12 @@ export default function Workspace() {
             >
               {page === 'overview' && (
                 <OperationsCenter
-                  onNavigate={(next, scope) => {
+                  onNavigate={(next, scope, action) => {
                     if (scope?.environment === 'production')
                       setProductionShopKey(scope.partnerId + ':' + scope.shopId);
                     if (next === 'production') {
-                      setProductionView('working');
+                      setProductionView(action?.view ?? 'working');
+                      setProductionWorkFilter(action?.filter ?? 'active');
                       go('prepared-batches');
                     } else go(next);
                   }}
@@ -1129,7 +1236,7 @@ export default function Workspace() {
               )}
               {page === 'prepared-batches' && (
                 <>
-                  <section className="panel" aria-label="Shop đích đang chọn">
+                  <section className="panel production-shop-context" aria-label="Shop đích đang chọn">
                     <label htmlFor="production-target-shop">
                       <strong>Đăng vào shop</strong>
                     </label>
@@ -1167,16 +1274,7 @@ export default function Workspace() {
                             </option>
                           ))}
                         </select>
-                        {selectedProductionShop && (
-                          <p className="caption">
-                            Shop đích:{' '}
-                            <strong>
-                              {selectedProductionShop.displayName || selectedProductionShop.name}
-                            </strong>{' '}
-                            · Shop ID {selectedProductionShop.scope.shopId} · Partner ID{' '}
-                            {selectedProductionShop.scope.partnerId}. Mỗi lô được khóa với shop này.
-                          </p>
-                        )}
+                        {selectedProductionShop && <details className="production-shop-identity"><summary>Thông tin kết nối</summary><p className="caption">Shop ID {selectedProductionShop.scope.shopId} · Partner ID {selectedProductionShop.scope.partnerId}. Mỗi lô được khóa với shop này.</p></details>}
                         {!selectedProductionShop && (
                           <p className="context-note">
                             Chọn shop đích để mở đúng đợt đã lưu. Ứng dụng không tự chọn một shop
@@ -1249,6 +1347,7 @@ export default function Workspace() {
                           selectedProductionShop?.displayName || selectedProductionShop?.name
                         }
                         active={productionView === 'working'}
+                        initialFilter={productionWorkFilter}
                         onImageQc={() => go('image-qc')}
                         onSource={(key) => void openLatestSource(key)}
                       />
@@ -1266,6 +1365,7 @@ export default function Workspace() {
                         key={productionShopKey}
                         initialProductKey={preparationSource?.productKey}
                         initialSourceRevision={preparationSource?.revision}
+                        showSavedPreparations={productionWorkFilter === 'all'}
                         targetScope={selectedProductionScope}
                         targetShopName={
                           selectedProductionShop?.displayName || selectedProductionShop?.name
@@ -1662,7 +1762,7 @@ export default function Workspace() {
                 </>
               )}
               {page === 'assistant' && <AssistantPanel plans={plans} />}
-              {page === 'archives' && <ShopArchive />}
+              {page === 'archives' && <ShopArchive key={archiveRouteSearch} routeSearch={archiveRouteSearch} onBusyChange={setConnectionBatchBusy} />}
               {page === 'guide' && (
                 <UsageGuide
                   onImport={() => startBatch()}
@@ -1687,6 +1787,8 @@ export default function Workspace() {
                         setProductionShopKey(savedShopKey(shop));
                     }}
                     onConnectShop={openConnection}
+                    onPrepareCopy={prepareArchiveCopy}
+                    onBatchBusyChange={setConnectionBatchBusy}
                     onRefresh={refresh}
                   />
                   {connectionDetail !== undefined && (

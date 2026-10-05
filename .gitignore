@@ -31,3 +31,16 @@ docs/handoffs/20*.md
 *.key
 # Deliberately curated fixtures can be tracked explicitly after reviewing their contents.
 tests/fixtures/private/
+
+# Generated deliveries and one-off scratch work
+outputs/
+tmp/
+
+# Portable transfer bundles and credential exports are private, even if copied into this checkout.
+PRIVATE_TRANSFER/
+REFERENCE_LIBRARY/
+*.dump
+app-key.json
+connection-keys.json
+original-app.env
+original-docker.env

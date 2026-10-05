@@ -1,3 +1,4 @@
+import { assertAcceptanceDatabase } from '../fixtures/acceptance-database.mjs';
 import { test, expect } from '@playwright/test';
 import { fork, type ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,7 +10,7 @@ import { zipSync } from 'fflate';
 import { openInputLibrary, openWorkspaceTool } from './workspace-navigation.js';
 let server: ChildProcess, baseURL: string, evidenceRoot: string, fixture: any;
 test.beforeAll(async () => {
-  if (process.env.INTERNAL_ISOLATED_MODE !== '1' || new URL(process.env.DATABASE_URL!).port !== '5443') throw Error('INTERNAL_ACCEPTANCE_ISOLATION_REQUIRED');
+  await assertAcceptanceDatabase();
   server = fork(resolve('tests/e2e/internal-acceptance-server.mts'), [], { execArgv: ['--import', './scripts/internal-network-guard.mjs', '--conditions=development', '--import', 'tsx'],
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: { ...process.env, TSX_TSCONFIG_PATH: resolve('apps/api/tsconfig.json') }, windowsHide: true } as any);
   baseURL = await new Promise((done, fail) => {
@@ -116,27 +117,40 @@ test('operator imports actual ZIP and Excel, edits a draft, prepares and runs a 
   await page.getByRole('tab', { name: 'Chuẩn bị lô mới', exact: true }).click();
   const preparation = page.getByRole('region', { name: 'Chuẩn bị đợt từ listing đã lưu', exact: true });
   await expect(preparation).toContainText(fixture.profile.name);
-  await expect(preparation).toContainText(fixture.scope.shopId);
   async function configurePreparation() {
+    await expect(page.getByLabel('Đăng vào shop', { exact: true })).toHaveValue(`${fixture.scope.partnerId}:${fixture.scope.shopId}`);
+    await expect(page.getByRole('region', { name: 'Shop đích đang chọn', exact: true })).toContainText(fixture.scope.shopId);
+    await preparation.getByRole('button', { name: '1. Chọn sản phẩm', exact: true }).click();
     await preparation.getByRole('checkbox', { name: /Xịt mũ bảo hiểm QA/ }).check();
+    await preparation.getByRole('button', { name: 'Tiếp tục · Bổ sung thông tin', exact: true }).click();
+    await expect(preparation.getByRole('button', { name: '2. Bổ sung thông tin', exact: true })).toHaveAttribute('aria-current', 'step');
     await preparation.getByRole('combobox', { name: 'Ngành hàng', exact: true }).selectOption(fixture.category.categoryId);
     await preparation.getByRole('combobox', { name: 'Thương hiệu', exact: true }).selectOption(fixture.category.brandId);
     await preparation.getByRole('combobox', { name: 'Tình trạng sản phẩm', exact: true }).selectOption('NEW');
     await preparation.getByLabel('Hàng đặt trước', { exact: true }).selectOption('no');
+    await preparation.locator('summary').filter({ hasText: /^Vận chuyển & kiện hàng$/ }).click();
     for (const dimension of ['Dài', 'Rộng', 'Cao']) await preparation.getByLabel(dimension + ' kiện hàng (cm)', { exact: true }).fill('12');
     await preparation.getByLabel(fixture.category.requiredAttribute.name, { exact: true }).selectOption(fixture.category.requiredAttribute.values[0].valueId);
+    await preparation.locator('summary').filter({ hasText: /^Kênh vận chuyển/ }).click();
     await preparation.getByRole('checkbox', { name: 'QA vận chuyển ' + fixture.profile.name, exact: true }).check();
-    await preparation.getByLabel('Tồn áp dụng cho 2 dòng SKU trong 1 listing đã chọn', { exact: true }).fill('100');
+    await preparation.getByLabel('Tồn đăng bán chung cho các SKU đã chọn', { exact: true }).fill('100');
     await preparation.getByRole('button', { name: 'Áp dụng 100 cho các dòng SKU đã chọn', exact: true }).click();
+    await preparation.locator('summary').filter({ hasText: /^Kho áp dụng/ }).click();
     await preparation.getByRole('button', { name: 'Chọn listing tham khảo kho', exact: true }).click();
     await preparation.getByRole('combobox', { name: 'Trạng thái listing tham khảo kho', exact: true }).selectOption('UNLIST');
     await preparation.getByRole('combobox', { name: 'Listing đang có tại shop', exact: true }).selectOption(fixture.referenceItemId);
     await expect(preparation).toContainText('Đã có đối chiếu kho cho đúng shop và các SKU đã chọn.');
+    await preparation.getByRole('button', { name: 'Tiếp tục · Kiểm tra', exact: true }).click();
+    await expect(preparation.getByRole('button', { name: '3. Kiểm tra', exact: true })).toHaveAttribute('aria-current', 'step');
+    await expect(preparation.getByRole('radio', { name: 'Đăng ẩn để QC', exact: true })).toBeChecked();
   }
   await configurePreparation();
   const heldReply = page.waitForResponse(reply => new URL(reply.url()).pathname === '/v1/production-preparations/preview');
   await preparation.getByRole('button', { name: 'Kiểm tra 1 listing đã chọn', exact: true }).click();
-  const held = await (await heldReply).json();
+  const heldResponse = await heldReply, heldScope = new URL(heldResponse.url()).searchParams;
+  expect(heldScope.get('partnerId')).toBe(fixture.scope.partnerId);
+  expect(heldScope.get('shopId')).toBe(fixture.scope.shopId);
+  const held = await heldResponse.json();
   expect(held).toMatchObject({ readyCount: 0, blockedCount: 1 });
   expect(held.entries[0]).toMatchObject({ productKey: edited.productKey, sourceRevision: edited.revision, kind: 'blocked' });
   expect(held.entries[0].issues).toHaveLength(1);

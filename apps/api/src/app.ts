@@ -1,3 +1,4 @@
+import { recoveryRequestBlocked } from '@shopee/persistence';
 import { ContentWorkbookService } from './content-workbook-service.js';
 import { ContentWorkbookController } from './content-workbook-controller.js';
 import 'reflect-metadata';
@@ -810,6 +811,8 @@ class AppController {
       productionWrites: false,
       listingExecutor: 'not_configured',
       statusScope: 'legacy_worker',
+      transferReadOnly: process.env.LISTINGSTUDIO_TRANSFER_READ_ONLY === '1',
+      workerHeld: process.env.LISTINGSTUDIO_TRANSFER_READ_ONLY === '1',
       isolatedMode: runtime.isolatedMode,
       operationsOverviewPath: '/v1/operations/overview',
       workspaceResetId: (await workspaceResetState())?.id,
@@ -822,7 +825,7 @@ class AppController {
         requiresPerBatchChecks: true,
       },
       sandboxTrialExecutor: 'bounded_synthetic_unlisted',
-      worker: r.rows[0].last_seen ? 'online' : 'offline',
+      worker: process.env.LISTINGSTUDIO_TRANSFER_READ_ONLY === '1' ? 'held' : r.rows[0].last_seen ? 'online' : 'offline',
       version: '0.1.0',
       mode: 'internal',
     };
@@ -1063,6 +1066,7 @@ export async function createApp(
     trialPause?: () => Promise<void>;
     preparedGateway?: PreparedGateway;
     sellerKnowledge?: SellerKnowledgeService;
+    transferReadOnly?: boolean;
   } = {},
 ): Promise<NestFastifyApplication> {
   const contents = new ContentWorkbookService(repo, blobs);
@@ -1138,6 +1142,10 @@ export async function createApp(
     );
   adapter.getInstance().addHook('onRequest', async (req, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
+    if (options.transferReadOnly && recoveryRequestBlocked(req.method, req.url)) {
+      reply.status(423).send({ code: 'TRANSFER_REVIEW_REQUIRED' });
+      return;
+    }
     if (req.url.startsWith('/v1/connections') || req.url.startsWith('/v1/shops')) {
       reply.header('Cache-Control', 'no-store');
       reply.header('Referrer-Policy', 'no-referrer');

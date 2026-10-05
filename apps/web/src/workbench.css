@@ -19,7 +19,7 @@
   min-width: 230px;
 }
 .workbench-list {
-  border-top: 1px solid #dce1e8;
+  border-top: 1px solid var(--line);
 }
 .workbench-row {
   display: grid;
@@ -27,7 +27,7 @@
   align-items: center;
   gap: 24px;
   padding: 22px 0;
-  border-bottom: 1px solid #dce1e8;
+  border-bottom: 1px solid var(--line);
 }
 .workbench-identity {
   display: flex;
@@ -40,7 +40,7 @@
   width: 60px;
   height: 66px;
   object-fit: contain;
-  background: #fff;
+  background: var(--surface);
   flex: none;
   border-radius: 6px;
 }
@@ -50,7 +50,7 @@
 .workbench-source-picks small,
 .workbench-stocks small {
   display: block;
-  color: #64748b;
+  color: var(--muted);
   line-height: 1.5;
   margin-top: 4px;
   overflow-wrap: anywhere;
@@ -61,21 +61,21 @@
 }
 .workbench-problem strong {
   font-size: 14px;
-  color: #924c2a;
+  color: var(--warning);
 }
 .workbench-ready {
-  color: #2e7154 !important;
+  color: var(--success) !important;
 }
 .workbench-footnote {
   justify-content: space-between;
   padding: 18px 0;
-  color: #64748b;
+  color: var(--muted);
   font-size: 13px;
 }
 .workbench-create {
   padding: 24px;
-  background: #fff;
-  border: 1px solid #dce1e8;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 10px;
   margin-bottom: 24px;
 }
@@ -92,7 +92,7 @@
   gap: 12px;
   align-items: flex-start;
   padding: 12px;
-  background: #f7f8fa;
+  background: var(--surface-soft);
   border-radius: 6px;
 }
 .workbench-source-picks input,
@@ -128,8 +128,8 @@
 .workbench-settings,
 .workbench-exceptions {
   padding: 24px;
-  background: #fff;
-  border: 1px solid #dce1e8;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 10px;
 }
 .workbench-detail fieldset {
@@ -170,7 +170,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-top: 1px solid #eef0f4;
+  border-top: 1px solid var(--line);
   padding: 10px 0;
   gap: 16px;
 }
@@ -180,27 +180,27 @@
 .workbench-save {
   margin-top: 26px;
   padding-top: 20px;
-  border-top: 1px solid #e5e8ef;
+  border-top: 1px solid var(--line);
 }
 .workbench-save > span {
   display: flex;
   gap: 6px;
   align-items: center;
   font-size: 13px;
-  color: #64748b;
+  color: var(--muted);
 }
 .workbench-exceptions {
   align-self: start;
-  background: #fafafa;
+  background: var(--surface-soft);
 }
 .workbench-exceptions section + section {
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--line);
 }
 .workbench-exceptions h3 {
   font-size: 15px;
-  color: #924c2a;
+  color: var(--warning);
 }
 .workbench-issue {
   margin-bottom: 12px;
@@ -212,14 +212,14 @@
 .workbench-issue small {
   display: block;
   line-height: 1.6;
-  color: #64748b;
+  color: var(--muted);
 }
 .sandbox-review {
   margin-top: 30px;
   padding: 26px;
-  border: 1px solid #dce1e8;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 .sandbox-review h2 {
   margin-bottom: 8px;
@@ -236,7 +236,7 @@
 .sandbox-comparison > div {
   min-width: 0;
   padding: 16px;
-  background: #f6f7f9;
+  background: var(--surface-soft);
   border-radius: 6px;
   overflow-wrap: anywhere;
 }
@@ -248,7 +248,7 @@
 .sandbox-run {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #e5e8ef;
+  border-top: 1px solid var(--line);
 }
 .sandbox-confirm {
   display: flex;
@@ -273,7 +273,7 @@
   margin: 12px 0;
 }
 .sandbox-result dt {
-  color: #64748b;
+  color: var(--muted);
 }
 .sandbox-result dd {
   margin: 0;
@@ -291,7 +291,7 @@
 .sandbox-review th {
   text-align: left;
   padding: 9px;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--line);
 }
 .sandbox-review .table-scroll {
   overflow: auto;
@@ -319,17 +319,6 @@
   }
 }
 @media (max-width: 760px) {
-  .main-nav button {
-    white-space: normal;
-    flex: 1;
-    padding-inline: 6px;
-  }
-  .main-nav {
-    min-width: 0;
-  }
-  .main-nav button svg {
-    display: none;
-  }
   .workbench-tools,
   .workbench-actions {
     align-items: stretch;

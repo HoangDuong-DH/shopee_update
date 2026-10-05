@@ -1,3 +1,4 @@
+import { assertAcceptanceDatabase } from '../fixtures/acceptance-database.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -6,9 +7,7 @@ import react from '@vitejs/plugin-react';
 import { Pool, Repository, BlobStore, migrate } from '../../packages/persistence/src/index.js';
 import type { createApp as AppFactory } from '../../apps/api/src/app.js';
 import type { createInternalConnectedShop } from '../fixtures/internal-connected-shop.js';
-const target = new URL(process.env.DATABASE_URL ?? 'postgres://invalid/invalid');
-if (process.env.INTERNAL_ISOLATED_MODE !== '1' || target.hostname !== '127.0.0.1' || target.port !== '5443'
-  || target.pathname !== '/shopee_internal_test' || target.username !== 'shopee_internal') throw Error('INTERNAL_ACCEPTANCE_ISOLATION_REQUIRED');
+await assertAcceptanceDatabase();
 const projectRoot = process.cwd(), schema = 'internal_browser_' + randomUUID().replaceAll('-', '');
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${schema},public` });
@@ -132,7 +131,7 @@ process.on('disconnect', () => void close().then(() => process.exit(0)));
 try {
   await admin.query(`CREATE SCHEMA ${schema}`); await migrate(pool);
   const { createInternalConnectedShop } = await import('../fixtures/internal-connected-shop.js');
-  connected = await createInternalConnectedShop(repo, root, process.env.APP_ENCRYPTION_KEY!);
+  connected = await createInternalConnectedShop(repo, root, process.env.APP_ENCRYPTION_KEY!, projectRoot);
   if (workspaceMode) workspaceFixture = await seedWorkspaceFixture();
   const localFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {

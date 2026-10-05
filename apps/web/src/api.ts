@@ -1,3 +1,4 @@
+import { dataChangeResource, notifyWorkspaceDataChange } from './workspace-data-updates.js';
 export class RequestError extends Error {
   constructor(
     message: string,
@@ -155,6 +156,7 @@ const requestMessages: Record<string, string> = {
   INVALID_FILENAME: 'Tên tệp chưa hợp lệ. Kiểm tra lại tên tệp rồi chọn lại.',
   SOURCE_NOT_FOUND: 'Không tìm thấy nguồn đã chọn. Tải lại danh sách và chọn đúng tệp.',
   NOT_FOUND: 'Không tìm thấy dữ liệu này. Tải lại danh sách để mở bản hiện có.',
+  TRANSFER_REVIEW_REQUIRED: 'Dữ liệu vừa chuyển máy đang được bảo vệ. Bạn có thể xem; cần kiểm tra hồ sơ phục hồi trước khi sửa hoặc chạy công việc.',
   PRODUCTION_READ_ONLY: 'Shop thật hiện chỉ được đọc thông tin. Chưa thể gửi thay đổi lên Shopee.',
   SERVICE_UNAVAILABLE:
     'Ứng dụng chưa xử lý được yêu cầu. Phần đang nhập vẫn ở màn hình này; kiểm tra kết nối và thử lại.',
@@ -184,6 +186,8 @@ export async function api<T>(path: string, init?: ApiRequestInit): Promise<T> {
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     callerSignal?.removeEventListener('abort', cancel);
+    const resource = dataChangeResource(path, init?.method);
+    if (resource) notifyWorkspaceDataChange(resource);
   }
 }
 

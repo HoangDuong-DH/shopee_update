@@ -1,3 +1,4 @@
+import { useWorkspaceDataUpdates } from './useWorkspaceDataUpdates.js';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ArrowRight, FolderOpen, Plus, RefreshCw, Search } from 'lucide-react';
 import type { ListingDraft, LocalLibraryPage, LocalProductSummary } from '@shopee/domain';
@@ -84,6 +85,7 @@ export function ListingLibrary({
   useEffect(() => {
     if (reload) void load();
   }, [reload]);
+  useWorkspaceDataUpdates(() => load(), ['sources'], busy || blocked || selected.length > 0 || bulk !== null || rows.length > 40);
   const changed = () => setReload((value) => value + 1);
   async function openRow(row: LocalProductSummary) {
     if (openLock.current || row.archived) return;

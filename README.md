@@ -106,27 +106,24 @@ Các projection gọn phục vụ tìm kiếm và phân trang; raw observations,
 
 Phiên bản Node được ghim trong [`.node-version`](.node-version). PostgreSQL local dùng image `postgres:17.11-alpine`.
 
-## Khởi động tại máy
+## Nhận bàn giao và cài mới
+
+Bắt đầu tại **[Hướng dẫn nhận bàn giao](docs/onboarding/START_HERE.md)**. Nếu dùng Codex, mở repo rồi gửi [prompt lần đầu](docs/onboarding/CODEX_FIRST_RUN.md); Codex đọc đúng phần theo công việc, kiểm tra máy và thực thi bộ cài trong giới hạn quyền của bạn.
+
+Trên Windows, mở Docker Desktop và đợi Engine running, sau đó chạy **SETUP_LISTINGSTUDIO.cmd**. Bộ cài tìm Node phù hợp hoặc tải runtime portable từ nguồn chính thức có kiểm SHA; tạo cấu hình và database riêng, cài dependency theo lockfile, áp migration và build. Sau khi hoàn tất, chạy **START_LISTINGSTUDIO.cmd**; dùng **STOP_LISTINGSTUDIO.cmd** khi cần dừng đúng các tiến trình của bản cài này.
+
+Với Node đã cài:
 
 ```powershell
-git clone https://github.com/HoangDuong-DH/shopee_update.git
-cd shopee_update
-npm ci
-npm run setup:local
-docker compose --env-file .local/docker.env -f infra/local/compose.yaml up -d postgres
-npm run db:migrate
-npm run dev
+npm run onboarding:plan       # Chỉ kiểm tra, chưa đổi máy
+npm run onboarding:setup      # Cài mới có biên nhận, không đăng sản phẩm
+npm run onboarding:check      # Chẩn đoán an toàn, không in khóa
+npm run start:local           # Chạy bản đã setup, không tự bật đăng hàng
 ```
 
-Mở [http://127.0.0.1:5173](http://127.0.0.1:5173). Các dịch vụ mặc định:
+Cổng mặc định web 5173, API 4310, PostgreSQL 5442. Nếu máy đã dùng các cổng đó, chọn bộ cổng khác bằng `node scripts/bootstrap.mjs --apply --api-port 4431 --web-port 5274 --db-port 5444`; bộ cài không chiếm cổng hoặc ghi đè cấu hình/volume cũ. Khởi động không chạy migration lại. Chủ tài khoản cần cung cấp cấu hình Open Platform và hoàn tất cấp quyền shop khi sử dụng Shopee.
 
-| Dịch vụ    | Địa chỉ                 |
-| ---------- | ----------------------- |
-| Web        | `http://127.0.0.1:5173` |
-| API        | `http://127.0.0.1:4310` |
-| PostgreSQL | `127.0.0.1:5442`        |
-
-`npm run setup:local` tạo mật khẩu database và khóa mã hóa ngẫu nhiên khi máy chưa có cấu hình. Nếu `.env` đã tồn tại, script giữ nguyên tệp đó và không in secrets ra terminal.
+Clone hoặc ZIP mã nguồn không chứa database, tệp riêng hoặc kết nối shop. Muốn chuyển công việc hiện có, làm theo **[Chuyển dữ liệu và phục hồi](docs/onboarding/TRANSFER_AND_RECOVERY.md)**; giữ khóa giải mã riêng. Không chạy cài mới lên máy đang vận hành để “sửa” kết nối.
 
 ### Cấu hình quan trọng
 

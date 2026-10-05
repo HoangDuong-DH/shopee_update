@@ -7,14 +7,14 @@
   margin: 8px 0;
 }
 .tryout-heading > p {
-  color: #59646c;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 .tryout-notice,
 .tryout-alert {
   padding: 16px 20px;
-  border: 1px solid #e5c6a3;
-  background: #fff7e9;
+  border: 1px solid var(--warning-border);
+  background: var(--warning-soft);
   border-radius: 10px;
   margin: 18px 0;
   line-height: 1.55;
@@ -36,7 +36,7 @@
   padding: 12px 0;
 }
 .tryout-target span {
-  color: #606970;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 .tryout-steps {
@@ -48,19 +48,19 @@
   list-style: none;
 }
 .tryout-steps li {
-  border-top: 3px solid #d8dfe4;
+  border-top: 3px solid var(--line);
   padding-top: 12px;
-  color: #68727a;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 .tryout-steps li[aria-current] {
-  color: #a44429;
-  border-color: #b9472b;
+  color: var(--accent-ink);
+  border-color: var(--accent);
   font-weight: 600;
 }
 .tryout-panel {
-  background: white;
-  border: 1px solid #d8dfe4;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 24px;
   margin-top: 20px;
@@ -80,11 +80,11 @@
   gap: 8px;
   padding: 16px 0;
   margin-top: 12px;
-  border-bottom: 1px solid #e2e7ea;
+  border-bottom: 1px solid var(--line);
 }
 .tryout-current span,
 .tryout-help {
-  color: #647079;
+  color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -133,15 +133,15 @@
 }
 .tryout-diff > div {
   padding: 16px;
-  background: #f6f8f9;
-  border: 1px solid #dce2e6;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
   border-radius: 8px;
 }
 .tryout-diff > div:last-child {
-  background: #f1f7f2;
+  background: var(--surface-soft);
 }
 .tryout-diff span {
-  color: #67717a;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .tryout-diff p {
@@ -154,7 +154,7 @@
 }
 .tryout-outcome {
   padding: 16px;
-  background: #fff6e8;
+  background: var(--warning-soft);
   border-radius: 8px;
   margin: 20px 0;
 }
@@ -162,7 +162,7 @@
   margin-bottom: 0;
 }
 .tryout-outcome.is-verified {
-  background: #eaf4ed;
+  background: var(--success-soft);
 }
 .tryout-checks {
   display: grid;
@@ -171,7 +171,7 @@
   margin: 20px 0;
 }
 .tryout-checks dt {
-  color: #637079;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 .tryout-checks dd {
@@ -180,7 +180,7 @@
 }
 .tryout-receipt {
   margin-top: 24px;
-  color: #68727a;
+  color: var(--text-secondary);
   font-size: 13px;
   overflow-wrap: anywhere;
 }

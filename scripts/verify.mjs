@@ -1,3 +1,4 @@
+import { buildEnvironment } from './onboarding-core.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 const commands = [
@@ -20,7 +21,7 @@ await mkdir('.local', { recursive: true });
 for (const [name, ...args] of commands) {
   const start = Date.now();
   console.log('\nChecking ' + name);
-  const r = spawnSync(process.execPath, args, { stdio: 'inherit', windowsHide: true });
+  const r = spawnSync(process.execPath, args, { env: name === 'build-web' ? buildEnvironment(process.env) : process.env, stdio: 'inherit', windowsHide: true });
   results.push({ name, exitCode: r.status, durationMs: Date.now() - start });
   if (r.status !== 0) {
     process.exitCode = 1;

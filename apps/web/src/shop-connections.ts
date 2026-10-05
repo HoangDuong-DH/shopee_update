@@ -1,7 +1,7 @@
 import type { ShopConnection } from '@shopee/domain';
 
 export type ConnectionHealthView = {
-  code: 'saved' | 'checked' | 'expired' | 'unknown' | 'reauthorize' | 'waiting' | 'disconnected';
+  code: 'saved' | 'checked' | 'expired' | 'unknown' | 'reauthorize' | 'waiting' | 'disconnected' | 'stale' | 'expiring' | 'unverified';
   tone: 'neutral' | 'success' | 'warning' | 'danger';
   label: string;
   detail: string;
@@ -57,6 +57,12 @@ export function connectionHealthView(shop: ShopConnection, now = Date.now()): Co
         ? 'Lần kiểm tra chưa nhận được kết quả từ Shopee. Mở kết nối để đọc lại khi có thể.'
         : 'Hệ thống đang chờ điều kiện xử lý kết nối. Mở kết nối để xem việc cần làm.',
       actionLabel: 'Xem kết nối đang chờ', needsAttention: true };
+  if (!expiresAt)
+    return { ...base, code: 'unverified', tone: 'warning', label: 'Chưa xác minh', detail: 'Chưa có thời hạn token hợp lệ đã lưu. Mở đúng kết nối để xác minh; chưa thể coi lần kiểm tra trước là kết nối hiện tại.', actionLabel: 'Kiểm tra kết nối', needsAttention: true };
+  if (expiresAt && Date.parse(expiresAt) - now <= 10 * 60_000)
+    return { ...base, code: 'expiring', tone: 'warning', label: 'Sắp hết hạn', detail: 'Kết nối còn hạn nhưng sắp cần gia hạn. Mở kết nối để xem việc tiếp theo.', actionLabel: 'Gia hạn kết nối', needsAttention: true };
+  if (shop.refreshStatus === 'healthy' && checkedAt && (now - Date.parse(checkedAt) < 0 || now - Date.parse(checkedAt) > 15 * 60_000))
+    return { ...base, code: 'stale', tone: 'warning', label: 'Cần kiểm tra lại', detail: 'Lần kiểm tra đã lưu quá 15 phút hoặc có thời điểm chưa hợp lệ. Kết nối chưa được kiểm tra mới.', actionLabel: 'Kiểm tra kết nối', needsAttention: true };
   if (shop.refreshStatus === 'healthy' && checkedAt)
     return { ...base, code: 'checked', tone: 'success', label: 'Đã kiểm tra quyền truy cập',
       detail: 'Kết quả thuộc lần kiểm tra đã lưu bên dưới. Quyền đăng được kiểm tra tiếp trong từng thao tác.', actionLabel: 'Quản lý kết nối', needsAttention: false };

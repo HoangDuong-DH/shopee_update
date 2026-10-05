@@ -1,8 +1,8 @@
 .listing-folder-guide {
   margin: 0 0 26px;
-  border: 1px solid #dbe2df;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   overflow: hidden;
 }
 .listing-folder-guide > summary {
@@ -21,7 +21,7 @@
   outline-offset: -4px;
 }
 .listing-folder-guide > summary > svg:first-child {
-  color: #617c65;
+  color: var(--text-secondary);
   flex: none;
 }
 .listing-folder-guide h2 {
@@ -49,8 +49,8 @@
   gap: 24px;
 }
 .folder-guide-example {
-  background: #f7f9f6;
-  border: 1px solid #e2e8df;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 18px;
   min-width: 0;
@@ -60,7 +60,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  color: #405f48;
+  color: var(--text-secondary);
 }
 .folder-guide-root strong {
   overflow-wrap: anywhere;
@@ -68,7 +68,7 @@
 .folder-guide-root > span {
   flex-basis: 100%;
   padding-left: 28px;
-  color: #5d6d60;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .folder-guide-tree,
@@ -76,7 +76,7 @@
   list-style: none;
   margin: 12px 0 0 8px;
   padding: 0 0 0 17px;
-  border-left: 1px solid #cbd6c7;
+  border-left: 1px solid var(--line);
 }
 .folder-guide-tree li {
   position: relative;
@@ -89,7 +89,7 @@
   top: 12px;
   left: -18px;
   width: 12px;
-  border-top: 1px solid #cbd6c7;
+  border-top: 1px solid var(--line);
 }
 .folder-guide-tree li > div {
   display: flex;
@@ -99,10 +99,10 @@
 .folder-guide-tree svg {
   flex: none;
   margin-top: 3px;
-  color: #778677;
+  color: var(--muted);
 }
 .folder-guide-tree .folder-guide-folder > svg {
-  color: #67816a;
+  color: var(--muted);
 }
 .folder-guide-tree span,
 .folder-guide-tree strong {
@@ -110,12 +110,12 @@
 }
 .folder-guide-tree small {
   display: block;
-  color: #6c766e;
+  color: var(--text-secondary);
   font-size: 12px;
   margin: 2px 0 0 24px;
 }
 .folder-guide-caption {
-  color: #6c766e;
+  color: var(--text-secondary);
   font-size: 12px;
   margin: 18px 0 0;
 }
@@ -125,14 +125,14 @@
 .folder-guide-price {
   display: flex;
   gap: 12px;
-  border: 1px solid #dce5df;
-  background: #fafcf9;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
   padding: 15px;
   border-radius: 8px;
 }
 .folder-guide-price > svg {
   flex: none;
-  color: #507b5b;
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 .folder-guide-price > div {
@@ -164,7 +164,7 @@
   margin-bottom: 14px;
 }
 .folder-guide-steps li::marker {
-  color: #af492e;
+  color: var(--accent-ink);
   font-weight: 600;
 }
 .folder-guide-steps strong {

@@ -1,27 +1,16 @@
-import { mkdir, access, writeFile } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
-await mkdir('.local/data', { recursive: true });
-try {
-  await access('.env');
-  console.log('Existing .env preserved.');
-} catch {
-  const password = randomBytes(24).toString('hex');
-  const encryptionKey = randomBytes(32).toString('hex');
-  await writeFile(
-    '.env',
-    [
-      `DATABASE_URL=postgres://shopee:${password}@127.0.0.1:5442/shopee_uploader`,
-      'API_HOST=127.0.0.1',
-      'API_PORT=4310',
-      'WEB_PORT=5173',
-      'DATA_ROOT=.local/data',
-      'ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4310',
-      'SHOPEE_PRODUCTION_WRITES=false',
-      `APP_ENCRYPTION_KEY=${encryptionKey}`,
-      '',
-    ].join('\n'),
-    { flag: 'wx' },
-  );
-  await writeFile('.local/docker.env', `POSTGRES_PASSWORD=${password}\n`, { flag: 'wx' });
-  console.log('Local configuration created. Secrets were not printed.');
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isMain, setupLocal } from './onboarding-core.mjs';
+
+export { setupLocal };
+if (isMain(import.meta.url)) {
+  try {
+    if (process.argv.length > 2) throw Error('UNKNOWN_SETUP_ARGUMENT');
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+    console.log((await setupLocal(root)).message);
+  } catch (error) {
+    const code = /^[A-Z_]+$/.test(error.message) ? error.message : 'LOCAL_SETUP_FAILED';
+    console.error(`${code}: Configuration was preserved. Resolve the incomplete setup before retrying.`);
+    process.exitCode = 1;
+  }
 }

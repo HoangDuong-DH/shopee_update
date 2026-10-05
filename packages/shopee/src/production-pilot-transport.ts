@@ -219,7 +219,19 @@ const promotionCoverUpdateSchema = z.object({
     image_id_list: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,512}$/)).length(1),
   }).strict(),
 }).strict();
-const itemUpdateSchema = z.union([descriptionUpdateSchema, logisticsAndParentSkuUpdateSchema, promotionCoverUpdateSchema]);
+// A 1:1 cover is the first gallery entry. The scoped planner must bind fresh
+// gallery IDs and retain every trailing entry in its durable mutation permit.
+const squareCoverUpdateSchema = z.object({
+  item_id: z.number().int().positive().refine(Number.isSafeInteger),
+  image: z.object({
+    image_ratio: z.literal('1:1'),
+    image_id_list: z.array(z.string().regex(/^[A-Za-z0-9_-]{1,512}$/)).min(1).max(9),
+  }).strict(),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.image.image_id_list).size !== value.image.image_id_list.length)
+    context.addIssue({ code: 'custom', path: ['image', 'image_id_list'], message: 'Duplicate image' });
+});
+const itemUpdateSchema = z.union([descriptionUpdateSchema, logisticsAndParentSkuUpdateSchema, promotionCoverUpdateSchema, squareCoverUpdateSchema]);
 const credentialSchema = z
   .object({
     ...scopeSchema.shape,
