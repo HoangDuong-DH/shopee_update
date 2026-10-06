@@ -8,6 +8,7 @@ import { createServer, createConnection } from 'node:net';
 import { readOwnedConfiguration, runtimeEnvironment, inspectOwnedDatabase, assertNoLinks, buildIdentity, sourceIdentity } from './onboarding-core.mjs';
 
 import { readConnectionMaintenancePolicy } from './connection-maintenance-policy.mjs';
+import * as defaultSupervisor from './local-supervisor.mjs';
 const delay = ms => new Promise(done => setTimeout(done, ms));
 const normalized = value => String(value ?? '').replaceAll('\\', '/').toLowerCase();
 function commandMatches(command, line) {
@@ -157,7 +158,7 @@ export async function runLocalLauncher(action = 'start', options = {}) {
   const lock = resolve(root, '.local/onboarding/launch.lock');
   await assertNoLinks(runtimePath); await assertNoLinks(lock);
   return withRuntimeLock(lock, async () => {
-    const supervisor = adapters.supervisor ?? await import('./local-supervisor.mjs');
+    const supervisor = adapters.supervisor ?? defaultSupervisor;
     const readJsonEndpoint = adapters.json ?? json;
     const waitUntil = adapters.waitFor ?? waitFor;
     if (action === 'stop') await supervisor.disableLocalSupervisor(root);
