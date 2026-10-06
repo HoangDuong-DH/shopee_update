@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 
@@ -86,19 +87,19 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
     }
     if (!path.startsWith('/v1/')) return route.continue();
     if (path === '/v1/prepared-batches/context')
-      return route.fulfill({ json: { mode: 'unavailable', shops: [], batches: [] } });
+      return fulfillPagedProducts(route,{ json: { mode: 'unavailable', shops: [], batches: [] } });
     if (path === '/v1/production-pilot/status')
-      return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
-    if (path === '/v1/status') return route.fulfill({ json: { worker: 'online' } });
+      return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
+    if (path === '/v1/status') return fulfillPagedProducts(route,{ json: { worker: 'online' } });
     if (path === '/v1/workbench')
-      return route.fulfill({ json: { orders: [], sources: [], shops: [], execution: {} } });
+      return fulfillPagedProducts(route,{ json: { orders: [], sources: [], shops: [], execution: {} } });
     if (path === '/v1/input-library') {
       await held;
       if (failLibrary) {
         failLibrary = false;
-        return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+        return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
       }
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           priceBooks: books,
           batches: batches.map((batch) => ({
@@ -143,15 +144,15 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
       records.set(id, record);
       writes.push({ path, body: { filename, sha256: record.sha256 } });
       if (kind === 'xlsx') books.push({ ...record, rowCount: 1, sheetCount: 2, issueCount: 0 });
-      return route.fulfill({ json: record });
+      return fulfillPagedProducts(route,{ json: record });
     }
     if (path.startsWith('/v1/imports/'))
-      return route.fulfill({ json: records.get(path.split('/').at(-1)!) });
+      return fulfillPagedProducts(route,{ json: records.get(path.split('/').at(-1)!) });
     if (path === '/v1/input-batches' && method === 'POST') {
       const body = request.postDataJSON();
       writes.push({ path, body });
       if (options.rejectSave)
-        return route.fulfill({ status: 422, json: { code: 'INPUT_BATCH_PATH_INVALID' } });
+        return fulfillPagedProducts(route,{ status: 422, json: { code: 'INPUT_BATCH_PATH_INVALID' } });
       let saved = batches.find((batch) => batch.id === body.id);
       if (!saved) {
         saved = {
@@ -168,19 +169,19 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
         loseSave = false;
         return route.abort('connectionfailed');
       }
-      return route.fulfill({ json: saved });
+      return fulfillPagedProducts(route,{ json: saved });
     }
     if (path.startsWith('/v1/input-batches/')) {
       if (failSource) {
         failSource = false;
-        return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+        return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
       }
-      return route.fulfill({ json: batches.find((batch) => batch.id === path.split('/').at(-1)) });
+      return fulfillPagedProducts(route,{ json: batches.find((batch) => batch.id === path.split('/').at(-1)) });
     }
     if (path === '/v1/prepared-batches/template' && options.templateFailure)
-      return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+      return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
     if (path === '/v1/prepared-batches/template')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         body: Buffer.from('fixture-download-only'),
       });
@@ -196,9 +197,9 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
         '/v1/import-patches',
       ].includes(path)
     )
-      return route.fulfill({ json: [] });
+      return fulfillPagedProducts(route,{ json: [] });
     unexpected.push(`${method} ${path}`);
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
   return { writes, unexpected, pageErrors, release, batches };
 }

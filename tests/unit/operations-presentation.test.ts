@@ -127,7 +127,7 @@ describe('compact connection indicators', () => {
   it('uses authoritative reason codes and keeps unverified status distinct from expiry', () => {
     const expired = blocker({ code: 'CONNECTION_TOKEN_EXPIRED' });
     const unknown = blocker({ code: 'CONNECTION_TOKEN_UNKNOWN' });
-    expect(connectionIndicator([expired]).label).toBe('Hết hạn');
+    expect(connectionIndicator([expired]).label).toBe('Cần gia hạn');
     expect(connectionIndicator([expired, unknown]).label).toBe('Chưa xác minh');
     expect(connectionIndicator([blocker({ code: 'CONNECTION_TOKEN_MISSING' })]).label).toBe('Chưa cấp quyền');
     expect(connectionIndicator([blocker({ code: 'NEW_SERVER_REASON', message: 'Hết hạn' })])).toMatchObject({ label: 'Cần xử lý', icon: 'alert' });
@@ -139,7 +139,7 @@ describe('compact connection indicators', () => {
       blocker({ connectionId: 'c', code: 'CONNECTION_TOKEN_UNKNOWN' }),
     ]).connections;
     const before = structuredClone(groups);
-    expect(connectionIndicatorCounts(groups).map((row) => [row.indicator.label, row.count])).toEqual([['Hết hạn', 2], ['Chưa xác minh', 1]]);
+    expect(connectionIndicatorCounts(groups).map((row) => [row.indicator.label, row.count])).toEqual([['Cần gia hạn', 2], ['Chưa xác minh', 1]]);
     expect(groups).toEqual(before);
   });
 });

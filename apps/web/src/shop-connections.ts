@@ -49,8 +49,8 @@ export function connectionHealthView(shop: ShopConnection, now = Date.now()): Co
     return { ...base, code: 'disconnected', tone: 'neutral', label: 'Chưa kết nối',
       detail: 'Hoàn tất cấp quyền trước khi dùng dữ liệu hoặc chuẩn bị đăng vào shop này.', actionLabel: 'Kết nối shop', needsAttention: true };
   if (shop.state === 'token_expired' || (expiresAt && Date.parse(expiresAt) <= now))
-    return { ...base, code: 'expired', tone: 'warning', label: 'Token đã hết hạn',
-      detail: 'Mở kết nối để xem kết quả gia hạn; cấp quyền lại nếu được yêu cầu.', actionLabel: 'Gia hạn / cấp quyền lại', needsAttention: true };
+    return { ...base, code: 'expired', tone: 'warning', label: 'Cần gia hạn kết nối',
+      detail: 'Token truy cập cần được làm mới. Điều này không có nghĩa quyền shop đã hết; xem kết quả gia hạn tại đây.', actionLabel: 'Xem gia hạn', needsAttention: true };
   if (shop.refreshStatus === 'waiting')
     return { ...base, code: 'waiting', tone: 'warning', label: 'Đang chờ kiểm tra / gia hạn',
       detail: shop.refreshReason === 'SHOP_CHECK_TEMPORARILY_UNAVAILABLE'
@@ -60,7 +60,7 @@ export function connectionHealthView(shop: ShopConnection, now = Date.now()): Co
   if (!expiresAt)
     return { ...base, code: 'unverified', tone: 'warning', label: 'Chưa xác minh', detail: 'Chưa có thời hạn token hợp lệ đã lưu. Mở đúng kết nối để xác minh; chưa thể coi lần kiểm tra trước là kết nối hiện tại.', actionLabel: 'Kiểm tra kết nối', needsAttention: true };
   if (expiresAt && Date.parse(expiresAt) - now <= 10 * 60_000)
-    return { ...base, code: 'expiring', tone: 'warning', label: 'Sắp hết hạn', detail: 'Kết nối còn hạn nhưng sắp cần gia hạn. Mở kết nối để xem việc tiếp theo.', actionLabel: 'Gia hạn kết nối', needsAttention: true };
+    return { ...base, code: 'expiring', tone: 'warning', label: 'Sắp gia hạn', detail: 'Token truy cập sắp cần làm mới; hệ thống tự gia hạn khi chế độ này được bật.', actionLabel: 'Gia hạn kết nối', needsAttention: true };
   if (shop.refreshStatus === 'healthy' && checkedAt && (now - Date.parse(checkedAt) < 0 || now - Date.parse(checkedAt) > 15 * 60_000))
     return { ...base, code: 'stale', tone: 'warning', label: 'Cần kiểm tra lại', detail: 'Lần kiểm tra đã lưu quá 15 phút hoặc có thời điểm chưa hợp lệ. Kết nối chưa được kiểm tra mới.', actionLabel: 'Kiểm tra kết nối', needsAttention: true };
   if (shop.refreshStatus === 'healthy' && checkedAt)

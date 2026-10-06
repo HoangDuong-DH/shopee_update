@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 const id = '513281a9-764c-4b04-a73e-85b8c6c1c984';
 function ready() {
@@ -50,16 +51,16 @@ async function fixture(page: Page, initial: any = ready(), drop = false) {
       writes.push({ path, payload: route.request().postDataJSON() });
     }
     if (path === '/v1/production-batches')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: { batches: Array.isArray(current) ? current : current ? [current] : [] },
       });
     if (path === '/v1/shops')
-      return route.fulfill({ json: [{
+      return fulfillPagedProducts(route,{ json: [{
         id: 'production-fixture-shop', name: 'vuatinhdau.vn', state: 'connected',
         scope: { environment: 'production', partnerId: '2010476', shopId: '1423724897', connectionRevision: 1, capabilityRevision: 1 },
       }] });
     if (path === '/v1/production-preparations/context')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: { scope: { shopId: '1423724897' }, products: [], pricebooks: [], preparations: [] },
       });
     if (
@@ -78,7 +79,7 @@ async function fixture(page: Page, initial: any = ready(), drop = false) {
       current = Array.isArray(current)
         ? current.map((value) => (value.batchId === sentId ? running(value) : value))
         : running(current);
-      return route.fulfill({ status: 202, json: { requestId: 'fixture-only' } });
+      return fulfillPagedProducts(route,{ status: 202, json: { requestId: 'fixture-only' } });
     }
     if (
       path === '/v1/production-batches/' + id + '/publish' &&
@@ -96,12 +97,12 @@ async function fixture(page: Page, initial: any = ready(), drop = false) {
       current = Array.isArray(current)
         ? current.map((value) => (value.batchId === sentId ? running(value) : value))
         : running(current);
-      return route.fulfill({ status: 202, json: { requestId: 'publication-fixture-only' } });
+      return fulfillPagedProducts(route,{ status: 202, json: { requestId: 'publication-fixture-only' } });
     }
     if (route.request().method() !== 'GET') return route.abort();
     if (path === '/v1/production-pilot/status')
-      return route.fulfill({ status: 503, json: { message: 'Fixture: old panel unavailable' } });
-    return route.fulfill({ json: path === '/v1/status' ? { worker: 'online' } : [] });
+      return fulfillPagedProducts(route,{ status: 503, json: { message: 'Fixture: old panel unavailable' } });
+    return fulfillPagedProducts(route,{ json: path === '/v1/status' ? { worker: 'online' } : [] });
   });
   await page.goto('/');
   await page
@@ -143,7 +144,7 @@ test('stale unsent source can be excluded without publishing or deleting its sou
       statusFingerprint: 'c'.repeat(64), listings: initial.listings.map((row: any) => row.sourceKey === 'b'
         ? { ...row, excluded: true, canExclude: false } : row) };
     f.set(updated);
-    await route.fulfill({ json: updated });
+    await fulfillPagedProducts(route,{ json: updated });
   });
   await expect(page.getByText('Nguồn đã có phiên bản mới. Loại mục chưa gửi rồi chuẩn bị lại từ bản mới.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Loại khỏi đợt này', exact: true }).click();
@@ -373,7 +374,7 @@ test('an accepted weight receipt under deferred image QC directs explicit hidden
   });
   await page.route('**/v1/production-batches/' + id + '/review**', async (route) => {
     expect(route.request().method()).toBe('GET');
-    return route.fulfill({ json: { sourceKey: 'a', eligible: true, approved: true } });
+    return fulfillPagedProducts(route,{ json: { sourceKey: 'a', eligible: true, approved: true } });
   });
   const region = page.getByRole('region', { name: 'Đợt đăng mới' });
   await region.getByText('Chi tiết sản phẩm', { exact: true }).first().click();
@@ -555,9 +556,9 @@ test('employee sees exact grouped weights and approves locally without starting 
   await page.route('**/v1/production-batches/' + id + '/review**', async (route) => {
     if (route.request().method() === 'POST') {
       approvals.push(route.request().postDataJSON());
-      return route.fulfill({ json: { approved: true } });
+      return fulfillPagedProducts(route,{ json: { approved: true } });
     }
-    return route.fulfill({
+    return fulfillPagedProducts(route,{
       json: {
         sourceKey: 'b',
         eligible: true,
@@ -628,7 +629,7 @@ test('review with unrelated mismatch offers no approval and has readable mobile 
   initial.listings[1]!.state = 'created_readback_pending';
   await fixture(page, initial);
   await page.route('**/v1/production-batches/' + id + '/review**', (route) =>
-    route.fulfill({
+    fulfillPagedProducts(route,{
       json: {
         sourceKey: 'b',
         eligible: false,
@@ -925,7 +926,7 @@ test('translated review expiry uses the API code to explain the next read-only a
     ],
   });
   await page.route('**/v1/production-batches/*/review?*', (route) =>
-    route.fulfill({
+    fulfillPagedProducts(route,{
       status: 409,
       json: {
         code: 'PRODUCTION_BATCH_REVIEW_READBACK_EXPIRED',

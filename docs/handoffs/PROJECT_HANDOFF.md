@@ -20,6 +20,16 @@ Start at [START_HERE](../onboarding/START_HERE.md). [CODEX_FIRST_RUN](../onboard
 
 Installation and restore were rehearsed in isolated checkouts/databases on the operating computer. A physical second computer and continuous production operation have not been accepted.
 
+## Session continuity and receiving context
+
+The current source base is `9a4da9ff5d089a6e686f6b0ebca144eb9f29fecc`; the context/transfer working-tree additions require their own source release receipt and are not published by a local package update.
+
+The [continuity protocol](../ai/SESSION_CONTINUITY.md) routes AGENTS, project map, contracts and selected feature briefs into a bounded packet. A private current projection plus immutable revision journal retains scope, decisions, pause state, unresolved questions and do-not-replay operations. It detects stale source/evidence and checks journal integrity; older journal entries explicitly retain unknown integrity metadata. It does not call an LLM or grant remote-write authority.
+
+[SESSION_CONTEXT_TRANSFER](../onboarding/SESSION_CONTEXT_TRANSFER.md) defines a separately verified private context bundle and plan/apply import into the receiving checkout. Context evidence keeps relative paths and original bytes; source/configuration and different existing checkpoints are not overwritten. New source, dated database snapshot and context checkpoint are recorded separately. A newer context cannot retroactively update an older database dump.
+
+The latest targeted run on 2026-10-05 passed 151 Vitest cases (100 context/harness, including 11 private-transfer cases, and 51 onboarding cases), 35 Node onboarding cases, typecheck, two repository skill checks and isolated TypeScript/web builds. These are scoped checks, not a new full production acceptance. Existing publication/copy pauses and completed operations must not be replayed because a checkout was restored. Physical second-machine and platform acceptance remain outstanding.
+
 ## Objective
 
 Maintain a resumable Shopee bulk-listing application that receives Word, image, and price sources; prepares reviewable listing drafts; creates hidden listings through a controlled backend; and keeps human QC separate from publication.
@@ -83,3 +93,22 @@ Repository skills:
 5. Preserve unresolved values instead of filling them speculatively.
 6. Run the checks proportional to the change and record only the evidence actually observed.
 7. Complete backup/restore checks and migration readiness before restarting the operating build; keep unresolved preparations paused and reconcile unknown outcomes before any retry.
+
+## Runtime reliability hardening — 2026-10-05
+
+Idle PostgreSQL errors are handled without terminating API/worker. SQL and client-response deadlines bound waits; failed rollback discards its connection and preserves the original error. Mutations with unknown outcomes are never automatically replayed. See [database runtime resilience](../runbooks/database-runtime-resilience.md).
+
+Nest 12.1.2 and the dependency lock remove the four audited advisories; the isolated production audit reports zero vulnerabilities. A real Nest/Fastify regression checks origin and absolute request targets. Product reads now use bounded SQL pages, search/filter before paging, and exact source/revision lookup for restoration. API/frontend/internal recipe callers use the same contract.
+
+Source imports have a 120-second blob-read/parser/result deadline, separate database deadlines, bounded bytes, CPU threads and lease fencing. Compiled worker launches and literal lazy parser subpaths reduce initialization; the real 80-source/321-import acceptance completed in 98 seconds without extending its limit. See [source intake limits](../runbooks/internal-source-intake.md).
+
+Owned-process supervision performs bounded recovery for dead API/web processes, holds dead workers for queue review and avoids restart storms for living unhealthy/unknown processes. Source/build/configuration/executable changes hold recovery. It is not a Windows service and does not recover its own monitor after death/reboot. See [local supervisor](../runbooks/local-service-supervisor.md).
+
+Isolated validation covered 2,942 unit/integration cases: 2,938 passed in the full run; four 15-second timeouts occurred during overlapping browser activity. All 61 cases in the affected three suites subsequently passed with unchanged deadlines and serialized execution. This is combined coverage, not one wholly green full run. Typecheck, TS/web builds, repository skills, seven legacy cases and 72 Node onboarding/supervisor/endurance checks passed. Actual browser intake passed ZIP/Excel→draft→hidden fixture job→readback/QC; 16 actual workspace checks passed navigation, scope, reload, cross-tab changes, responsive layout, theme and keyboard. A further 23 recovery/workbench browser cases passed, including exact source restoration beyond page one.
+
+Measured load acceptance processed 32,544 requests over 300.117 seconds with 20 reader lanes, no HTTP/timeout failures, approximate p95 50ms, p99 60ms and max 228ms. Sampled heap stayed 50–55MiB. This uses a small local fixture and proves neither large-shop throughput, absence of long-term leaks nor 24-hour uptime. See [repeatable endurance checks](../runbooks/runtime-endurance.md).
+
+Controlled local deployment completed after fresh ownership/job checks and a verified database/configuration/build backup. API, compiled worker, web and owned supervisor are ready. Read-only checks preserved configuration, 14 connection records, source/import state and paused operation state. No platform writes or paused batches were resumed. Startup exposed four runtime cross-package imports pointing into source directories; these now use package exports. A compiled dependency-graph regression reproduced the failure and passed after correction; the affected 49 unit and 18 isolated database cases also passed. GitHub and old source/transfer ZIPs do not update merely because the local working tree changes; regenerate and verify them in the separate delivery task.
+## Connection renewal — 2026-10-06
+
+Explicit local maintenance opt-in is independent of publication flags. Launcher and owned API recovery preserve it; new setup, transfer hold and isolated mode remain disabled. Policy changes are part of supervisor identity and require a reviewed restart. Access token expiry is shown as renewal needed, not proof that the shop grant expired. See [connection maintenance](../runbooks/connection-maintenance.md). On the operating machine, 10 production shops renewed and were verified by fresh shop reads; RITEX/BABIOR returned HTTP403/error_param and remain held without replay. One historical Vuatinhdau unknown and one unverified sandbox remain separate. No product writes or paused batches were resumed; .env and compared operation states were preserved.

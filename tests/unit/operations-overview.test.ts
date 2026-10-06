@@ -40,7 +40,7 @@ it('reports configuration literally, including isolated maintenance suppression,
     .toMatchObject({ productionWorkflowEnabled: true, productionWritesConfigured: false,
       connectionMaintenanceEnabled: false, executionReadiness: 'not_assessed' });
   expect(operationsRuntime({ PRODUCTION_PILOT_ENABLED: 'true', SHOPEE_PRODUCTION_WRITES: 'true' }))
-    .toMatchObject({ productionWorkflowEnabled: false, productionWritesConfigured: true, connectionMaintenanceEnabled: true });
+    .toMatchObject({ productionWorkflowEnabled: false, productionWritesConfigured: true, connectionMaintenanceEnabled: false });
 });
 
 it('turns database failure into unavailable sources instead of zero workloads or leaking driver errors', async () => {

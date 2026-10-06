@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { workspaceResetState } from './workspace-reset-state.js';
-import { canonicalJson, type SourceRef } from '@shopee/domain';
+import { productPageQuerySchema, productKeysSchema, canonicalJson, type SourceRef } from '@shopee/domain';
 import { Repository, localArchiveLock, assertPreparationLocalSourcesActive, type BlobStore } from '@shopee/persistence';
 import type { Pool, PoolClient } from 'pg';
 import { buildProductionDraftSource, productionExistingListingAuthorizationSchema } from './production-draft-source.js';
@@ -109,17 +109,24 @@ export class ProductionPreparationService {
     }
     return {preparationId:id,scope:row.body.scope ?? legacyProductionScope,entries};
   }
-  async context() {
+  async context(raw: unknown = {}) {
+    const input=z.object({partnerId:z.string().optional(),shopId:z.string().optional(),
+      productKeys:z.string().max(60000).transform((value,ctx)=>{try{return productKeysSchema.parse(JSON.parse(value));}catch{ctx.addIssue({code:'custom',message:'Invalid product keys'});return z.NEVER;}}).optional(),
+      page:z.unknown().optional(),limit:z.unknown().optional(),q:z.unknown().optional(),lifecycle:z.unknown().optional()}).strict().parse(raw);
+    const query=productPageQuerySchema.parse({page:input.page,limit:input.limit,q:input.q,lifecycle:input.lifecycle});
     const hidden = new Set((await workspaceResetState())?.hiddenPreparationIds ?? []);
-    const [products, imports, recent] = await Promise.all([
-      this.repo.listProducts(), this.repo.listImports(),
+    const [page, imports, recent, pinned] = await Promise.all([
+      this.repo.listProductsPage(query), this.repo.listImports(),
       this.repo.pool.query(`SELECT * FROM production_source_preparations
         WHERE COALESCE(body->'scope'->>'partnerId','2010476')=$1
         AND COALESCE(body->'scope'->>'shopId','1423724897')=$2
         ORDER BY created_at DESC LIMIT 30`,[currentProductionScope().partnerId,currentProductionScope().shopId]),
+      this.repo.getProductsByKeys(input.productKeys ?? []),
     ]);
-    const visibleProducts = await projectProductPriceIssues(this.repo, products);
-    return {scope:currentProductionScope(),products:visibleProducts.map(p=>({productKey:p.productKey,revision:p.revision,title:p.title.value,
+    const merged=new Map(page.items.map(product=>[product.productKey,product]));
+    for(const product of pinned) if(!(product as any).archived) merged.set(product.productKey,product);
+    const visibleProducts = await projectProductPriceIssues(this.repo, [...merged.values()]);
+    return {scope:currentProductionScope(),productPage:{total:page.total,page:page.page,limit:page.limit,hasMore:page.hasMore},pageProductKeys:page.items.map(product=>product.productKey),products:visibleProducts.map(p=>({productKey:p.productKey,revision:p.revision,title:p.title.value,
       skus:p.variants.map(v=>v.sku.value), categoryId:p.categoryId?.value,brandId:p.brandId?.value,
       sourceSelection:p.sourceSelection,attributes:p.attributes,logistics:p.logistics,issues:p.issues})),
       pricebooks:imports.filter(i=>i.kind==='xlsx' && i.status==='ready').map(i=>({id:i.id,filename:i.filename})),

@@ -41,6 +41,10 @@ Với cổng mặc định, web ở `http://127.0.0.1:5173` và API ở `http://
 
 Nếu partner/shop chưa thuộc phạm vi mà luồng hiện có hỗ trợ, giữ riêng và báo phần cần bổ sung; không đổi ID để vượt kiểm tra. Lưu trạng thái và kiểm mới khi token hết hạn, quyền bị thu hồi hoặc thay shop. Credentials được mã hóa trong database bằng `APP_ENCRYPTION_KEY`; giữ khóa này cùng vòng đời database, qua kênh bảo mật riêng.
 
-Onboarding và launcher local giữ ghi production/pilot và bảo trì kết nối tự động **tắt**. Kết nối thành công không tự cho phép chạy đợt đăng, gia hạn tự động hay mở bán. Trước một thao tác ghi thật phải có phạm vi người dùng giao, đúng shop, nguồn đã chốt và operation đã đăng ký; sau ghi phải đọc lại để QC.
+Onboarding giữ ghi production/pilot và bảo trì kết nối tự động **tắt** mặc định. Launcher chỉ bật gia hạn khi có opt-in riêng được chủ máy cho phép; việc này không bật đăng hàng. Kết nối thành công không tự cho phép chạy đợt đăng, gia hạn tự động hay mở bán. Trước một thao tác ghi thật phải có phạm vi người dùng giao, đúng shop, nguồn đã chốt và operation đã đăng ký; sau ghi phải đọc lại để QC.
 
 Xem [hướng dẫn chốt nguồn](../runbooks/source-provenance-guard.md), [skill vận hành](../../skills/shopee-uploader-operator/SKILL.md) và [handoff hiện hành](../handoffs/PROJECT_HANDOFF.md) để biết giới hạn đang áp dụng. Chưa có nghiệm thu chung cho mọi shop, ngành hàng hoặc chạy liên tục 24 giờ.
+
+## Tự gia hạn độc lập với đăng hàng
+
+Xem [bảo trì kết nối](../runbooks/connection-maintenance.md). Token truy cập cần gia hạn không chứng minh quyền shop đã hết. Khi cho phép, launcher và supervisor giữ chế độ gia hạn qua lần khởi động/phục hồi API; trạng thái tạm dừng đăng/sao chép vẫn giữ. Máy phải chạy API và có mạng; nếu refresh token bị Shopee từ chối hoặc đã quá hạn thì có thể cần cấp quyền lại.

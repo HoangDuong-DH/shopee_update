@@ -1,3 +1,4 @@
+import type { ProductPage } from '@shopee/domain';
 import { readProductionWorkFilter, type ProductionWorkFilter } from './operations-presentation.js';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
@@ -412,7 +413,7 @@ export default function Workspace() {
       const options = { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) };
       const readers = {
         imports: () => api<(ImportRecord & ArchiveFlags)[]>('/v1/imports?lifecycle=all', options),
-        products: () => api<ListingDraft[]>('/v1/products', options),
+        products: () => api<ProductPage>('/v1/products', options),
         shops: () => api<ShopConnection[]>('/v1/shops', options),
         plans: () => api<ChangePlan[]>('/v1/plans', options),
         jobs: () => api<JobRecord[]>('/v1/jobs', options),
@@ -432,7 +433,7 @@ export default function Workspace() {
       if (controller.signal.aborted || version !== refreshVersion.current) return;
       if (values.status && applyWorkspaceReset(values.status)) return;
       if (values.imports) mergeImports(values.imports);
-      if (values.products) setProducts(values.products);
+      if (values.products) setProducts(values.products.items);
       if (values.shops) setShops(values.shops);
       if (values.plans) setPlans(values.plans);
       if (values.jobs) setJobs(values.jobs);

@@ -100,7 +100,7 @@ it.each([false, true])(
     ).toBe(duplicate);
     for (const view of [
       detail.json(),
-      list.json().find((p: any) => p.productKey === draft.productKey),
+      list.json().items.find((p: any) => p.productKey === draft.productKey),
     ]) {
       expect(view.issues.some((i: any) => i.code === 'DUPLICATE_SKU')).toBe(duplicate);
       const {archived,archivedAt,...sourceView}=view;

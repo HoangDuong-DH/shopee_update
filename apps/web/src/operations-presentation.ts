@@ -78,11 +78,11 @@ export function connectionIndicator(issues: OperationsBlocker[]): ConnectionIndi
   if (codes.has('CONNECTION_TOKEN_MISSING'))
     return { label: 'Chưa cấp quyền', icon: 'key', tone: 'danger' };
   if (codes.has('CONNECTION_TOKEN_EXPIRED'))
-    return { label: 'Hết hạn', icon: 'clock', tone: 'danger' };
+    return { label: 'Cần gia hạn', icon: 'clock', tone: 'warning' };
   if (codes.has('CONNECTION_NOT_CONNECTED'))
     return { label: 'Cần kết nối', icon: 'key', tone: 'danger' };
   if (codes.has('CONNECTION_TOKEN_EXPIRING'))
-    return { label: 'Sắp hết hạn', icon: 'clock', tone: 'warning' };
+    return { label: 'Sắp gia hạn', icon: 'clock', tone: 'warning' };
   if (codes.has('CONNECTION_CHECK_NEEDS_ATTENTION'))
     return { label: 'Cần xử lý', icon: 'alert', tone: 'warning' };
   if (codes.has('CONNECTION_HEALTH_NOT_FRESH'))

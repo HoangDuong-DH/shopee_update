@@ -11,10 +11,10 @@ const rootFiles = new Set(['README.md', 'AGENTS.md', 'HUONG_DAN_MO_WEB_APP.md', 
   '.prettierignore', '.prettierrc.json', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.check.json',
   'vitest.config.mts', 'playwright.config.ts', 'manifest.json', 'content.js', 'content.css', 'popup.js', 'popup.html', 'shared.js']);
 const scripts = new Set(['README.md', 'bootstrap.mjs', 'onboarding-core.mjs', 'setup-local.mjs', 'doctor.mjs',
-  'start-local.mjs', 'local-launcher.mjs', 'managed-process.mjs', 'windows-entry.ps1', 'release-package.mjs', 'migrate.mts',
-  'dev.mjs', 'verify.mjs', 'verify-internal.mjs', 'internal-environment.mjs', 'internal-network-guard.mjs',
+  'start-local.mjs', 'local-launcher.mjs', 'managed-process.mjs', 'runtime-files.mjs', 'local-supervisor-policy.mjs', 'local-supervisor.mjs', 'connection-maintenance-policy.mjs', 'windows-entry.ps1', 'release-package.mjs', 'migrate.mts',
+  'dev.mjs', 'verify.mjs', 'verify-internal.mjs', 'runtime-endurance.mts', 'runtime-endurance-core.mjs', 'import-recipe-product.mts', 'import-recipe.mts', 'internal-environment.mjs', 'internal-network-guard.mjs',
   'internal-backup.mjs', 'transfer-local.mjs', 'transfer-files.mjs', 'transfer-database.mjs', 'transfer-restore.mjs', 'reference-library.mjs', 'validate-repository-skills.mjs', 'evaluate-harness.mjs',
-  'run-pass1-production-batch.mts', 'inspect-pass1-size-charts.mts', 'inspect-pass1-category-recommendations.mts']);
+  'session-context.mjs', 'session-context.mts', 'run-pass1-production-batch.mts', 'inspect-pass1-size-charts.mts', 'inspect-pass1-category-recommendations.mts']);
 const excludedParts = new Set(['node_modules', 'dist', 'coverage', '.local', '.git', '.cache', '.claude', '.codex', '.agents', 'outputs', 'output', 'tmp', 'test-results', 'playwright-report', 'private']);
 export function isReleasePath(path) {
   if (typeof path !== 'string' || !path || path.includes('\\') || path.includes(':') || path.startsWith('/')) return false;

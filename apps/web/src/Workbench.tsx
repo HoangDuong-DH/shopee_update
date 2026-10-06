@@ -1,3 +1,4 @@
+import { ProductPager } from './ProductPager.js';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, FileInput, Plus, RefreshCw } from 'lucide-react';
 import type {
@@ -92,6 +93,10 @@ export function Workbench({
     'all',
   );
   const [query, setQuery] = useState('');
+  const [sourceQuery,setSourceQuery] = useState('');
+  const [sourcePage,setSourcePage] = useState(1);
+  const chosenSources = useRef(new Map<string,ListingDraft>());
+  const readVersion=useRef(0);
   const [creating, setCreating] = useState(false);
   const [sourceKeys, setSourceKeys] = useState<string[]>([]);
   const [shopId, setShopId] = useState('');
@@ -102,19 +107,22 @@ export function Workbench({
   >(null);
   const lock = useRef(false);
   async function reload() {
+    const version=++readVersion.current;
     setLoading(true);
     try {
-      setData(await api<WorkbenchData>('/v1/workbench'));
+      const value=await api<WorkbenchData>('/v1/workbench?'+new URLSearchParams({page:String(sourcePage),q:sourceQuery}));
+      if(version!==readVersion.current) return;
+      setData(value);
       setError('');
     } catch (cause) {
-      setError((cause as Error).message);
+      if(version===readVersion.current)setError((cause as Error).message);
     } finally {
-      setLoading(false);
+      if(version===readVersion.current)setLoading(false);
     }
   }
   useEffect(() => {
     void reload();
-  }, []);
+  }, [sourcePage,sourceQuery]);
   useEffect(() => {
     onDirty(creating && (sourceKeys.length > 0 || !!shopId || !!operation));
   }, [creating, sourceKeys, shopId, operation, onDirty]);
@@ -138,7 +146,7 @@ export function Workbench({
       id: crypto.randomUUID(),
       expectedRevision: 0,
       config: emptyConfig(
-        data.sources.find((source) => source.productKey === key)!,
+        chosenSources.current.get(key)!,
         shopId,
         operation,
       ),
@@ -157,6 +165,7 @@ export function Workbench({
       createRequests.current = null;
       setCreating(false);
       setSourceKeys([]);
+      chosenSources.current.clear();
       setShopId('');
       setOperation('');
       onDirty(false);
@@ -271,6 +280,7 @@ export function Workbench({
               onClick={() => {
                 setCreating(false);
                 setSourceKeys([]);
+                chosenSources.current.clear();
                 setShopId('');
                 setOperation('');
               }}
@@ -281,6 +291,9 @@ export function Workbench({
           <p className="caption">
             Chọn nhiều bộ để tạo từng công việc riêng. Bước này chỉ lưu việc cần làm trong ứng dụng.
           </p>
+          <label>Tìm bộ listing<input type="search" value={sourceQuery} disabled={busy || !!createRequests.current} onChange={event=>{setSourcePage(1);setSourceQuery(event.target.value);}} /></label>
+          <ProductPager info={data.sourcePage} loading={loading || busy || !!createRequests.current} onPage={setSourcePage} />
+          <p>{sourceKeys.length} bộ đã chọn trên các trang.</p>
           <fieldset disabled={busy || !!createRequests.current} className="workbench-source-picks">
             <legend>Bộ listing đã tiếp nhận</legend>
             {data.sources.map((source) => (
@@ -288,13 +301,14 @@ export function Workbench({
                 <input
                   type="checkbox"
                   checked={sourceKeys.includes(source.productKey)}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    if(event.target.checked) chosenSources.current.set(source.productKey,source); else chosenSources.current.delete(source.productKey);
                     setSourceKeys((current) =>
                       event.target.checked
                         ? [...current, source.productKey]
                         : current.filter((key) => key !== source.productKey),
-                    )
-                  }
+                    );
+                  }}
                 />
                 <span>
                   {source.title.value}

@@ -33,16 +33,18 @@ export async function transaction<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
+  let failed = false;
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    failed = true;
+    try { await client.query('ROLLBACK'); } catch { /* Preserve the original uncertain failure. */ }
     throw error;
   } finally {
-    client.release();
+    client.release(failed);
   }
 }
 export async function migrate(pool: Pool): Promise<void> {

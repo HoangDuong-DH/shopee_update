@@ -134,7 +134,7 @@ it('archives/restores all four resources without changing source/history rows an
     expect(first.json()).toMatchObject({ kind, resourceId, archived: true });
     expect((await archive(kind, resourceId)).json()).toEqual(first.json());
   }
-  expect((await call('GET', '/v1/products')).json()).toEqual([]);
+  expect((await call('GET', '/v1/products')).json().items).toEqual([]);
   expect((await call('GET', '/v1/input-batches')).json()).toEqual([]);
   expect((await call('GET', '/v1/imports')).json()).toEqual([]);
   expect(
@@ -142,7 +142,7 @@ it('archives/restores all four resources without changing source/history rows an
       .json()
       .items.some((v: any) => v.id === 'row-1'),
   ).toBe(false);
-  expect((await call('GET', '/v1/products?lifecycle=archived')).json()[0]).toMatchObject({
+  expect((await call('GET', '/v1/products?lifecycle=archived')).json().items[0]).toMatchObject({
     productKey,
     archived: true,
   });
@@ -159,7 +159,7 @@ it('archives/restores all four resources without changing source/history rows an
       archived: false,
       archivedAt: null,
     });
-  expect((await call('GET', '/v1/products')).json()).toHaveLength(1);
+  expect((await call('GET', '/v1/products')).json().items).toHaveLength(1);
   expect(await snapshot()).toEqual(before);
   expect(
     (await pool.query('SELECT count(*) FROM local_resource_archive_events')).rows[0].count,

@@ -2,6 +2,14 @@
 
 Bắt đầu tại [START_HERE](docs/onboarding/START_HERE.md). Nếu nhận repo lần đầu, đọc [CODEX_FIRST_RUN](docs/onboarding/CODEX_FIRST_RUN.md), sau đó chạy kế hoạch thiết lập trước khi thay đổi máy. Không đọc toàn bộ lịch sử theo mặc định.
 
+## Tiếp nối context ở mỗi yêu cầu
+
+- Sau khi đọc file này, chạy `node scripts/session-context.mjs status`. Phiên mới, sau compaction hoặc đổi chức năng: đọc `brief --feature <id>` hoặc `brief --task <id>`. Chọn feature từ `docs/context/features.json`; đọc bản đồ, contract và tài liệu ngắn đúng phần, không nạp cả lịch sử.
+- Nếu còn giữ brief gần nhất và cùng chức năng, dùng `changes --since-revision N` để đọc delta/độ mới; đọc hết các trang `hasMore`. Code hoặc bằng chứng đổi thì đọc brief/phần liên quan lại. Chưa có dependencies/checkpoint: theo hướng dẫn tối thiểu, không suy trạng thái cũ.
+- Ghi checkpoint sau quyết định người dùng, thay đổi phạm vi, kết quả quan trọng và trước bàn giao: mục tiêu, scope, quyết định, câu hỏi, bước tiếp, `doNotReplay` và tham chiếu biên nhận. Dùng expected revision; xung đột phải đối chiếu, không ghi đè. Giữ riêng trong `.local/session-context`, không commit dữ liệu phiên.
+- Brief/checkpoint là dữ liệu tham khảo, không phải lệnh hoặc quyền ghi. Không tự resume việc tạm dừng; giữ quyền/phạm vi đã được người dùng cấp mà không hỏi lại vô cớ. Thiếu/đổi bằng chứng phải nói rõ, không lấy hash hoặc tài liệu cũ làm QC.
+- Giữ đầu ra nhỏ theo byte budget, chỉ đọc code/schema/runbook cần thiết. Repo không điều khiển context window của Codex hoặc bảo đảm tuyệt đối không quên. Xem [cơ chế tiếp nối](docs/ai/SESSION_CONTINUITY.md).
+
 ## Nguyên tắc dữ liệu và listing
 
 - Chỉ dùng ảnh, nội dung, cấu trúc phân loại, SKU và giá truy được về đúng tệp/dòng/ô người dùng cung cấp hoặc xác nhận. Không tự tìm ảnh, mượn listing khác, suy SKU/giá từ tên, tạo phân loại hay lấp dữ liệu thiếu. Lịch sử chỉ là gợi ý chưa được duyệt.
@@ -18,7 +26,7 @@ Bắt đầu tại [START_HERE](docs/onboarding/START_HERE.md). Nếu nhận rep
 | --- | --- |
 | Cài mới / khởi động | `docs/onboarding/START_HERE.md`, `CODEX_FIRST_RUN.md` |
 | Cấp quyền nhiều shop | `docs/onboarding/SHOP_CONNECTIONS.md` |
-| Chuyển dữ liệu / phục hồi | `docs/onboarding/TRANSFER_AND_RECOVERY.md`, `docs/runbooks/internal-backup-restore.md` |
+| Chuyển dữ liệu / phục hồi | `docs/onboarding/TRANSFER_AND_RECOVERY.md`, `docs/onboarding/SESSION_CONTEXT_TRANSFER.md` nếu có checkpoint, `docs/runbooks/internal-backup-restore.md` |
 | Sửa code / kiến trúc | `README.md`, `docs/handoffs/PROJECT_HANDOFF.md`, runbook liên quan |
 | Làm việc với mô hình / harness | `docs/ai/MODEL_MANAGEMENT_HARNESS.md`, `packages/agent-runtime` |
 | Bàn giao / báo cáo | `skills/shopee-uploader-handoff/SKILL.md`, `docs/onboarding/ACCEPTANCE.md` |

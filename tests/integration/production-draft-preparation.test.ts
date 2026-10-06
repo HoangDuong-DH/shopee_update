@@ -15,7 +15,12 @@ import {
   type WorkbookImport,
 } from '@shopee/domain';
 import { Pool, Repository, BlobStore, migrate, type ImportRecord } from '@shopee/persistence';
-import { importNext } from '../../apps/worker/src/imports.js';
+import { createRequire } from 'node:module';
+// Acceptance follows the launcher: compiled import driver and fixed .js parser threads.
+// verify/verify-internal build before integration; source mode remains covered by unit tests.
+const { importNext } = createRequire(resolve('package.json'))(
+  resolve('apps/worker/dist/imports.js'),
+) as typeof import('../../apps/worker/src/imports.js');
 import { assembleProduct } from '../../apps/api/src/product-service.js';
 import { ProductionPreparationService } from '../../apps/api/src/production-preparation-service.js';
 import {

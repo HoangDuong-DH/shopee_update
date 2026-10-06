@@ -4,13 +4,13 @@ Tải dự án, mở cả thư mục bằng Codex rồi dán [lời nhờ thiế
 
 ## Chọn đúng việc
 
-| Bạn muốn | Bắt đầu ở đâu |
-| --- | --- |
-| Dùng ứng dụng mới, chưa có dữ liệu cũ | Theo các bước bên dưới. |
+| Bạn muốn                                     | Bắt đầu ở đâu                                                                                                                                |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dùng ứng dụng mới, chưa có dữ liệu cũ        | Theo các bước bên dưới.                                                                                                                      |
 | Chuyển tiếp dữ liệu và công việc từ máy khác | Nhận thêm bộ dữ liệu/key riêng và `REFERENCE_LIBRARY`; theo [Chuyển máy và phục hồi](TRANSFER_AND_RECOVERY.md), chưa mở app trước bước nhập. |
-| Thư mục đã có `.env`, database hoặc dữ liệu | Nhờ Codex kiểm tra hiện trạng; không tạo lại cấu hình. |
+| Thư mục đã có `.env`, database hoặc dữ liệu  | Nhờ Codex kiểm tra hiện trạng; không tạo lại cấu hình.                                                                                       |
 
-Repository và ZIP mã nguồn không chứa database, Word/Excel/ảnh riêng, token hay khóa của máy vận hành. Tải mã không khôi phục các dữ liệu này. Khi chuyển máy, người nhận cần bộ riêng có database, nguồn/hồ sơ và đúng khóa giải mã; các key/token đã lưu có thể được bàn giao bằng file riêng có dấu kiểm, không dán vào chat.
+Repository và ZIP mã nguồn không chứa database, Word/Excel/ảnh riêng, token hay khóa của máy vận hành. Tải mã không khôi phục các dữ liệu này. Khi chuyển máy, người nhận cần bộ riêng có database, nguồn/hồ sơ và đúng khóa giải mã; nếu tiếp nối việc cũ thì nhận thêm [SESSION_CONTEXT](SESSION_CONTEXT_TRANSFER.md) có checkpoint và bằng chứng; các key/token đã lưu có thể được bàn giao bằng file riêng có dấu kiểm, không dán vào chat.
 
 Thư viện `knowledge-base/` cũng được bàn giao riêng bằng thư mục `REFERENCE_LIBRARY`. Nó có tài liệu Open Platform và hướng dẫn người bán Việt Nam phục vụ tra cứu/đối chiếu. Nếu chỉ kiểm mã hoặc build, ghi rõ thư viện chưa có; bản bàn giao ứng dụng đầy đủ cần nhận và nhập thư viện trước khi START.
 
@@ -69,11 +69,11 @@ Lệnh import mặc định chỉ kiểm; `--apply` mới chép vào `knowledge-
 
 Mở **`START_LISTINGSTUDIO.cmd`** hoặc chạy `npm run start:local`. Dùng **`STOP_LISTINGSTUDIO.cmd`** để dừng đúng các tiến trình của bản cài, giữ database và tệp. Với cổng mặc định:
 
-| Thành phần | Địa chỉ |
-| --- | --- |
-| Giao diện | `http://127.0.0.1:5173` |
-| API | `http://127.0.0.1:4310` |
-| PostgreSQL | `127.0.0.1:5442` |
+| Thành phần | Địa chỉ                 |
+| ---------- | ----------------------- |
+| Giao diện  | `http://127.0.0.1:5173` |
+| API        | `http://127.0.0.1:4310` |
+| PostgreSQL | `127.0.0.1:5442`        |
 
 Launcher chỉ nhận cấu hình có biên nhận hợp lệ và giữ đúng database riêng; nó không migrate lại khi mở app. Sau chuyển dữ liệu, `transfer-hold` giữ worker/công việc cũ; launcher chỉ mở API và giao diện để kiểm tra. Không tự gỡ hold hoặc resume batch. Nếu chọn cổng riêng, dùng địa chỉ mà công cụ kiểm tra báo. Không chạy hai bản ứng dụng trên cùng database để thử.
 

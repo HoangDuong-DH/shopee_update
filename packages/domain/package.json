@@ -4,8 +4,25 @@
   "private": true,
   "type": "module",
   "exports": {
-    "types": "./dist/index.d.ts",
-    "development": "./src/index.ts",
-    "default": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./source/kini": {
+      "types": "./dist/source/kini.d.ts",
+      "development": "./src/source/kini.ts",
+      "default": "./dist/source/kini.js"
+    },
+    "./source/word": {
+      "types": "./dist/source/word.d.ts",
+      "development": "./src/source/word.ts",
+      "default": "./dist/source/word.js"
+    },
+    "./source/assets": {
+      "types": "./dist/source/assets.d.ts",
+      "development": "./src/source/assets.ts",
+      "default": "./dist/source/assets.js"
+    }
   }
 }

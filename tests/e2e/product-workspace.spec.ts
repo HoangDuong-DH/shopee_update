@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -499,7 +500,7 @@ test('bulk connection UI sends each reviewed shop once, holds sandbox and retain
     const url = new URL(route.request().url());
     const shop = [a, b].find(row => row.scope.shopId === url.searchParams.get('shopId'));
     if (!shop) return route.continue();
-    await route.fulfill({ json: { connectionId: shop.id, ...shop.scope,
+    await fulfillPagedProducts(route,{ json: { connectionId: shop.id, ...shop.scope,
       connectionRevision: 1, state: 'connected', refreshStatus: 'saved', refreshReason: null,
       hasSavedKey: true, tokenExpiresAt: new Date(Date.now() + 3600000).toISOString(), officialName: shop.name } });
   });
@@ -507,7 +508,7 @@ test('bulk connection UI sends each reviewed shop once, holds sandbox and retain
     const id = new URL(route.request().url()).pathname.split('/')[3]!;
     writes.push({ id, action: 'check', body: route.request().postDataJSON() });
     await new Promise(resolve => setTimeout(resolve, 150));
-    await route.fulfill({ json: { kind: id === a.id ? 'success' : 'unknown' } });
+    await fulfillPagedProducts(route,{ json: { kind: id === a.id ? 'success' : 'unknown' } });
   });
   await page.goto(baseURL + '/?page=shops');
   const region = page.getByRole('region', { name: 'Danh sách kết nối shop', exact: true });

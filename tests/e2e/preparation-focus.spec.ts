@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 const sourceKey = 'saved-source-a',
   priceId = '252d91d1-93c7-429a-a4fc-1e719a0bbaf9',
@@ -140,22 +141,22 @@ async function fixture(
         preview.publicationMode =
           route.request().postDataJSON().publicationMode ?? 'hidden_for_review';
         preview.imageQcPolicy = route.request().postDataJSON().imageQcPolicy ?? 'required';
-        return route.fulfill({ json: preview });
+        return fulfillPagedProducts(route,{ json: preview });
       }
       if (path === '/v1/production-preparations/' + previewId + '/register') {
         registered = true;
-        return route.fulfill({
+        return fulfillPagedProducts(route,{
           json: { batches: [{ batchId: 'fixture-only' }], readyCount: 1, blockedCount: 0 },
         });
       }
       if (path === '/v1/production-preparations/' + previewId + '/run') {
         running = true;
-        return route.fulfill({ json: { state: 'running', completedBatches: [], totalBatches: 1 } });
+        return fulfillPagedProducts(route,{ json: { state: 'running', completedBatches: [], totalBatches: 1 } });
       }
       return route.abort();
     }
     if (path === '/v1/production-preparations/context')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           scope: { shopId: '1423724897', partnerId: '2010476' },
           products: [summary, { ...summary, productKey: 'saved-source-b', title: 'Bộ thứ hai — khăn cotton', skus: ['SKU-B'] }],
@@ -164,7 +165,7 @@ async function fixture(
         },
       });
     if (path === '/v1/production-preparations/metadata')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           ...meta,
           ...(url.searchParams.get('includeInventory') === 'true'
@@ -196,12 +197,12 @@ async function fixture(
             : {}),
         },
       });
-    if (path === '/v1/products/' + sourceKey) return route.fulfill({ json: draft });
-    if (path === '/v1/products/saved-source-b') return route.fulfill({ json: { ...draft, productKey: 'saved-source-b', title: fact('Bộ thứ hai — khăn cotton'), variants: [{ ...draft.variants[0], key: 'row2', sku: fact('SKU-B') }] } });
-    if (path === '/v1/shops') return route.fulfill({ json: [{ id: 'focus-shop', name: 'Shop kiểm thử UX', state: 'connected', revision: 1, scope: { environment: 'production', partnerId: '2010476', shopId: '1423724897' } }] });
-    if (path === '/v1/products') return route.fulfill({ json: [draft] });
+    if (path === '/v1/products/' + sourceKey) return fulfillPagedProducts(route,{ json: draft });
+    if (path === '/v1/products/saved-source-b') return fulfillPagedProducts(route,{ json: { ...draft, productKey: 'saved-source-b', title: fact('Bộ thứ hai — khăn cotton'), variants: [{ ...draft.variants[0], key: 'row2', sku: fact('SKU-B') }] } });
+    if (path === '/v1/shops') return fulfillPagedProducts(route,{ json: [{ id: 'focus-shop', name: 'Shop kiểm thử UX', state: 'connected', revision: 1, scope: { environment: 'production', partnerId: '2010476', shopId: '1423724897' } }] });
+    if (path === '/v1/products') return fulfillPagedProducts(route,{ json: [draft] });
     if (path === '/v1/imports/' + priceId)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: priceId,
           filename: 'DORIS.xlsx',
@@ -209,18 +210,18 @@ async function fixture(
         },
       });
     if (path === '/v1/production-preparations/' + previewId + '/execution')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: running
           ? { state: 'running', completedBatches: [], totalBatches: 1 }
           : prior
             ? { state: 'paused', completedBatches: [], totalBatches: 1, ...effectivePolicy }
             : null,
       });
-    if (path === '/v1/production-batches') return route.fulfill({ json: { batches: [] } });
-    if (path.startsWith('/v1/media/')) return route.fulfill({ status: 404, body: '' });
+    if (path === '/v1/production-batches') return fulfillPagedProducts(route,{ json: { batches: [] } });
+    if (path.startsWith('/v1/media/')) return fulfillPagedProducts(route,{ status: 404, body: '' });
     if (path === '/v1/production-pilot/status')
-      return route.fulfill({ status: 503, json: { message: 'Old pilot not part of fixture' } });
-    return route.fulfill({ json: path === '/v1/status' ? { worker: 'online' } : [] });
+      return fulfillPagedProducts(route,{ status: 503, json: { message: 'Old pilot not part of fixture' } });
+    return fulfillPagedProducts(route,{ json: path === '/v1/status' ? { worker: 'online' } : [] });
   });
   await page.goto('/?page=prepared-batches&partnerId=2010476&shopId=1423724897&stage=prepare');
   await page

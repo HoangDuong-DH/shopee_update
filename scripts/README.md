@@ -13,3 +13,6 @@
 Máy mới chưa có dữ liệu: [START_HERE](../docs/onboarding/START_HERE.md). Chuyển dữ liệu từ máy cũ: [TRANSFER_AND_RECOVERY](../docs/onboarding/TRANSFER_AND_RECOVERY.md). Docker Desktop cần chủ máy cài/bật; keys trong bộ riêng không thuộc Git hoặc ZIP source.
 
 Các script có tên pilot/pass1/sandbox/audit còn trong checkout phục vụ lịch sử hoặc kiểm thử. Không chạy để thử kết nối, thiết lập máy mới hoặc tiếp tục công việc chưa đối chiếu journal. Chỉ một số module có unit tests được giữ trong gói source; chúng không nằm trong luồng thiết lập/khởi động.
+
+- local-supervisor.mjs: giám sát có quyền sở hữu, restart hữu hạn API/web, giữ worker chết và không tự resume. Xem runbook local-service-supervisor.
+- runtime-endurance.mts: tải đọc trong database thử riêng, có biên nhận độ trễ/bộ nhớ và thời gian thực; không gọi Shopee. Xem runbook runtime-endurance.

@@ -184,6 +184,10 @@ Các phần chưa nên suy rộng từ kết quả hiện có:
 
 Xem [handoff hiện hành](docs/handoffs/PROJECT_HANDOFF.md) để biết ranh giới vận hành đã công bố và [hướng dẫn chạy local](docs/runbooks/local-development.md) để xử lý lỗi môi trường.
 
+## Context và tiếp nối phiên Codex
+
+[Hướng dẫn tiếp nối phiên](docs/ai/SESSION_CONTINUITY.md) dùng tài liệu theo chức năng và checkpoint riêng, có revision, kiểm hash bằng chứng và giới hạn đầu ra. `npm run session:status` xem chỉ mục; `npm run session:brief -- --feature <id>` đọc đúng phần; `session:changes` chỉ trả thay đổi từ revision đã đọc. Không gọi LLM, sửa DB hay chạy công việc Shopee. Registry tại [docs/context/features.json](docs/context/features.json); trạng thái riêng không đi cùng Git clone.
+
 ## Tài liệu
 
 - [Review tích hợp ListingStudio ngày 01/10](docs/reviews/2026-10-01-product-integration.md)

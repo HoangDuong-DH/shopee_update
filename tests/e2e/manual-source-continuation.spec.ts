@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { expect, test, type Page } from '@playwright/test';
 import { fact, fixtureDraft } from '../helpers/fixtures.js';
 
@@ -21,20 +22,20 @@ async function setup(page: Page, registered: boolean, partial = false) {
     const url = new URL(route.request().url()), path = url.pathname;
     requests.push(path);
     if (route.request().method() !== 'GET') { writes.push(path); return route.abort(); }
-    if (path === '/v1/shops') return route.fulfill({ json: [{ id: 'selected-shop', name: 'vinatuoi.vn', displayName: 'VINA TƯƠI Nội bộ', state: 'connected',
+    if (path === '/v1/shops') return fulfillPagedProducts(route,{ json: [{ id: 'selected-shop', name: 'vinatuoi.vn', displayName: 'VINA TƯƠI Nội bộ', state: 'connected',
       scope: { environment: 'production', partnerId, shopId } }] });
-    if (path === '/v1/products') return route.fulfill({ json: [{ ...product, revision: 1, title: fact('Bản danh sách cũ') }] });
-    if (path === '/v1/products/' + product.productKey) return route.fulfill({ json: product });
-    if (path === '/v1/production-preparations/context') return route.fulfill({ json: { scope: { shopId, partnerId },
+    if (path === '/v1/products') return fulfillPagedProducts(route,{ json: [{ ...product, revision: 1, title: fact('Bản danh sách cũ') }] });
+    if (path === '/v1/products/' + product.productKey) return fulfillPagedProducts(route,{ json: product });
+    if (path === '/v1/production-preparations/context') return fulfillPagedProducts(route,{ json: { scope: { shopId, partnerId },
       products: [{ productKey: product.productKey, title, revision: product.revision, skus: [], issues: [] }, ...(partial ? [{ productKey: 'still-current', title: 'Nước lau sàn nguồn còn khớp', revision: 1, skus: [], issues: [] }] : [])], pricebooks: [], preparations: [snapshot] } });
-    if (path.endsWith('/source-changes')) return route.fulfill({ json: { preparationId, scope: { shopId, partnerId }, entries: [
+    if (path.endsWith('/source-changes')) return fulfillPagedProducts(route,{ json: { preparationId, scope: { shopId, partnerId }, entries: [
       { productKey: product.productKey, title: snapshot.entries[0]!.title, sourceRevision: 1, currentRevision: 2, state: 'changed', changedFields: ['title'],
         changes: [{ field: 'title', label: 'Tiêu đề', before: snapshot.entries[0]!.title, after: title }] },
       ...(partial ? [{ productKey: 'still-current', title: 'Nước lau sàn nguồn còn khớp', sourceRevision: 1, currentRevision: 1, state: 'current', changedFields: [], changes: [] }] : []),
     ] } });
-    if (path.endsWith('/execution')) return route.fulfill({ json: null });
-    if (path === '/v1/production-batches') return route.fulfill({ json: { batches: [] } });
-    return route.fulfill({ json: path === '/v1/status' ? { worker: 'online' } : [] });
+    if (path.endsWith('/execution')) return fulfillPagedProducts(route,{ json: null });
+    if (path === '/v1/production-batches') return fulfillPagedProducts(route,{ json: { batches: [] } });
+    return fulfillPagedProducts(route,{ json: path === '/v1/status' ? { worker: 'online' } : [] });
   });
   await page.goto('/');
   const panel = page.getByRole('region', { name: 'Chuẩn bị đợt từ listing đã lưu', exact: true });

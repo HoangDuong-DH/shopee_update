@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 
 // UI fixtures only: every API request is intercepted, including reads.
@@ -59,7 +60,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
     const body = method === 'POST' ? request.postDataJSON() : null;
     requests.push({ method, path, body });
     if (method === 'GET' && path === '/v1/prepared-batches/context')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           mode: 'simulation',
           shops: [{ id: 'ui-shop', name: 'Shop UI fixture', shopId: '123' }],
@@ -67,7 +68,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         },
       });
     if (method === 'GET' && path === '/v1/input-library')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           batches: [
             {
@@ -97,7 +98,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         },
       });
     if (method === 'GET' && path === '/v1/input-batches/' + inputId)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: inputId,
           revision: 1,
@@ -118,7 +119,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         },
       });
     if (method === 'GET' && path === '/v1/imports/' + workbookId)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: workbookId,
           filename: 'Điều phối UI fixture.xlsx',
@@ -128,7 +129,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         },
       });
     if (method === 'GET' && path === '/v1/production-pilot/status')
-      return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+      return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
     if (method === 'POST' && path === '/v1/prepared-batches/preview') {
       run = {
         ...run,
@@ -136,14 +137,14 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         state: 'prepared',
         items: run.items.map((item) => ({ ...item, state: 'prepared' })),
       };
-      return route.fulfill({ json: run });
+      return fulfillPagedProducts(route,{ json: run });
     }
     if (method === 'GET' && path === '/v1/prepared-batches/' + run.id)
-      return route.fulfill({ json: run });
+      return fulfillPagedProducts(route,{ json: run });
     if (method === 'POST' && path === `/v1/prepared-jobs/${jobId}/control`) {
       if (!['pause', 'resume', 'cancel'].includes(body.action)) {
         unexpected.push('Unsupported control action');
-        return route.fulfill({ status: 400, json: { code: 'INVALID_INPUT' } });
+        return fulfillPagedProducts(route,{ status: 400, json: { code: 'INVALID_INPUT' } });
       }
       run.items[0] = {
         ...run.items[0]!,
@@ -152,7 +153,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
       };
       run.state =
         body.action === 'cancel' ? 'cancelled' : body.action === 'pause' ? 'paused' : 'queued';
-      return route.fulfill({ json: run.items[0] });
+      return fulfillPagedProducts(route,{ json: run.items[0] });
     }
     if (method === 'POST' && path === `/v1/prepared-jobs/${jobId}/reconcile`) {
       run.state = 'verified';
@@ -166,10 +167,10 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         dropReconcile = false;
         return route.abort('connectionfailed');
       }
-      return route.fulfill({ json: run.items[0] });
+      return fulfillPagedProducts(route,{ json: run.items[0] });
     }
     if (method === 'GET' && path === '/v1/workbench')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           orders: [],
           sources: [],
@@ -178,7 +179,7 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         },
       });
     if (method === 'GET' && path === '/v1/status')
-      return route.fulfill({ json: { worker: 'online' } });
+      return fulfillPagedProducts(route,{ json: { worker: 'online' } });
     if (
       method === 'GET' &&
       [
@@ -191,9 +192,9 @@ async function installFixture(page: Page, initial: State, dropReconcile = false)
         '/v1/import-patches',
       ].includes(path)
     )
-      return route.fulfill({ json: [] });
+      return fulfillPagedProducts(route,{ json: [] });
     unexpected.push(method + ' ' + path);
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
   return { requests, unexpected, errors, current: () => structuredClone(run) };
 }

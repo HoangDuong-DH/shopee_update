@@ -283,15 +283,16 @@ export class WorkbenchService {
     if (!current) throw new Error('WORK_ORDER_NOT_FOUND');
     return this.view(current);
   }
-  async list(): Promise<Workbench> {
+  async list(query: unknown = {}): Promise<Workbench> {
     const [orders, sources, shops] = await Promise.all([
       this.orders.list(),
-      this.repo.listProducts(),
+      this.repo.listProductsPage(query),
       this.shops(),
     ]);
     return {
       orders: await Promise.all(orders.map((order) => this.view(order, shops))),
-      sources,
+      sources: sources.items,
+      sourcePage:{total:sources.total,page:sources.page,limit:sources.limit,hasMore:sources.hasMore},
       shops,
       execution: { productionWrites: false, sandboxUpdates: true, createEnabled: false },
     };

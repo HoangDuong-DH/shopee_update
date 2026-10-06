@@ -11,8 +11,8 @@ import {
   type Fact,
   type WorkbookImport,
 } from '@shopee/domain';
-import { folderManifestSchema } from '../../domain/src/folder-manifest.js';
-import { compileDescription } from '../../domain/src/source/normalize.js';
+import { folderManifestSchema } from '@shopee/domain';
+import { compileDescription } from '@shopee/domain';
 import type { Pool, PoolClient } from 'pg';
 import { transaction } from './db.js';
 import { localArchiveList, lockLocalSourceSelection, assertLocalResourcesActive, type LocalLifecycle } from './local-archives.js';

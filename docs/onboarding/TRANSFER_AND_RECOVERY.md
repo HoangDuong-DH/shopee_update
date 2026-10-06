@@ -1,19 +1,20 @@
 # Chuyển máy và phục hồi
 
-Muốn tiếp tục dữ liệu cũ trên máy khác, cần nhận **gói mã nguồn**, **bộ chuyển dữ liệu riêng** và **thư viện `REFERENCE_LIBRARY`** đi cùng nhau. ZIP mã nguồn/GitHub giúp cài ứng dụng; database, tệp nguồn và khóa nằm trong bộ riêng.
+Muốn tiếp tục dữ liệu cũ trên máy khác, cần nhận **gói mã nguồn**, **bộ chuyển dữ liệu riêng** và **thư viện `REFERENCE_LIBRARY`** đi cùng nhau. ZIP mã nguồn/GitHub giúp cài ứng dụng; database, tệp nguồn và khóa nằm trong bộ riêng. Nếu cần tiếp nối trạng thái công việc, nhận thêm `SESSION_CONTEXT/` theo [Chuyển checkpoint](SESSION_CONTEXT_TRANSFER.md).
 
 ## Bộ người nhận cần có
 
-| Thành phần | Mục đích |
-| --- | --- |
-| `LISTINGSTUDIO_SOURCE.zip` và biên nhận release | Mã đã duyệt, lockfile và manifest SHA-256. |
-| `REFERENCE_LIBRARY/` bàn giao riêng | Hai bộ tài liệu Open Platform/người bán Việt Nam, manifest, chỉ mục tìm kiếm và toàn bộ Markdown được tham chiếu. |
-| `database.dump` trong bộ riêng | Bản nháp, kết nối mã hóa, công việc, journal và biên nhận trong database. |
-| `data/` và các thư mục `receipts-N/` | Blob nguồn, manifest và hồ sơ ngoài database thuộc phạm vi đã chọn. |
-| `secrets/app-key.json` | Đúng `APP_ENCRYPTION_KEY` giải mã database đã chuyển. |
-| `secrets/connection-keys.json` | Các trường key/token đã lưu, được xuất thành file riêng theo yêu cầu chủ hệ thống. Không suy khóa chưa từng được lưu. |
-| `secrets/original-app.env` | CLI giữ bản môi trường nguồn để đối chiếu riêng; không chép đè `.env` của máy nhận. |
-| Manifest của bộ riêng và biên nhận kiểm | Danh sách tệp, dấu kiểm và phần đã kiểm/chưa kiểm. |
+| Thành phần                                      | Mục đích                                                                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `LISTINGSTUDIO_SOURCE.zip` và biên nhận release | Mã đã duyệt, lockfile và manifest SHA-256.                                                                            |
+| `REFERENCE_LIBRARY/` bàn giao riêng             | Hai bộ tài liệu Open Platform/người bán Việt Nam, manifest, chỉ mục tìm kiếm và toàn bộ Markdown được tham chiếu.     |
+| `database.dump` trong bộ riêng                  | Bản nháp, kết nối mã hóa, công việc, journal và biên nhận trong database.                                             |
+| `data/` và các thư mục `receipts-N/`            | Blob nguồn, manifest và hồ sơ ngoài database thuộc phạm vi đã chọn.                                                   |
+| `secrets/app-key.json`                          | Đúng `APP_ENCRYPTION_KEY` giải mã database đã chuyển.                                                                 |
+| `secrets/connection-keys.json`                  | Các trường key/token đã lưu, được xuất thành file riêng theo yêu cầu chủ hệ thống. Không suy khóa chưa từng được lưu. |
+| `secrets/original-app.env`                      | CLI giữ bản môi trường nguồn để đối chiếu riêng; không chép đè `.env` của máy nhận.                                   |
+| `SESSION_CONTEXT/` và manifest riêng            | Checkpoint, journal phiên và bằng chứng đúng đường dẫn; giữ quyết định, phần tạm dừng và việc không được phát lại.    |
+| Manifest của bộ riêng và biên nhận kiểm         | Danh sách tệp, dấu kiểm và phần đã kiểm/chưa kiểm.                                                                    |
 
 Database và khóa giải mã phải là cặp phù hợp. Các key/token xuất riêng có thể đọc được; giữ cả bộ trong thư mục hạn chế quyền, trao qua kênh riêng. Không đưa bộ này lên GitHub, ZIP công khai, chat hoặc ảnh chụp. Khóa/token được giữ không đồng nghĩa còn hiệu lực trên Shopee.
 
@@ -55,6 +56,8 @@ Khi kế hoạch đạt và đúng đích đã chọn:
 & $nodeRuntime scripts/reference-library.mjs import --library "$referenceLibrary" --apply
 & $nodeRuntime scripts/doctor.mjs --json
 ```
+
+Nếu nhận `SESSION_CONTEXT/`, kiểm và nhập theo [hướng dẫn context](SESSION_CONTEXT_TRANSFER.md) sau cài dependencies, trước START. Đọc status/brief sau nhập; không lấy checkpoint làm quyền gỡ hold. Ghi riêng mốc source, dump database và context: chúng có thể khác ngày; context mới không cập nhật dump cũ.
 
 Thư viện phải nhập trước START. `reference-library import --apply` chỉ chép vào `knowledge-base/` khi thư mục đích chưa tồn tại; thư viện có sẵn cần đối chiếu, không xóa/ghi đè. Gói thư viện có cả manifest, `search.sqlite`, các Markdown được dẫn và hướng dẫn nhỏ; không cần mang lại kho raw/assets/downloads trùng lặp.
 

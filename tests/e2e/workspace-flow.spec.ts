@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { openWorkspaceTool } from './workspace-navigation.js';
 import { test, expect } from '@playwright/test';
 import type { ListingDraft } from '@shopee/domain';
@@ -191,7 +192,7 @@ test('fixture: reviews both classification tiers without flattening or unlocking
   });
   await page.route('**/v1/products', async (route) => {
     if (route.request().method() !== 'GET') return route.abort();
-    await route.fulfill({ json: [fixture] });
+    await fulfillPagedProducts(route,{ json: [fixture] });
   });
   await page.goto('/');
   await openWorkspaceTool(page, 'Listing của tôi');
@@ -309,7 +310,7 @@ test('fixture: keeps the listing screen stable while a plan save is pending', as
     if (route.request().method() !== 'POST') return route.continue();
     interceptedWrites.push(route.request().method());
     await heldResponse;
-    await route.fulfill({ status: 503, json: { code: 'TEST_FIXTURE_SAVE_UNAVAILABLE' } });
+    await fulfillPagedProducts(route,{ status: 503, json: { code: 'TEST_FIXTURE_SAVE_UNAVAILABLE' } });
   });
   try {
     await page.goto('/');
@@ -369,7 +370,7 @@ test('fixture: retains edited content after a failed save and blocks navigation 
     if (route.request().method() !== 'POST') return route.continue();
     interceptedWrites.push(route.request().method());
     await heldResponse;
-    await route.fulfill({ status: 503, json: { code: 'TEST_FIXTURE_PRODUCT_SAVE_UNAVAILABLE' } });
+    await fulfillPagedProducts(route,{ status: 503, json: { code: 'TEST_FIXTURE_PRODUCT_SAVE_UNAVAILABLE' } });
   });
   try {
     await page.goto('/');
@@ -458,9 +459,9 @@ test('fixture: assigning Word paragraphs previews before replacement and keeps l
   });
   await page.route(/\/v1\/imports(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.abort();
-    return route.fulfill({ json: [fixture] });
+    return fulfillPagedProducts(route,{ json: [fixture] });
   });
-  await page.route('**/v1/imports/' + wordId, (route) => route.fulfill({ json: fixture }));
+  await page.route('**/v1/imports/' + wordId, (route) => fulfillPagedProducts(route,{ json: fixture }));
   await page.goto('/');
   await openWorkspaceTool(page, 'Listing của tôi');
   await page.getByRole('button', { name: /^Khẩu trang 5D Lamy 3 lớp trắng đen/ }).click();
@@ -500,7 +501,7 @@ test('fixture: retrying an upload from the editor locks save and preserves unfin
     if (route.request().method() !== 'POST') return route.continue();
     attempts++;
     if (attempts === 2) await heldRetry;
-    await route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+    await fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
   });
   const productWrites: string[] = [];
   await page.route('**/v1/products', async (route) => {

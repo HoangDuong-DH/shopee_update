@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 import { openInputLibrary, openWorkspaceTool } from './workspace-navigation.js';
 
@@ -22,9 +23,9 @@ async function setup(page: Page, blocked = false) {
       if (url.pathname !== '/v1/local-archives') return route.abort('blockedbyclient');
       const value = request.postDataJSON();
       writes.push(value);
-      if (blocked) return route.fulfill({ status: 409, json: { code: 'LOCAL_ARCHIVE_IN_USE', message: 'Nguồn đang được công việc sử dụng.' } });
+      if (blocked) return fulfillPagedProducts(route,{ status: 409, json: { code: 'LOCAL_ARCHIVE_IN_USE', message: 'Nguồn đang được công việc sử dụng.' } });
       states.set(value.kind + ':' + value.resourceId, value.archived);
-      return route.fulfill({ json: { ...value, archivedAt: value.archived ? '2026-09-17T00:00:00Z' : null } });
+      return fulfillPagedProducts(route,{ json: { ...value, archivedAt: value.archived ? '2026-09-17T00:00:00Z' : null } });
     }
     const include = (kind: string, id: string) => url.searchParams.get('lifecycle') === 'all'
       || Boolean(states.get(kind + ':' + id)) === (url.searchParams.get('lifecycle') === 'archived');
@@ -34,14 +35,16 @@ async function setup(page: Page, blocked = false) {
     else if (url.pathname === '/v1/source-catalogs/catalog-1') body = catalog;
     else if (url.pathname.endsWith('/listings')) body = { items: include('catalog_listing', 'catalog-1/row-1') ? [listing] : [],
       total: include('catalog_listing', 'catalog-1/row-1') ? 1 : 0, page: 1, pageSize: 30 };
-    else if (url.pathname === '/v1/products') body = include('product', 'draft-1') ? [product] : [];
+    else if (url.pathname === '/v1/products' || url.pathname === '/v1/local-library/products') body = include('product', 'draft-1') ? [{...product,archived:!!states.get('product:draft-1'),archivedAt:states.get('product:draft-1') ? '2026-09-17T00:00:00Z' : null}] : [];
+    else if (url.pathname === '/v1/products/draft-1') body = {...product,archived:!!states.get('product:draft-1'),archivedAt:states.get('product:draft-1') ? '2026-09-17T00:00:00Z' : null};
     else if (url.pathname === '/v1/input-library') body = {
       priceBooks: include('pricebook', 'book-1') ? [book] : [],
       batches: include('input_batch', 'batch-1') ? [batch] : [], unassigned: [],
     };
-    return route.fulfill({ json: body });
+    return fulfillPagedProducts(route,{ json: body });
   });
   await page.goto('/');
+  await openWorkspaceTool(page, 'Kho nguồn');
   return { writes, states };
 }
 

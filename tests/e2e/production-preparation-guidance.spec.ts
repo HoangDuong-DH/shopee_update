@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 
 const priceId = '252d91d1-93c7-429a-a4fc-1e719a0bbaf9';
@@ -33,7 +34,7 @@ async function fixture(page: Page, slow = false) {
       requests.push({ path, body: route.request().postDataJSON() });
       if (path !== '/v1/production-preparations/preview') return route.abort();
       if (slow) await waiting;
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: previewId,
           fingerprint: 'a'.repeat(64),
@@ -60,7 +61,7 @@ async function fixture(page: Page, slow = false) {
       });
     }
     if (path === '/v1/production-preparations/context')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           scope: { shopId: '1423724897' },
           products: products.map((p) => ({ ...p, revision: 1, skus: ['SKU-A'], issues: [] })),
@@ -69,7 +70,7 @@ async function fixture(page: Page, slow = false) {
         },
       });
     if (path === '/v1/production-preparations/metadata')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           shop: { id: '1423724897', name: 'vuatinhdau.vn' },
           categories: [{ id: '10', label: 'Làm thơm nhà', path: 'Nhà cửa > Làm thơm nhà' }],
@@ -93,7 +94,7 @@ async function fixture(page: Page, slow = false) {
       });
     const product = products.find((p) => path === '/v1/products/' + p.productKey);
     if (product)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           productKey: product.productKey,
           revision: 1,
@@ -131,16 +132,16 @@ async function fixture(page: Page, slow = false) {
         },
       });
     if (path === '/v1/imports/' + priceId)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: priceId,
           filename: 'DORIS.xlsx',
           body: { rows: [{ key: 'row1', sheet: 'DORIS', priceProfile: 'SHOP MALL' }] },
         },
       });
-    if (path === '/v1/production-batches') return route.fulfill({ json: { batches: [] } });
-    if (path.startsWith('/v1/media/')) return route.fulfill({ status: 404, body: '' });
-    return route.fulfill({ json: path === '/v1/status' ? { worker: 'online' } : [] });
+    if (path === '/v1/production-batches') return fulfillPagedProducts(route,{ json: { batches: [] } });
+    if (path.startsWith('/v1/media/')) return fulfillPagedProducts(route,{ status: 404, body: '' });
+    return fulfillPagedProducts(route,{ json: path === '/v1/status' ? { worker: 'online' } : [] });
   });
   await page.goto('/');
   await page
@@ -281,7 +282,7 @@ test('source conflicts and unknown fields retain their original explanations wit
 }) => {
   const f = await fixture(page);
   await page.route('**/v1/production-preparations/preview', (route) =>
-    route.fulfill({
+    fulfillPagedProducts(route,{
       json: {
         id: previewId,
         fingerprint: 'a'.repeat(64),
@@ -382,7 +383,7 @@ test('warehouse selector reaches hidden listings and later pages, retains the ch
           : {}),
       };
     }
-    return route.fulfill({ json: base });
+    return fulfillPagedProducts(route,{ json: base });
   });
   await f.region.getByRole('checkbox', { name: 'Nước Lau Sàn Hương Quế', exact: false }).check();
   const editor = f.region.locator('.preparation-entry');

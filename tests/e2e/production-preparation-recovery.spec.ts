@@ -1,15 +1,32 @@
-import { test, expect, type Page } from '@playwright/test';
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 const key = 'recovery-floor-cleaner';
 const title = 'Nước Lau Sàn Hương Quế';
 const preparationId = '1651c52c-4cc8-4b57-951a-6b9b4d6b2281';
 const priceId = '252d91d1-93c7-429a-a4fc-1e719a0bbaf9';
 const fact = (value: unknown) => ({ value, confirmed: true, sources: [] });
-const workingKey = 'production-preparation-working-copy-v1';
+const workingKey = 'production-preparation-working-copy-v1:2010476:1423724897';
+const pendingKey = 'production-preparation-pending:2010476:1423724897';
+async function showStep(region: Locator, step: 1 | 2 | 3) {
+  const labels = { 1: 'Chọn sản phẩm', 2: 'Bổ sung thông tin', 3: 'Kiểm tra' };
+  await region.getByRole('button', { name: step + '. ' + labels[step], exact: true }).click();
+}
+async function openDisclosure(region: Locator, name: string) {
+  const summary = region.locator('summary').filter({ hasText: name });
+  await expect(summary).toBeVisible();
+  if (!(await summary.evaluate(element => (element.parentElement as HTMLDetailsElement).open)))
+    await summary.click();
+}
+async function showSupplement(region: Locator) {
+  await showStep(region, 2);
+  await openDisclosure(region, 'Vận chuyển & kiện hàng');
+}
 async function openPreparation(page: Page) {
   await page
     .getByRole('navigation', { name: 'Điều hướng chính', exact: true })
     .getByRole('button', { name: 'Đăng hàng', exact: true })
     .click();
+  await page.getByRole('combobox', { name: 'Đăng vào shop', exact: true }).selectOption('2010476:1423724897');
   await page.getByRole('tab', { name: 'Chuẩn bị lô mới', exact: true }).click();
 }
 
@@ -17,21 +34,26 @@ test('reload preserves an explicit shipping override instead of resetting it to 
   const f = await fixture(page, 'none');
   f.draft.logistics = { '7': fact(true) };
   await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
-  const channel = f.region.getByRole('checkbox', { name: 'Vận chuyển phù hợp', exact: true });
+  await showSupplement(f.region);
+  await openDisclosure(f.region, 'Kênh vận chuyển');
+  const channel = f.region.getByRole('checkbox', { name: /^Vận chuyển phù hợp/ });
   await expect(channel).toBeChecked();
   await channel.uncheck();
   await expect.poll(() => page.evaluate(key => JSON.parse(sessionStorage.getItem(key) ?? 'null')?.entries[0]?.choices.logistics, workingKey))
     .toEqual([{ channelId: '7', enabled: false }]);
   await page.reload();
   await openPreparation(page);
+  await showSupplement(f.region);
+  await openDisclosure(f.region, 'Kênh vận chuyển');
   await expect(channel).not.toBeChecked();
+  await showStep(f.region, 3);
   await expect(f.region.getByRole('button', { name: 'Kiểm tra 1 listing đã chọn', exact: true })).toBeEnabled();
   expect(f.reads.source).toBe(2);
   expect(f.reads.metadata).toBe(2);
   expect(f.draft.logistics).toEqual({ '7': fact(true) });
   expect(f.writes).toEqual([]);
 });
-async function fixture(page: Page, failure: 'context' | 'source' | 'execution' | 'none') {
+async function fixture(page: Page, failure: 'context' | 'source' | 'execution' | 'none', lateSource = false) {
   const writes: string[] = [],
     reads = { context: 0, source: 0, execution: 0, metadata: 0 },
     scope = { shopId: '1423724897', partnerId: '2010476' };
@@ -98,14 +120,23 @@ async function fixture(page: Page, failure: 'context' | 'source' | 'execution' |
       writes.push(path);
       return route.abort();
     }
+    if (path === '/v1/shops') return fulfillPagedProducts(route,{json:[{
+      id:'recovery-connection',name:'vuatinhdau.vn',state:'connected',revision:1,
+      scope:{environment:'production',partnerId:scope.partnerId,shopId:scope.shopId},
+    }]});
+    if (path === '/v1/production-preparations/' + preparationId + '/source-changes') return fulfillPagedProducts(route,{json:{
+      preparationId,scope,entries:[{productKey:key,title,sourceRevision:1,currentRevision:draft.revision,
+        state:draft.revision===1?'current':'changed',changedFields:draft.revision===1?[]:['revision'],changes:[]}],
+    }});
     if (path === '/v1/production-preparations/context') {
       reads.context++;
       if (failure === 'context' && reads.context === 1)
-        return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
-      return route.fulfill({
+        return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+      return fulfillPagedProducts(route,{
         json: {
           scope,
           products: [
+            ...(lateSource ? Array.from({length:120},(_,index)=>({productKey:`other-${index}`,title:`Bộ khác ${index}`,revision:1,skus:[],issues:[]})) : []),
             { productKey: key, title, revision: draft.revision, skus: ['SKU-A'], issues: [] },
           ],
           pricebooks: [{ id: priceId, filename: 'DORIS.xlsx' }],
@@ -116,11 +147,11 @@ async function fixture(page: Page, failure: 'context' | 'source' | 'execution' |
     if (path === '/v1/products/' + key) {
       reads.source++;
       if (failure === 'source' && reads.source === 1)
-        return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
-      return route.fulfill({ json: draft });
+        return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+      return fulfillPagedProducts(route,{ json: draft });
     }
     if (path === '/v1/imports/' + priceId)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: priceId,
           filename: 'DORIS.xlsx',
@@ -130,7 +161,7 @@ async function fixture(page: Page, failure: 'context' | 'source' | 'execution' |
     if (path === '/v1/production-preparations/metadata') {
       reads.metadata++;
       const query = new URL(request.url()).searchParams;
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           shop: { id: scope.shopId, name: 'vuatinhdau.vn' },
           categories: [{ id: '101', label: 'Lau sàn', path: 'Nhà cửa > Lau sàn' }],
@@ -140,6 +171,14 @@ async function fixture(page: Page, failure: 'context' | 'source' | 'execution' |
               id: '7',
               name: 'Vận chuyển phù hợp',
               enabled: true,
+              parentId: '0',
+              relationsKnown: true,
+              feeType: 'SIZE_INPUT',
+              relatedEnabledChannelIds: [],
+              dependentBlockChannelIds: [],
+              weightKg: { min: 0, max: 0 },
+              maxDimension: { height: 0, width: 0, length: 0, sum: 0, unit: 'cm' },
+              volume: { min: 0, max: 0 },
               forceEnabled: false,
               compulsory: false,
             },
@@ -182,14 +221,14 @@ async function fixture(page: Page, failure: 'context' | 'source' | 'execution' |
     if (path === '/v1/production-preparations/' + preparationId + '/execution') {
       reads.execution++;
       if (reads.execution === 1)
-        return route.fulfill({
+        return fulfillPagedProducts(route,{
           status: 409,
           json: {
             code: 'PRODUCTION_EXECUTION_POLICY_SOURCE_CHANGED',
             message: 'Lựa chọn thực thi cần đối chiếu. Đọc lại đợt đăng trước khi tiếp tục.',
           },
         });
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           state: 'paused',
           completedBatches: [],
@@ -198,9 +237,9 @@ async function fixture(page: Page, failure: 'context' | 'source' | 'execution' |
         },
       });
     }
-    if (path === '/v1/production-batches') return route.fulfill({ json: { batches: [] } });
-    if (path.startsWith('/v1/media/')) return route.fulfill({ status: 404, body: '' });
-    return route.fulfill({ json: path === '/v1/status' ? { worker: 'online' } : [] });
+    if (path === '/v1/production-batches') return fulfillPagedProducts(route,{ json: { batches: [] } });
+    if (path.startsWith('/v1/media/')) return fulfillPagedProducts(route,{ status: 404, body: '' });
+    return fulfillPagedProducts(route,{ json: path === '/v1/status' ? { worker: 'online' } : [] });
   });
   await page.goto('/');
   await openPreparation(page);
@@ -227,15 +266,19 @@ test('failed context read stops loading and offers explicit read-only recovery',
 test('failed source read offers a retry and keeps selection and common stock', async ({ page }) => {
   const f = await fixture(page, 'source');
   await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
+  await showStep(f.region, 2);
   const retry = f.region.getByRole('button', { name: 'Đọc lại nguồn listing này', exact: true });
   await expect(retry).toBeVisible();
   await expect(f.region.getByText('Đang đọc nguồn và dòng giá…', { exact: true })).toHaveCount(0);
   await f.region.getByLabel('Tồn đăng bán chung cho các SKU đã chọn').fill('100');
   await retry.click();
+  await showStep(f.region, 3);
   await expect(
     f.region.getByRole('button', { name: 'Kiểm tra 1 listing đã chọn', exact: true }),
   ).toBeEnabled();
+  await showStep(f.region, 1);
   await expect(f.region.getByRole('checkbox', { name: new RegExp(title) })).toBeChecked();
+  await showStep(f.region, 2);
   await expect(f.region.getByLabel('Tồn đăng bán chung cho các SKU đã chọn')).toHaveValue('100');
   await expect(retry).toHaveCount(0);
   expect(f.reads.source).toBe(2);
@@ -261,14 +304,17 @@ test('reload before preview restores scoped inputs after fresh reads without res
 }) => {
   const f = await fixture(page, 'none');
   await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
+  await showSupplement(f.region);
   await f.region.getByRole('combobox', { name: 'Ngành hàng', exact: true }).selectOption('101');
   await f.region.getByRole('combobox', { name: 'Thương hiệu', exact: true }).selectOption('202');
   await f.region.getByLabel('Tồn đăng bán chung cho các SKU đã chọn').fill('100');
-  await f.region.getByRole('button', { name: /Áp dụng tồn/ }).click();
+  await f.region.getByRole('button', { name: 'Áp dụng 100 cho các dòng SKU đã chọn', exact: true }).click();
   await f.region.getByLabel('Dài kiện hàng (cm)', { exact: true }).fill('12');
   await f.region.getByLabel('Rộng kiện hàng (cm)', { exact: true }).fill('13');
   await f.region.getByLabel('Cao kiện hàng (cm)', { exact: true }).fill('28');
+  await openDisclosure(f.region, 'Kênh vận chuyển');
   await f.region.getByRole('checkbox', { name: 'Vận chuyển phù hợp', exact: true }).check();
+  await openDisclosure(f.region, 'Kho áp dụng');
   await f.region.getByRole('button', { name: 'Chọn listing tham khảo kho', exact: true }).click();
   await f.region
     .getByRole('combobox', { name: 'Listing đang có tại shop', exact: true })
@@ -276,9 +322,10 @@ test('reload before preview restores scoped inputs after fresh reads without res
   await expect(
     f.region.getByText('Đã có đối chiếu kho cho đúng shop và các SKU đã chọn.'),
   ).toBeVisible();
-  await f.region
-    .getByRole('checkbox', { name: 'Tạm hoãn kiểm tra ảnh để thử đăng ẩn', exact: true })
-    .check();
+  await showStep(f.region, 3);
+  await openDisclosure(f.region, 'Thay đổi cách đăng & kiểm tra');
+  await f.region.getByRole('radio', { name: 'Mở bán sau kiểm tra', exact: true }).check();
+  await expect(f.region.getByRole('checkbox', { name: 'Tạm hoãn kiểm tra ảnh để thử đăng ẩn', exact: true })).not.toBeChecked();
   await expect
     .poll(() =>
       page.evaluate(
@@ -301,10 +348,14 @@ test('reload before preview restores scoped inputs after fresh reads without res
   for (const property of ['metadata', 'knowledgeAcceptanceId', 'publicationMode', 'imageQcPolicy'])
     expect(copy.entries[0]).not.toHaveProperty(property);
   expect(copy).not.toHaveProperty('imageQcPolicy');
+  expect(copy).not.toHaveProperty('publicationMode');
   const before = { ...f.reads };
   await page.reload();
   await openPreparation(page);
+  await showStep(f.region, 1);
   await expect(f.region.getByRole('checkbox', { name: new RegExp(title) })).toBeChecked();
+  await showSupplement(f.region);
+  await openDisclosure(f.region, 'Kênh vận chuyển');
   await expect(f.region.getByRole('combobox', { name: 'Thương hiệu', exact: true })).toHaveValue(
     '202',
   );
@@ -313,9 +364,12 @@ test('reload before preview restores scoped inputs after fresh reads without res
   await expect(
     f.region.getByRole('checkbox', { name: 'Vận chuyển phù hợp', exact: true }),
   ).toBeChecked();
+  await showStep(f.region, 3);
+  await openDisclosure(f.region, 'Thay đổi cách đăng & kiểm tra');
   await expect(
     f.region.getByRole('checkbox', { name: 'Tạm hoãn kiểm tra ảnh để thử đăng ẩn', exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
+  await expect(f.region.getByRole('radio', { name: 'Mở bán sau kiểm tra', exact: true })).not.toBeChecked();
   await expect(f.region.getByRole('radio', { name: 'Đăng ẩn để QC', exact: true })).toBeChecked();
   await expect(
     f.region.getByText('Đã có đối chiếu kho cho đúng shop và các SKU đã chọn.'),
@@ -328,7 +382,9 @@ test('reload before preview restores scoped inputs after fresh reads without res
   expect(f.reads.source).toBeGreaterThan(before.source);
   expect(f.reads.metadata).toBeGreaterThan(before.metadata);
   expect(f.writes).toEqual([]);
+  await openDisclosure(f.region, 'Đã giữ phần nhập tạm');
   await f.region.getByRole('button', { name: 'Bỏ phần nhập tạm', exact: true }).click();
+  await showStep(f.region, 1);
   await expect(f.region.getByRole('checkbox', { name: new RegExp(title) })).not.toBeChecked();
   await expect
     .poll(() => page.evaluate((key) => sessionStorage.getItem(key), workingKey))
@@ -343,6 +399,7 @@ for (const changedTarget of ['source revision', 'shop scope'] as const)
   test(`does not restore inputs onto a changed ${changedTarget}`, async ({ page }) => {
     const f = await fixture(page, 'none');
     await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
+    await showSupplement(f.region);
     await f.region.getByLabel('Dài kiện hàng (cm)', { exact: true }).fill('12');
     await expect
       .poll(() =>
@@ -353,9 +410,13 @@ for (const changedTarget of ['source revision', 'shop scope'] as const)
       )
       .toBe(1);
     if (changedTarget === 'source revision') f.draft.revision = 2;
-    else f.scope.shopId = '999999';
+    else await page.evaluate(storageKey=>{
+      const stored=JSON.parse(sessionStorage.getItem(storageKey)!);stored.scope.shopId='999999';
+      sessionStorage.setItem(storageKey,JSON.stringify(stored));
+    },workingKey);
     await page.reload();
     await openPreparation(page);
+    await showStep(f.region, 1);
     await expect(f.region.getByRole('checkbox', { name: new RegExp(title) })).not.toBeChecked();
     await expect(f.region.getByLabel('Dài kiện hàng (cm)', { exact: true })).toHaveCount(0);
     await expect(f.region.getByLabel('Phần nhập tạm')).toContainText(
@@ -369,6 +430,7 @@ test('an uncertain preview keeps priority over the temporary form and is never r
 }) => {
   const f = await fixture(page, 'none');
   await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
+  await showSupplement(f.region);
   await f.region.getByLabel('Dài kiện hàng (cm)', { exact: true }).fill('12');
   await expect
     .poll(() =>
@@ -387,8 +449,8 @@ test('an uncertain preview keeps priority over the temporary form and is never r
     ],
   };
   await page.evaluate(
-    (value) => sessionStorage.setItem('production-preparation-pending', JSON.stringify(value)),
-    pending,
+    ({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)),
+    { key: pendingKey, value: pending },
   );
   const before = f.reads.source;
   await page.reload();
@@ -396,10 +458,11 @@ test('an uncertain preview keeps priority over the temporary form and is never r
   await expect(
     f.region.getByRole('button', { name: 'Lấy lại kết quả kiểm tra trước', exact: true }),
   ).toBeVisible();
+  await showStep(f.region, 1);
   await expect(f.region.getByRole('checkbox', { name: new RegExp(title) })).not.toBeChecked();
   expect(
-    await page.evaluate(() =>
-      JSON.parse(sessionStorage.getItem('production-preparation-pending')!),
+    await page.evaluate(key =>
+      JSON.parse(sessionStorage.getItem(key)!), pendingKey,
     ),
   ).toEqual(pending);
   expect(f.reads.source).toBe(before);
@@ -411,6 +474,7 @@ test('successful explicit registration removes registered listings from the temp
 }) => {
   const f = await fixture(page, 'none');
   await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
+  await showSupplement(f.region);
   await f.region.getByLabel('Dài kiện hàng (cm)', { exact: true }).fill('12');
   await expect
     .poll(() =>
@@ -420,9 +484,9 @@ test('successful explicit registration removes registered listings from the temp
       ),
     )
     .toBe(1);
-  await page.route('**/v1/production-preparations/preview', (route) => {
+  await page.route('**/v1/production-preparations/preview?*', (route) => {
     f.writes.push('/v1/production-preparations/preview');
-    return route.fulfill({
+    return fulfillPagedProducts(route,{
       json: {
         id: preparationId,
         fingerprint: 'a'.repeat(64),
@@ -441,10 +505,11 @@ test('successful explicit registration removes registered listings from the temp
       },
     });
   });
-  await page.route('**/v1/production-preparations/' + preparationId + '/register', (route) => {
+  await page.route('**/v1/production-preparations/' + preparationId + '/register?*', (route) => {
     f.writes.push('/v1/production-preparations/' + preparationId + '/register');
-    return route.fulfill({ json: {} });
+    return fulfillPagedProducts(route,{ json: {} });
   });
+  await showStep(f.region, 3);
   await f.region.getByRole('button', { name: 'Kiểm tra 1 listing đã chọn', exact: true }).click();
   expect(await page.evaluate((key) => sessionStorage.getItem(key), workingKey)).not.toBeNull();
   await f.region
@@ -476,7 +541,7 @@ for (const scope of ['initial', 'current category'] as const) {
       calls++;
       requestedCategories.push(new URL(route.request().url()).searchParams.get('categoryId'));
       if (calls === failureCall)
-        return route.fulfill({
+        return fulfillPagedProducts(route,{
           status: 409,
           json: {
             code:
@@ -491,6 +556,7 @@ for (const scope of ['initial', 'current category'] as const) {
       return route.fallback();
     });
     await f.region.getByRole('checkbox', { name: new RegExp(title) }).check();
+  await showSupplement(f.region);
     if (scope === 'current category')
       await f.region.getByRole('combobox', { name: 'Ngành hàng', exact: true }).selectOption('101');
     const retry = f.region.getByRole('button', { name: 'Đọc lại lựa chọn của shop', exact: true });
@@ -501,9 +567,11 @@ for (const scope of ['initial', 'current category'] as const) {
     await f.region.getByLabel('Rộng kiện hàng (cm)', { exact: true }).fill('13');
     await retry.click();
     await expect(retry).toBeDisabled();
+    await showStep(f.region, 3);
     await expect(
       f.region.getByRole('button', { name: 'Kiểm tra 1 listing đã chọn', exact: true }),
     ).toBeDisabled();
+    await showStep(f.region, 2);
     await f.region.getByLabel('Cao kiện hàng (cm)', { exact: true }).fill('29');
     releaseRetry();
     await expect(retry).toHaveCount(0);
@@ -516,7 +584,9 @@ for (const scope of ['initial', 'current category'] as const) {
     await expect(f.region.getByLabel('Dài kiện hàng (cm)', { exact: true })).toHaveValue('12');
     await expect(f.region.getByLabel('Rộng kiện hàng (cm)', { exact: true })).toHaveValue('13');
     await expect(f.region.getByLabel('Cao kiện hàng (cm)', { exact: true })).toHaveValue('29');
+    await showStep(f.region, 1);
     await expect(f.region.getByRole('checkbox', { name: new RegExp(title) })).toBeChecked();
+    await showStep(f.region, 2);
     expect(requestedCategories.at(-1)).toBe(scope === 'initial' ? null : '101');
     if (scope === 'current category')
       await expect(f.region.getByRole('combobox', { name: 'Ngành hàng', exact: true })).toHaveValue(
@@ -526,3 +596,26 @@ for (const scope of ['initial', 'current category'] as const) {
     expect(f.writes).toEqual([]);
   });
 }
+
+
+test('restores a selected source beyond the first page without treating it as missing',async({page})=>{
+  const f=await fixture(page,'none',true);
+  await expect(f.region.getByRole('checkbox',{name:new RegExp(title)})).toHaveCount(0);
+  await f.region.getByRole('button',{name:'Trang sau',exact:true}).click();
+  await expect(f.region.getByRole('status').filter({hasText:'Trang 2/3'})).toBeVisible();
+  await f.region.getByRole('button',{name:'Trang sau',exact:true}).click();
+  await f.region.getByRole('checkbox',{name:new RegExp(title)}).check();
+  await showSupplement(f.region);
+  await f.region.getByLabel('Tồn đăng bán chung cho các SKU đã chọn').fill('100');
+  await f.region.getByLabel('Dài kiện hàng (cm)',{exact:true}).fill('12');
+  await expect.poll(()=>page.evaluate(key=>JSON.parse(sessionStorage.getItem(key)??'null')?.selected,workingKey))
+    .toEqual([{productKey:key,revision:1}]);
+  await page.reload();await openPreparation(page);
+  await showSupplement(f.region);
+  await expect(f.region.getByLabel('Phần nhập tạm')).toContainText('Đã khôi phục phần đang nhập cho 1 listing');
+  await expect(f.region.getByLabel('Phần nhập tạm')).not.toContainText('không còn trong kho');
+  await expect(f.region.getByLabel('Tồn đăng bán chung cho các SKU đã chọn')).toHaveValue('100');
+  await expect(f.region.getByLabel('Dài kiện hàng (cm)',{exact:true})).toHaveValue('12');
+  await expect(f.region.getByRole('button',{name:'Sửa '+title,exact:true})).toBeVisible();
+  expect(f.reads.source).toBe(2);expect(f.writes).toEqual([]);
+});

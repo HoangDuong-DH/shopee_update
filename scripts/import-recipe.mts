@@ -1,3 +1,4 @@
+import { readExistingRecipeProduct, RecipeRequestError } from './import-recipe-product.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -12,7 +13,7 @@ async function call(path: string, init?: RequestInit) {
     headers: { 'X-App-Client': 'internal-workspace', ...init?.headers },
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(data.code ?? 'REQUEST_FAILED');
+  if (!r.ok) throw new RecipeRequestError(r.status,data.code ?? 'REQUEST_FAILED');
   return data;
 }
 async function upload(path: string, expectedSha?: string) {
@@ -60,9 +61,7 @@ const variants = recipe.variants.map((v: any) => {
     imageId: images.get(v.image),
   };
 });
-const existing = ((await call('/v1/products')) as ListingDraft[]).find(
-  (p) => p.productKey === recipe.productKey,
-);
+const existing = await readExistingRecipeProduct(call, recipe.productKey);
 if (existing) {
   console.log(
     JSON.stringify({

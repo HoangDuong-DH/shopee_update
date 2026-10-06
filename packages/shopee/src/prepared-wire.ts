@@ -9,7 +9,7 @@ import {
   type PreparedRemote,
 } from '@shopee/domain';
 import type { FieldSnapshot } from './field-client.js';
-import { isMissingPendingSku } from '../../domain/src/pending-listing-mapping.js';
+import { isMissingPendingSku } from '@shopee/domain';
 
 export const PREPARED_CREATED_ITEM_ID = '$created_item_id' as const;
 export type PreparedWireImageRole = 'cover' | 'gallery' | 'description' | 'variation';

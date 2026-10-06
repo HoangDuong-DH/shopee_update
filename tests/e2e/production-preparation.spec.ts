@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 const sourceKey = 'saved-source-a',
   priceId = '252d91d1-93c7-429a-a4fc-1e719a0bbaf9',
@@ -140,22 +141,22 @@ async function fixture(
         preview.publicationMode =
           route.request().postDataJSON().publicationMode ?? 'hidden_for_review';
         preview.imageQcPolicy = route.request().postDataJSON().imageQcPolicy ?? 'required';
-        return route.fulfill({ json: preview });
+        return fulfillPagedProducts(route,{ json: preview });
       }
       if (path === '/v1/production-preparations/' + previewId + '/register') {
         registered = true;
-        return route.fulfill({
+        return fulfillPagedProducts(route,{
           json: { batches: [{ batchId: 'fixture-only' }], readyCount: 1, blockedCount: 0 },
         });
       }
       if (path === '/v1/production-preparations/' + previewId + '/run') {
         running = true;
-        return route.fulfill({ json: { state: 'running', completedBatches: [], totalBatches: 1 } });
+        return fulfillPagedProducts(route,{ json: { state: 'running', completedBatches: [], totalBatches: 1 } });
       }
       return route.abort();
     }
     if (path === '/v1/production-preparations/context')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           scope: { shopId: '1423724897' },
           products: [summary],
@@ -164,7 +165,7 @@ async function fixture(
         },
       });
     if (path === '/v1/production-preparations/metadata')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           ...meta,
           ...(url.searchParams.get('includeInventory') === 'true'
@@ -196,10 +197,10 @@ async function fixture(
             : {}),
         },
       });
-    if (path === '/v1/products/' + sourceKey) return route.fulfill({ json: draft });
-    if (path === '/v1/products') return route.fulfill({ json: [draft] });
+    if (path === '/v1/products/' + sourceKey) return fulfillPagedProducts(route,{ json: draft });
+    if (path === '/v1/products') return fulfillPagedProducts(route,{ json: [draft] });
     if (path === '/v1/imports/' + priceId)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: priceId,
           filename: 'DORIS.xlsx',
@@ -207,18 +208,18 @@ async function fixture(
         },
       });
     if (path === '/v1/production-preparations/' + previewId + '/execution')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: running
           ? { state: 'running', completedBatches: [], totalBatches: 1 }
           : prior
             ? { state: 'paused', completedBatches: [], totalBatches: 1, ...effectivePolicy }
             : null,
       });
-    if (path === '/v1/production-batches') return route.fulfill({ json: { batches: [] } });
-    if (path.startsWith('/v1/media/')) return route.fulfill({ status: 404, body: '' });
+    if (path === '/v1/production-batches') return fulfillPagedProducts(route,{ json: { batches: [] } });
+    if (path.startsWith('/v1/media/')) return fulfillPagedProducts(route,{ status: 404, body: '' });
     if (path === '/v1/production-pilot/status')
-      return route.fulfill({ status: 503, json: { message: 'Old pilot not part of fixture' } });
-    return route.fulfill({ json: path === '/v1/status' ? { worker: 'online' } : [] });
+      return fulfillPagedProducts(route,{ status: 503, json: { message: 'Old pilot not part of fixture' } });
+    return fulfillPagedProducts(route,{ json: path === '/v1/status' ? { worker: 'online' } : [] });
   });
   await page.goto('/');
   await page
@@ -242,7 +243,7 @@ test('editing a pending preparation invalidates its old preview and preserves th
   await page.route('**/v1/production-preparations/preview', async (route) => {
     requests.push(route.request().postDataJSON());
     if (requests.length === 1) await hold;
-    await route.fulfill({ json: { ...f.preview, publicationMode: 'hidden_for_review' } });
+    await fulfillPagedProducts(route,{ json: { ...f.preview, publicationMode: 'hidden_for_review' } });
   });
   await region
     .getByRole('checkbox', { name: 'Listing tinh dầu đã chuẩn bị', exact: false })
@@ -304,7 +305,7 @@ for (const oldStatus of [200, 503]) {
       requests.push(route.request().postDataJSON());
       const first = requests.length === 1;
       await (first ? old : latest);
-      await route.fulfill({
+      await fulfillPagedProducts(route,{
         status: first ? oldStatus : 200,
         json:
           first && oldStatus !== 200
@@ -384,7 +385,7 @@ test('leaving a pending preparation preserves exact recovery and ignores the old
     requests.push(route.request().postDataJSON());
     const first = requests.length === 1;
     await (first ? old : latest);
-    await route.fulfill({ json: { ...f.preview, publicationMode: 'hidden_for_review' } });
+    await fulfillPagedProducts(route,{ json: { ...f.preview, publicationMode: 'hidden_for_review' } });
     if (first) deliveredOld();
   });
   await region
@@ -518,7 +519,7 @@ test('draft knowledge requires explicit confirmed selections and carries only th
   await page.route('**/v1/seller-knowledge/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/shops'))
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           shops: [
             {
@@ -531,7 +532,7 @@ test('draft knowledge requires explicit confirmed selections and carries only th
       });
     if (path.includes('/evidence/')) {
       evidenceRequests.push(path);
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           observedAt: new Date().toISOString(),
           body: { title: 'Listing lịch sử có nguồn', attributes: [] },
@@ -541,7 +542,7 @@ test('draft knowledge requires explicit confirmed selections and carries only th
     const body = route.request().postDataJSON();
     knowledgeRequests.push({ path, body });
     if (path.endsWith('/draft-recommendations'))
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           target,
           fingerprint: fp,
@@ -576,7 +577,7 @@ test('draft knowledge requires explicit confirmed selections and carries only th
         },
       });
     if (path.endsWith('/draft-acceptances'))
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: receiptId,
           target,
@@ -655,7 +656,7 @@ test('a delayed knowledge acceptance preserves newer unrelated preparation edits
   await page.route('**/v1/seller-knowledge/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/shops'))
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           shops: [
             {
@@ -671,7 +672,7 @@ test('a delayed knowledge acceptance preserves newer unrelated preparation edits
       expiresAt: new Date(Date.now() + 600000).toISOString(),
     };
     if (path.endsWith('/draft-recommendations'))
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           target,
           fingerprint: fp,
@@ -696,7 +697,7 @@ test('a delayed knowledge acceptance preserves newer unrelated preparation edits
     if (path.endsWith('/draft-acceptances')) {
       requested();
       await waiting;
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           id: receiptId,
           target,

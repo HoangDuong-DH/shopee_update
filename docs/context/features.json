@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "projectId": "listing-studio",
+  "coreDocuments": [
+    "AGENTS.md",
+    "docs/context/PROJECT_MAP.md",
+    "docs/context/DATA_CONTRACTS.md"
+  ],
+  "features": [
+    {
+      "id": "session-continuity",
+      "title": "Tiếp nối phiên và context",
+      "document": "docs/context/features/session-continuity.md",
+      "code": [
+        "packages/agent-runtime/src/session-context.ts",
+        "packages/agent-runtime/src/session-store.ts",
+        "scripts/session-context.mts",
+        "scripts/session-context.mjs",
+        "packages/agent-runtime/src/management.ts",
+        "packages/agent-runtime/src/session-transfer.ts"
+      ],
+      "tests": [
+        "tests/unit/session-context.test.ts",
+        "tests/unit/session-store.test.ts",
+        "tests/unit/management-harness.test.ts",
+        "tests/unit/session-cli.test.ts",
+        "tests/unit/session-transfer.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/ai/SESSION_CONTINUITY.md",
+        "docs/ai/MODEL_MANAGEMENT_HARNESS.md"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "shop-connections",
+      "title": "Kết nối nhiều shop",
+      "document": "docs/context/features/shop-connections.md",
+      "code": [
+        "apps/api/src/production-authorization-service.ts",
+        "apps/api/src/production-connection-service.ts",
+        "apps/api/src/production-refresh-service.ts",
+        "apps/api/src/connection-maintenance.ts"
+      ],
+      "tests": [
+        "tests/unit/shop-connections.test.ts",
+        "tests/unit/connection-authorization.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/onboarding/SHOP_CONNECTIONS.md",
+        "docs/runbooks/production-pilot-token-refresh.md"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "source-intake",
+      "title": "Nguồn ảnh, nội dung, SKU và giá",
+      "document": "docs/context/features/source-intake.md",
+      "code": [
+        "packages/domain/src/source/word.ts",
+        "packages/domain/src/source/assets.ts",
+        "apps/api/src/listing-price-mapping.ts",
+        "apps/api/src/production-source-contract.ts",
+        "apps/worker/src/imports.ts",
+        "apps/worker/src/source-parser.ts",
+        "apps/worker/src/source-parser-worker.ts",
+        "packages/persistence/src/blob-store.ts"
+      ],
+      "tests": [
+        "tests/unit/production-source-contract.test.ts",
+        "tests/unit/source-import-worker.test.ts",
+        "tests/unit/source-import-parser.test.ts",
+        "tests/unit/source-import-blob.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/runbooks/source-provenance-guard.md",
+        "docs/runbooks/listing-price-mapping.md",
+        "docs/runbooks/internal-source-intake.md"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "listing-preparation",
+      "title": "Chuẩn bị listing và phân loại",
+      "document": "docs/context/features/listing-preparation.md",
+      "code": [
+        "apps/api/src/production-preparation-service.ts",
+        "apps/api/src/production-preparation-execution.ts",
+        "packages/domain/src/prepared-batch.ts",
+        "packages/domain/src/contracts.ts"
+      ],
+      "tests": [
+        "tests/unit/prepared-wire.test.ts",
+        "tests/unit/prepared-wire-qc-adversarial.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/operator-guides/chuan-bi-bo-listing.md",
+        "docs/operator-guides/thong-tin-chi-tiet-theo-nganh.md"
+      ],
+      "dependsOn": [
+        "source-intake"
+      ]
+    },
+    {
+      "id": "publication-recovery",
+      "title": "Đăng ẩn và phục hồi operation",
+      "document": "docs/context/features/publication-recovery.md",
+      "code": [
+        "apps/api/src/production-batch-runner.ts",
+        "apps/api/src/production-batch-recovery.ts",
+        "apps/api/src/production-execution-policy.ts",
+        "packages/domain/src/plans.ts"
+      ],
+      "tests": [
+        "tests/unit/prepared-readback.test.ts",
+        "tests/unit/prepared-readback-timeouts.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/runbooks/internal-batch-resilience.md",
+        "docs/operator-guides/dang-hang-tu-bo-listing-da-luu.md"
+      ],
+      "dependsOn": [
+        "listing-preparation"
+      ]
+    },
+    {
+      "id": "archive-copy",
+      "title": "Kho snapshot và sao chép",
+      "document": "docs/context/features/archive-copy.md",
+      "code": [
+        "packages/domain/src/archive-clone.ts",
+        "packages/domain/src/archive-clone-qc.ts",
+        "packages/persistence/src/local-archives.ts",
+        "apps/api/src/archive-clone-coordinator.ts"
+      ],
+      "tests": [
+        "tests/unit/archive-clone.test.ts",
+        "tests/unit/archive-clone-qc.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/handoffs/PROJECT_HANDOFF.md",
+        "docs/runbooks/source-provenance-guard.md"
+      ],
+      "dependsOn": [
+        "shop-connections"
+      ]
+    },
+    {
+      "id": "media-quality",
+      "title": "Ảnh bìa, gallery và QC",
+      "document": "docs/context/features/media-quality.md",
+      "code": [
+        "apps/api/src/bulk-product-edit-service.ts",
+        "apps/api/src/image-qc-service.ts",
+        "apps/api/src/prepared-image-qc.ts",
+        "packages/domain/src/bulk-product-edit.ts"
+      ],
+      "tests": [
+        "tests/unit/bulk-product-edit.test.ts",
+        "tests/unit/archive-clone-image-compare.test.ts"
+      ],
+      "relatedDocuments": [
+        "docs/runbooks/source-provenance-guard.md",
+        "docs/runbooks/internal-manual-review.md"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "workspace-ui",
+      "title": "UX/UI và luồng công việc",
+      "document": "docs/context/features/workspace-ui.md",
+      "code": [
+        "apps/web/src/Workspace.tsx",
+        "apps/web/src/OperationsCenter.tsx",
+        "apps/web/src/useWorkspaceDataUpdates.ts",
+        "apps/web/src/ProductPager.tsx",
+        "packages/domain/src/product-page.ts",
+        "packages/persistence/src/product-pages.ts"
+      ],
+      "tests": [
+        "tests/unit/bulk-connection-actions.test.ts",
+        "tests/unit/product-pages.test.ts",
+        "tests/integration/product-pages.test.ts",
+        "tests/e2e/production-preparation-recovery.spec.ts"
+      ],
+      "relatedDocuments": [
+        "docs/runbooks/listing-workspace.md",
+        "docs/runbooks/internal-development.md"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "setup-transfer",
+      "title": "Cài mới, chuyển máy và đóng gói",
+      "document": "docs/context/features/setup-transfer.md",
+      "code": [
+        "scripts/bootstrap.mjs",
+        "scripts/local-launcher.mjs",
+        "scripts/transfer-local.mjs",
+        "scripts/release-package.mjs",
+        "packages/persistence/src/runtime-pool.ts",
+        "packages/persistence/src/db.ts",
+        "apps/api/src/main.ts",
+        "apps/worker/src/main.ts",
+        "scripts/local-supervisor.mjs",
+        "scripts/local-supervisor-policy.mjs",
+        "scripts/runtime-files.mjs",
+        "scripts/runtime-endurance.mts"
+      ],
+      "tests": [
+        "tests/unit/onboarding.test.ts",
+        "tests/onboarding-release.test.mjs",
+        "tests/unit/runtime-pool.test.ts",
+        "tests/unit/database-response-recovery.test.ts",
+        "tests/unit/database-response-api.test.ts",
+        "tests/integration/database-runtime-recovery.test.ts",
+        "tests/local-supervisor.test.mjs",
+        "tests/runtime-endurance.test.mjs"
+      ],
+      "relatedDocuments": [
+        "docs/onboarding/START_HERE.md",
+        "docs/onboarding/CODEX_FIRST_RUN.md",
+        "docs/onboarding/TRANSFER_AND_RECOVERY.md",
+        "docs/onboarding/ACCEPTANCE.md",
+        "docs/onboarding/SESSION_CONTEXT_TRANSFER.md",
+        "docs/runbooks/database-runtime-resilience.md",
+        "docs/runbooks/local-service-supervisor.md",
+        "docs/runbooks/runtime-endurance.md"
+      ],
+      "dependsOn": []
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { expect, test, type Page } from '@playwright/test';
 
 const partnerId = '2010476';
@@ -27,16 +28,16 @@ async function prepare(page: Page) {
       writes.push(url.pathname + url.search);
       return route.abort(); // The response was lost, not proof that the server rejected the write.
     }
-    if (path === '/v1/shops') return route.fulfill({ json: shopIds.map((shopId, index) => ({
+    if (path === '/v1/shops') return fulfillPagedProducts(route,{ json: shopIds.map((shopId, index) => ({
       id: `shop-${index}`, name: batches[index]!.shopName, state: 'connected',
       scope: { environment: 'production', partnerId, shopId },
     })) });
-    if (path === '/v1/production-batches') return route.fulfill({ json: { batches } });
-    if (path === '/v1/production-preparations/context') return route.fulfill({ json: {
+    if (path === '/v1/production-batches') return fulfillPagedProducts(route,{ json: { batches } });
+    if (path === '/v1/production-preparations/context') return fulfillPagedProducts(route,{ json: {
       scope: { shopId: url.searchParams.get('shopId'), partnerId }, products: [], pricebooks: [], preparations: [],
     } });
-    if (path === '/v1/status') return route.fulfill({ json: { worker: 'online' } });
-    return route.fulfill({ json: [] });
+    if (path === '/v1/status') return fulfillPagedProducts(route,{ json: { worker: 'online' } });
+    return fulfillPagedProducts(route,{ json: [] });
   });
   await page.goto('/');
   return writes;
@@ -74,7 +75,7 @@ test('export downloads the chosen shop report through the read-only scoped endpo
   let requestUrl = '';
   await page.route('**/v1/production-batches/*/report.xlsx?*', route => {
     requestUrl = route.request().url();
-    return route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('PK report fixture') });
+    return fulfillPagedProducts(route,{ contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('PK report fixture') });
   });
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Xuất báo cáo Excel', exact: true }).click();
@@ -90,7 +91,7 @@ test('export failure is visible and cannot download a JSON error as a workbook',
   const writes = await prepare(page);
   const downloads: string[] = [];
   page.on('download', value => downloads.push(value.suggestedFilename()));
-  await page.route('**/v1/production-batches/*/report.xlsx?*', route => route.fulfill({ status: 409, json: { code: 'PRODUCTION_BATCH_SCOPE_MISMATCH' } }));
+  await page.route('**/v1/production-batches/*/report.xlsx?*', route => fulfillPagedProducts(route,{ status: 409, json: { code: 'PRODUCTION_BATCH_SCOPE_MISMATCH' } }));
   await page.getByRole('button', { name: 'Xuất báo cáo Excel', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Chưa lấy được báo cáo của đợt này');
   await expect(page.getByRole('button', { name: 'Xuất báo cáo Excel', exact: true })).toBeEnabled();

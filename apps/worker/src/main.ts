@@ -2,10 +2,10 @@ import 'dotenv/config';
 import { transferRecoveryRequired } from '@shopee/persistence';
 if (transferRecoveryRequired()) throw new Error('TRANSFER_WORKER_HELD');
 import { hostname } from 'node:os';
-import { Pool, Repository, BlobStore, SandboxCreateTrialStore, runtimePoolConfig } from '@shopee/persistence';
+import { Repository, BlobStore, SandboxCreateTrialStore, createRuntimePool } from '@shopee/persistence';
 import { importNext } from './imports.js';
 import { runSandboxCreateTrialOnce } from './sandbox-create-trials.js';
-const pool = new Pool(runtimePoolConfig()),
+const pool = createRuntimePool(),
   repo = new Repository(pool),
   blobs = new BlobStore(process.env.DATA_ROOT ?? '.local/data'),
   trials = new SandboxCreateTrialStore(pool);

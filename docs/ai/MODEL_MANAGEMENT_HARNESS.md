@@ -25,7 +25,7 @@ The model management harness is a deterministic boundary around AI-assisted inve
 
 A model-facing prompt should contain, in order:
 
-1. the public current handoff;
+1. a bounded session brief containing public instructions, feature contracts and the selected checkpoint;
 2. the rendered management corridor;
 3. a detached plan projection;
 4. current unresolved issues;
@@ -41,3 +41,7 @@ The model may recommend an action. It may report a production result only when t
 ## Evaluation
 
 `npm run test:eval` runs deterministic fixtures. Its output explicitly sets `modelConfigured: false`, `modelAccuracy: not_measured`, and `shopeeRequests: 0`. A future model evaluation must remain separate from production writes and must report the model, dataset, rubric, failures, and observed tool traces.
+
+## Session continuity
+
+[Session continuity](SESSION_CONTINUITY.md) adds explicit feature routing, bounded context packets, a private revisioned checkpoint and immutable local deltas. It preserves decisions and paused work, detects changed/missing evidence and exposes remaining references without loading histories. The CLI never invokes models, refreshes connections, changes the business database or resumes operations. It does not modify the management corridor or grant authority. Context records remain reference data; current source, backend journals and readback remain authoritative. Repository instructions define a routine, not a platform hook that runs automatically on every chat message.

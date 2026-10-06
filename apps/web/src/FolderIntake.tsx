@@ -1,3 +1,4 @@
+import { RequestError } from './api.js';
 import { ContentWorkbookIntake } from './ContentWorkbookIntake.js';
 import type { ContentSelection, ContentBinding } from '../../../packages/domain/src/content-workbook.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -123,12 +124,13 @@ export function FolderIntake({
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkGuard = useRef(false);
   const [bulkSavedProducts, setBulkSavedProducts] = useState<ListingDraft[]>([]);
+  const [batchProducts,setBatchProducts]=useState<ListingDraft[]>([]);
   const allProducts = useMemo(() => {
     const merged = new Map(products.map(product => [product.productKey, product]));
-    for (const product of bulkSavedProducts)
+    for (const product of [...batchProducts,...bulkSavedProducts])
       if ((merged.get(product.productKey)?.revision ?? 0) <= product.revision) merged.set(product.productKey, product);
     return [...merged.values()];
-  }, [products, bulkSavedProducts]);
+  }, [products, batchProducts, bulkSavedProducts]);
   const savedBatch = useRef<InputBatchRecord | undefined>(initialBatch);
   const [batchName, setBatchName] = useState(initial?.name ?? 'Đợt listing mới');
   const [chosenFiles, setChosenFiles] = useState<File[]>([]);
@@ -584,6 +586,21 @@ export function FolderIntake({
       });
   }, [context, priceReady, catalog, profile, allProducts]);
 
+  // Saved batch identity is independent of the current library page.
+  const knownBatchProducts=JSON.stringify([...new Set(Object.values(productKeys))]);
+  useEffect(()=>{
+    const controller=new AbortController(),keys=JSON.parse(knownBatchProducts) as string[];
+    let cursor=0;const found:ListingDraft[]=[];
+    void Promise.all(Array.from({length:Math.min(3,keys.length)},async()=>{
+      while(cursor<keys.length && !controller.signal.aborted){
+        const key=keys[cursor++];
+        try {found.push(await api<ListingDraft>('/v1/products/'+encodeURIComponent(key!),{signal:controller.signal}));}
+        catch(cause){if(!(cause instanceof RequestError) || cause.status!==404) throw cause;}
+      }
+    })).then(()=>{if(!controller.signal.aborted)setBatchProducts(found);})
+      .catch(cause=>{if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'Chưa đọc được nguồn đã lưu của đợt.');});
+    return ()=>controller.abort();
+  },[knownBatchProducts]);
   function choosePrice(id: string) {
     if (locked) return;
     sourceGeneration.current += 1;
@@ -906,18 +923,19 @@ export function FolderIntake({
       },
     });
   }
-  function continueAssembly(assembly: FolderAssembly) {
+  async function continueAssembly(assembly: FolderAssembly) {
     if (locked || unsaved) return;
     if (pendingMappings[assembly.key]) {
       setSelectedFolder(assembly.key);
       setPanel('sku');
       return;
     }
-    const existing = allProducts.find(
-      (product) =>
-        product.productKey ===
-        (assembly.existingProductKey ?? (!assembly.manifest ? assembly.productKey : undefined)),
-    );
+    const key=assembly.existingProductKey ?? (!assembly.manifest ? assembly.productKey : undefined);
+    let existing:ListingDraft|null=null;
+    if(key) {
+      try {existing=await api<ListingDraft>('/v1/products/'+encodeURIComponent(key));}
+      catch(cause){if(!(cause instanceof RequestError) || cause.status!==404){setError(cause instanceof Error?cause.message:'Chưa đọc được đúng bộ nguồn.');return;}}
+    }
     if (existing) {
       onOpenExisting(existing);
       return;

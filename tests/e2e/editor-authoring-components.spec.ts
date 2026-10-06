@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 import { seed, imports, sourceIds, variants, priceId, coverId, galleryId, foreignImageId, shopId, draftFromPayload, mappingReviewFor, priceReviewFor } from './fixtures/editor-authoring-data.js';
 import { editorRecoveryKey, makeEditorRecovery, type EditorSavePayload } from '../../apps/web/src/editor-recovery.js';
@@ -8,13 +9,13 @@ test.beforeEach(async ({ page }, info) => {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
   await page.route('**/v1/**', route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.startsWith('/v1/media/')) return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/k1sAAAAASUVORK5CYII=', 'base64') });
+    if (path.startsWith('/v1/media/')) return fulfillPagedProducts(route,{ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/k1sAAAAASUVORK5CYII=', 'base64') });
     if (path.startsWith('/v1/imports/')) {
       const record = imports.find(record => record.id === path.split('/').at(-1));
-      if (record) return route.fulfill({ json: record });
+      if (record) return fulfillPagedProducts(route,{ json: record });
     }
-    if (path.endsWith('/mapping-review')) return route.fulfill({ json: mappingReviewFor(draftFromPayload(seed, 2), false) });
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+    if (path.endsWith('/mapping-review')) return fulfillPagedProducts(route,{ json: mappingReviewFor(draftFromPayload(seed, 2), false) });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
 });
 async function openEditing(page: Page, query = '') {
@@ -45,7 +46,7 @@ test('a lost POST response reads and accepts the exact next local revision witho
   const writes: EditorSavePayload[] = [], events: string[] = [];
   await page.route('**/v1/products**', route => {
     if (route.request().method() === 'POST') { events.push('POST'); writes.push(route.request().postDataJSON()); return route.abort('failed'); }
-    events.push('GET'); return route.fulfill({ json: draftFromPayload(writes[0]!) });
+    events.push('GET'); return fulfillPagedProducts(route,{ json: draftFromPayload(writes[0]!) });
   });
   await openEditing(page, 'emptyImports'); await title(page).fill('Sau chỉnh nội dung · TEST'); await save(page).click();
   await expect(page.getByTestId('saved-result')).toBeVisible();
@@ -60,9 +61,9 @@ test('response loss keeps the immutable request on reload and rechecks before an
     if (route.request().method() === 'POST') {
       events.push('POST'); writes.push(route.request().postDataJSON());
       if (writes.length === 1) return route.abort('failed');
-      committed = true; return route.fulfill({ json: draftFromPayload(writes[1]!) });
+      committed = true; return fulfillPagedProducts(route,{ json: draftFromPayload(writes[1]!) });
     }
-    events.push('GET'); return route.fulfill({ json: committed ? draftFromPayload(writes[1]!) : draftFromPayload(seed, 2) });
+    events.push('GET'); return fulfillPagedProducts(route,{ json: committed ? draftFromPayload(writes[1]!) : draftFromPayload(seed, 2) });
   });
   await openEditing(page); await title(page).fill('Yêu cầu đang giữ · TEST'); await save(page).click();
   await expect(page.getByRole('button', { name: 'Gửi lại đúng yêu cầu đã giữ', exact: true })).toBeVisible();
@@ -82,7 +83,7 @@ test('a changed price remains a conflict and opening the latest source keeps the
   await page.route('**/v1/products**', route => {
     if (route.request().method() === 'POST') { writes.push(route.request().postDataJSON()); return route.abort('failed'); }
     const latest = draftFromPayload(writes[0]!); latest.variants[0]!.originalPrice.value = '125001';
-    return route.fulfill({ json: latest });
+    return fulfillPagedProducts(route,{ json: latest });
   });
   await openEditing(page); await title(page).fill('Copy đang chờ · TEST'); await save(page).click();
   await expect(page.getByRole('alert')).toContainText('Phần đang sửa được giữ riêng');
@@ -164,10 +165,10 @@ async function preparationFixture(page: Page, sourceRevision = 2) {
     if (request.method() !== 'GET') {
       if (path !== '/v1/production-preparations/preview') return route.abort();
       writes.push({ path, body: request.postDataJSON() });
-      return route.fulfill({ json: { id: '66666666-6666-4666-8666-666666666666', fingerprint: 'a'.repeat(64), readyCount: 0, blockedCount: 1,
+      return fulfillPagedProducts(route,{ json: { id: '66666666-6666-4666-8666-666666666666', fingerprint: 'a'.repeat(64), readyCount: 0, blockedCount: 1,
         entries: [{ productKey: seed.productKey, title: seed.title, kind: 'blocked', issues: [{ field: 'categoryId', code: 'SOURCE_REQUIRED', message: 'Cần nguồn ngành hàng của bộ thử.' }] }] } });
     }
-    if (path === '/v1/production-preparations/context') return route.fulfill({ json: {
+    if (path === '/v1/production-preparations/context') return fulfillPagedProducts(route,{ json: {
       scope: { partnerId: 'FIXTURE-PARTNER', shopId: 'FIXTURE-SHOP' },
       products: [{ productKey: seed.productKey, title: seed.title, revision: sourceRevision, skus: variants.map(v => v.sku), issues: [] },
         { productKey: 'fixture-another-source', title: 'Bộ thử khác đã chuẩn bị', revision: 1, skus: ['FIXTURE-OTHER'], issues: [] }],
@@ -176,10 +177,10 @@ async function preparationFixture(page: Page, sourceRevision = 2) {
     if (path.startsWith('/v1/products/')) {
       const draft = draftFromPayload(seed, sourceRevision);
       if (path.endsWith('fixture-another-source')) { draft.productKey = 'fixture-another-source'; draft.revision = 1; draft.title.value = 'Bộ thử khác đã chuẩn bị'; }
-      return route.fulfill({ json: draft });
+      return fulfillPagedProducts(route,{ json: draft });
     }
-    if (path.startsWith('/v1/imports/')) return route.fulfill({ json: { ...imports[0], body: { rows: [{ key: seed.variants[0]!.rowKey, sheet: 'Sheet1', priceProfile: null }] } } });
-    if (path === '/v1/production-preparations/metadata') return route.fulfill({ json: { shop: { id: 'FIXTURE-SHOP', name: 'Shop thử giao diện' }, categories: [], attributes: [], channels: [] } });
+    if (path.startsWith('/v1/imports/')) return fulfillPagedProducts(route,{ json: { ...imports[0], body: { rows: [{ key: seed.variants[0]!.rowKey, sheet: 'Sheet1', priceProfile: null }] } } });
+    if (path === '/v1/production-preparations/metadata') return fulfillPagedProducts(route,{ json: { shop: { id: 'FIXTURE-SHOP', name: 'Shop thử giao diện' }, categories: [], attributes: [], channels: [] } });
     return route.fallback();
   });
   return writes;
@@ -225,12 +226,12 @@ test('edited folder sources follow the current server mapping gate before confir
     const path = new URL(route.request().url()).pathname, request = route.request();
     if (request.method() === 'POST') {
       writes.push({ path, body: request.postDataJSON() });
-      if (path.endsWith('/confirm-mapping')) { current = draftFromPayload(payload, 3); return route.fulfill({ json: current }); }
-      if (path.endsWith('/confirm-price-mapping')) return route.fulfill({ json: { confirmed: true } });
+      if (path.endsWith('/confirm-mapping')) { current = draftFromPayload(payload, 3); return fulfillPagedProducts(route,{ json: current }); }
+      if (path.endsWith('/confirm-price-mapping')) return fulfillPagedProducts(route,{ json: { confirmed: true } });
       return route.abort();
     }
-    if (path.endsWith('/mapping-review')) return route.fulfill({ json: mappingReviewFor(current, current.revision === 2) });
-    if (path.endsWith('/price-mapping-review')) return route.fulfill({ json: priceReviewFor(current) });
+    if (path.endsWith('/mapping-review')) return fulfillPagedProducts(route,{ json: mappingReviewFor(current, current.revision === 2) });
+    if (path.endsWith('/price-mapping-review')) return fulfillPagedProducts(route,{ json: priceReviewFor(current) });
     return route.abort();
   });
   await page.goto('/frontend-fixture?component=preview&folder');
@@ -252,7 +253,7 @@ test('a current server decision suppresses mapping confirmation even for an unbo
   const writes: string[] = [];
   await page.route('**/v1/products/**', route => {
     if (route.request().method() !== 'GET') { writes.push(route.request().url()); return route.abort(); }
-    return route.fulfill({ json: mappingReviewFor(draftFromPayload(seed, 2), false) });
+    return fulfillPagedProducts(route,{ json: mappingReviewFor(draftFromPayload(seed, 2), false) });
   });
   await page.goto('/frontend-fixture?component=preview');
   await expect(page.getByText('Đã có xác nhận cấu trúc và ảnh cho bản nguồn hiện tại.', { exact: false })).toBeVisible();
@@ -264,8 +265,8 @@ test('unknown mapping status cannot authorize price confirmation and offers a re
   await page.route('**/v1/products/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() !== 'GET') { writes.push(path); return route.abort(); }
-    if (path.endsWith('/mapping-review')) return readable ? route.fulfill({ json: mappingReviewFor(draftFromPayload(seed, 2), false) }) : route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
-    if (path.endsWith('/price-mapping-review')) return route.fulfill({ json: priceReviewFor(draftFromPayload(seed, 2)) });
+    if (path.endsWith('/mapping-review')) return readable ? fulfillPagedProducts(route,{ json: mappingReviewFor(draftFromPayload(seed, 2), false) }) : fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+    if (path.endsWith('/price-mapping-review')) return fulfillPagedProducts(route,{ json: priceReviewFor(draftFromPayload(seed, 2)) });
     return route.abort();
   });
   await page.goto('/frontend-fixture?component=preview&folder');
@@ -282,10 +283,10 @@ test('an old mapping response cannot unlock price confirmation after the source 
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/mapping-review')) {
       reads++;
-      if (reads === 1) { await waiting; try { await route.fulfill({ json: mappingReviewFor(draftFromPayload(seed, 2), false) }); } catch { /* The obsolete read may have been cancelled. */ } return; }
-      return route.fulfill({ json: mappingReviewFor(draftFromPayload(seed, 3), true) });
+      if (reads === 1) { await waiting; try { await fulfillPagedProducts(route,{ json: mappingReviewFor(draftFromPayload(seed, 2), false) }); } catch { /* The obsolete read may have been cancelled. */ } return; }
+      return fulfillPagedProducts(route,{ json: mappingReviewFor(draftFromPayload(seed, 3), true) });
     }
-    if (path.endsWith('/price-mapping-review')) return route.fulfill({ json: priceReviewFor(draftFromPayload(seed, 3)) });
+    if (path.endsWith('/price-mapping-review')) return fulfillPagedProducts(route,{ json: priceReviewFor(draftFromPayload(seed, 3)) });
     return route.abort();
   });
   await page.goto('/frontend-fixture?component=preview&switchPreview'); await expect.poll(() => reads).toBe(1);

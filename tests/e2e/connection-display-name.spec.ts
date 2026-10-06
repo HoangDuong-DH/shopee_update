@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { openWorkspaceTool } from './workspace-navigation.js';
 import { test, expect, type Page } from '@playwright/test';
 
@@ -33,7 +34,7 @@ async function setup(page: Page, conflict = false) {
           displayName: 'Tên mới của đồng nghiệp',
           nameRevision: 1,
         };
-        return route.fulfill({ status: 409, json: { code: 'CONNECTION_NAME_REVISION_CONFLICT' } });
+        return fulfillPagedProducts(route,{ status: 409, json: { code: 'CONNECTION_NAME_REVISION_CONFLICT' } });
       }
       const body = request.postDataJSON();
       shop = {
@@ -42,17 +43,17 @@ async function setup(page: Page, conflict = false) {
         displayName: body.displayName,
         nameRevision: shop.nameRevision + 1,
       };
-      return route.fulfill({ json: shop });
+      return fulfillPagedProducts(route,{ json: shop });
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
       writes.push({ unexpected: path });
-      return route.fulfill({ status: 503, json: { code: 'UNEXPECTED_FIXTURE_WRITE' } });
+      return fulfillPagedProducts(route,{ status: 503, json: { code: 'UNEXPECTED_FIXTURE_WRITE' } });
     }
-    if (path === '/v1/shops') return route.fulfill({ json: [shop] });
+    if (path === '/v1/shops') return fulfillPagedProducts(route,{ json: [shop] });
     if (path === '/v1/status')
-      return route.fulfill({ json: { worker: 'online', productionWrites: false } });
+      return fulfillPagedProducts(route,{ json: { worker: 'online', productionWrites: false } });
     if (path === '/v1/workbench')
-      return route.fulfill({ json: { orders: [], shops: [shop], sources: [] } });
+      return fulfillPagedProducts(route,{ json: { orders: [], shops: [shop], sources: [] } });
     if (
       [
         '/v1/imports',
@@ -63,8 +64,8 @@ async function setup(page: Page, conflict = false) {
         '/v1/import-patches',
       ].includes(path)
     )
-      return route.fulfill({ json: [] });
-    return route.fulfill({ status: 404, json: {} });
+      return fulfillPagedProducts(route,{ json: [] });
+    return fulfillPagedProducts(route,{ status: 404, json: {} });
   });
   await page.goto('/');
   await openWorkspaceTool(page, 'Kết nối shop');

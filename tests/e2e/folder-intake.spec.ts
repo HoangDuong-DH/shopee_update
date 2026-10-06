@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { openWorkspaceTool, openInputLibrary } from './workspace-navigation.js';
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -51,7 +52,8 @@ type FolderFileFixture = {
 };
 
 async function folderFixture(page: Page, info: TestInfo, definitions: FolderFileFixture[]) {
-  const directory = info.outputPath('selected-folders');
+  // Keep Chromium's Windows picker below MAX_PATH even with long source filenames.
+  const directory = info.outputPath('f');
   const imported = new Map<string, ImportRecord>();
   const byBody = new Map<string, ImportRecord>();
   const recordsByPath = new Map<string, ImportRecord>();
@@ -107,14 +109,14 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
       if (nextSaveFailure) {
         const failure = nextSaveFailure;
         nextSaveFailure = undefined;
-        return route.fulfill({ status: failure.status, json: { code: failure.code } });
+        return fulfillPagedProducts(route,{ status: failure.status, json: { code: failure.code } });
       }
       const previous = batches.get(input.id);
       const serialized = JSON.stringify(input);
       if (previous && lastBatchRequests.get(input.id) === serialized)
-        return route.fulfill({ json: previous });
+        return fulfillPagedProducts(route,{ json: previous });
       if ((previous?.revision ?? 0) !== input.expectedRevision)
-        return route.fulfill({ status: 409, json: { code: 'INPUT_BATCH_REVISION_CONFLICT' } });
+        return fulfillPagedProducts(route,{ status: 409, json: { code: 'INPUT_BATCH_REVISION_CONFLICT' } });
       const saved: InputBatchRecord = {
         id: input.id,
         revision: input.expectedRevision + 1,
@@ -128,27 +130,27 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
         disconnectAfterNextSave = false;
         return route.abort('failed');
       }
-      return route.fulfill({ status: 201, json: saved });
+      return fulfillPagedProducts(route,{ status: 201, json: saved });
     }
     if (request.method() === 'POST' && pathname === '/v1/imports') {
       const record = byBody.get(request.postDataBuffer()?.toString('base64') ?? '');
       if (!record) {
         unexpectedWrites.push('Unknown file body');
-        return route.fulfill({ status: 400, json: { code: 'INVALID_INPUT' } });
+        return fulfillPagedProducts(route,{ status: 400, json: { code: 'INVALID_INPUT' } });
       }
       writes.push(record.id);
       imported.set(record.id, record);
-      return route.fulfill({ status: 201, json: { ...record, status: 'queued', body: undefined } });
+      return fulfillPagedProducts(route,{ status: 201, json: { ...record, status: 'queued', body: undefined } });
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
       unexpectedWrites.push(request.method() + ' ' + pathname);
-      return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+      return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
     }
     if (pathname === '/v1/input-library') {
       const assigned = new Set(
         [...batches.values()].flatMap((batch) => batch.state.files.map((file) => file.importId)),
       );
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           priceBooks: [
             {
@@ -178,7 +180,7 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
     }
     if (pathname.startsWith('/v1/input-batches/')) {
       const batch = batches.get(pathname.split('/').at(-1)!);
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         status: batch ? 200 : 404,
         json: batch
           ? { ...batch, imports: [commonWorkbookRecord, ...imported.values()] }
@@ -186,26 +188,26 @@ async function folderFixture(page: Page, info: TestInfo, definitions: FolderFile
       });
     }
     if (pathname === '/v1/imports')
-      return route.fulfill({ json: [commonWorkbookRecord, ...imported.values()] });
+      return fulfillPagedProducts(route,{ json: [commonWorkbookRecord, ...imported.values()] });
     if (pathname === `/v1/imports/${commonWorkbookId}`)
-      return route.fulfill({ json: commonWorkbookRecord });
+      return fulfillPagedProducts(route,{ json: commonWorkbookRecord });
     if (pathname.startsWith('/v1/imports/')) {
       const record = imported.get(pathname.split('/').at(-1)!);
-      return route.fulfill({ status: record ? 200 : 404, json: record ?? { code: 'NOT_FOUND' } });
+      return fulfillPagedProducts(route,{ status: record ? 200 : 404, json: record ?? { code: 'NOT_FOUND' } });
     }
     if (pathname.startsWith('/v1/media/'))
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         contentType: 'image/png',
         body: Buffer.from(
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg1sAAAAASUVORK5CYII=',
           'base64',
         ),
       });
-    if (['/v1/products', '/v1/plans', '/v1/jobs', '/v1/shops'].includes(pathname))
-      return route.fulfill({ json: [] });
+    if (['/v1/products', '/v1/local-library/products', '/v1/plans', '/v1/jobs', '/v1/shops'].includes(pathname))
+      return fulfillPagedProducts(route,{ json: [] });
     if (pathname === '/v1/status')
-      return route.fulfill({ json: { worker: 'online', productionWrites: false } });
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+      return fulfillPagedProducts(route,{ json: { worker: 'online', productionWrites: false } });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
   return {
     directory,
@@ -254,7 +256,7 @@ const twoFolders: FolderFileFixture[] = [
 async function openFolders(page: Page, directory: string) {
   await page.goto('/');
   await openWorkspaceTool(page, 'Listing của tôi');
-  await page.getByRole('button', { name: 'Nhập listing có sẵn', exact: true }).click();
+  await page.locator('header.page-heading').getByRole('button', { name: 'Nhập bộ nguồn', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Bảng giá chung', exact: true })
     .selectOption(commonWorkbookId);
@@ -328,6 +330,8 @@ test('fixture: filename hints fill only after a click and keep numbered or draft
   await expect(summary).toContainText('Bộ ảnh đầu trang · 0 ảnh');
   await expect(summary).toContainText('Ảnh mô tả · 0 ảnh');
 
+  await expect(page.getByRole('region', { name: 'Nguồn đã chọn', exact: true })).toContainText(`${namedImageFolder.length}/${namedImageFolder.length} tệp đã đọc được`);
+  await expect(hints.getByRole('button', { name: 'Gợi ý bìa 1', exact: true })).toBeVisible();
   await hints.getByRole('button', { name: 'Ảnh đánh số · chưa rõ vai trò 1', exact: true }).click();
   await expect(candidate.getByRole('checkbox', { name: /^Chọn ảnh/ })).toHaveCount(1);
   await expect(
@@ -786,7 +790,7 @@ test('fixture: holds navigation while folder uploads are pending and keeps stage
     await openFolders(page, fixture.directory);
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho listing', exact: true })
+      .getByRole('button', { name: 'Bộ listing', exact: true })
       .click();
     const dialog = page.getByRole('alertdialog', { name: 'Thay đổi chưa lưu', exact: true });
     await expect(dialog).toBeVisible();
@@ -799,7 +803,7 @@ test('fixture: holds navigation while folder uploads are pending and keeps stage
     await requestStarted;
     await page
       .getByRole('navigation', { name: 'Điều hướng chính' })
-      .getByRole('button', { name: 'Kho listing', exact: true })
+      .getByRole('button', { name: 'Bộ listing', exact: true })
       .click({ force: true });
     await expect(
       page.getByRole('heading', { name: 'Nhập listing theo thư mục', exact: true }),

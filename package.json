@@ -34,7 +34,17 @@
     "start:local": "node scripts/local-launcher.mjs start",
     "release:package": "node scripts/release-package.mjs",
     "onboarding:check": "node scripts/doctor.mjs --json",
-    "onboarding:plan": "node scripts/bootstrap.mjs"
+    "onboarding:plan": "node scripts/bootstrap.mjs",
+    "session:brief": "node scripts/session-context.mjs brief",
+    "session:status": "node scripts/session-context.mjs status",
+    "session:checkpoint": "node scripts/session-context.mjs checkpoint",
+    "session:changes": "node scripts/session-context.mjs changes",
+    "session:verify": "node scripts/session-context.mjs verify",
+    "session:history": "node scripts/session-context.mjs history",
+    "test:context": "vitest run tests/unit/session-context.test.ts tests/unit/session-store.test.ts tests/unit/session-cli.test.ts tests/unit/management-harness.test.ts tests/unit/harness.test.ts tests/unit/session-transfer.test.ts",
+    "session:export": "node scripts/session-context.mjs export",
+    "session:verify-bundle": "node scripts/session-context.mjs verify-bundle",
+    "session:import": "node scripts/session-context.mjs import"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
@@ -52,9 +62,9 @@
     "vitest": "5.0.0"
   },
   "dependencies": {
-    "@nestjs/common": "12.0.1",
-    "@nestjs/core": "12.0.1",
-    "@nestjs/platform-fastify": "12.0.1",
+    "@nestjs/common": "12.1.2",
+    "@nestjs/core": "12.1.2",
+    "@nestjs/platform-fastify": "12.1.2",
     "dotenv": "17.4.2",
     "exceljs": "4.4.0",
     "fast-xml-parser": "5.11.1",

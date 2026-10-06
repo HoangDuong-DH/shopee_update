@@ -22,7 +22,7 @@ export function operationsRuntime(env: NodeJS.ProcessEnv = process.env): Operati
   return {
     productionWorkflowEnabled: env.PRODUCTION_PILOT_ENABLED === '1',
     productionWritesConfigured: env.SHOPEE_PRODUCTION_WRITES === 'true',
-    connectionMaintenanceEnabled: env.CONNECTION_MAINTENANCE_ENABLED !== '0' && !isolatedMode,
+    connectionMaintenanceEnabled: env.CONNECTION_MAINTENANCE_ENABLED === '1' && !isolatedMode,
     isolatedMode, executionReadiness: 'not_assessed', executor: 'api_coordinator',
   };
 }

@@ -113,7 +113,7 @@ export class ConnectionMaintenance {
 }
 
 export function startConnectionMaintenance(service:ConnectionMaintenance) {
-  if(process.env.CONNECTION_MAINTENANCE_ENABLED==='0' || process.env.INTERNAL_ISOLATED_MODE==='1') return async()=>{};
+  if(process.env.CONNECTION_MAINTENANCE_ENABLED!=='1' || process.env.INTERNAL_ISOLATED_MODE==='1') return async()=>{};
   let stopped=false,active:Promise<void>|undefined;
   const run=()=> {if(stopped||active)return;active=service.tick().catch(()=>{console.error('Connection maintenance temporarily unavailable; credentials were not logged.');}).finally(()=>{active=undefined;});};
   const timer=setInterval(run,60000);timer.unref();run();

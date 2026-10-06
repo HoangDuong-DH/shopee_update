@@ -1,3 +1,5 @@
+import type { ProductPage } from '@shopee/domain';
+import { ProductPager } from './ProductPager.js';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, CheckCircle2, Download, FileCheck2, FolderOpen, Upload } from 'lucide-react';
 import type { HandoffDocument, HandoffMode, HandoffPreview, ListingDraft } from '@shopee/domain';
@@ -103,7 +105,7 @@ function describeChange(field: string, value: unknown): ReactNode {
 }
 
 export function HandoffIntake({
-  products,
+  products: initialProducts,
   onSaved,
   onFolder,
   onDirty,
@@ -121,6 +123,12 @@ export function HandoffIntake({
 }) {
   const [document, setDocument] = useState<HandoffDocument | null>(null);
   const [filename, setFilename] = useState('');
+  const [productPage,setProductPage]=useState(1);
+  const [productQuery,setProductQuery]=useState('');
+  const [productData,setProductData]=useState<ProductPage>({items:initialProducts,total:0,page:1,limit:50,hasMore:false});
+  const [productLoading,setProductLoading]=useState(true);
+  const [pinnedProducts,setPinnedProducts]=useState<ListingDraft[]>([]);
+  const products=[...new Map([...productData.items,...pinnedProducts].map(product=>[product.productKey,product])).values()];
   const [mode, setMode] = useState<HandoffMode>('create_new');
   const [targetKey, setTargetKey] = useState(initialProductKey ?? '');
   const [newKey, setNewKey] = useState('');
@@ -145,6 +153,22 @@ export function HandoffIntake({
   useEffect(() => {
     onDirty?.(document !== null);
   }, [document, onDirty]);
+  useEffect(()=>{
+    const controller=new AbortController();setProductLoading(true);
+    void api<ProductPage>('/v1/products?'+new URLSearchParams({page:String(productPage),q:productQuery}),{signal:controller.signal})
+      .then(value=>{if(!controller.signal.aborted)setProductData(value);})
+      .catch(cause=>{if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'Chưa đọc được bộ listing.');})
+      .finally(()=>{if(!controller.signal.aborted)setProductLoading(false);});
+    return ()=>controller.abort();
+  },[productPage,productQuery]);
+  useEffect(()=>{
+    if(!initialProductKey) return;
+    const controller=new AbortController();
+    void api<ListingDraft>('/v1/products/'+encodeURIComponent(initialProductKey),{signal:controller.signal})
+      .then(product=>{if(!controller.signal.aborted)setPinnedProducts(previous=>[product,...previous.filter(item=>item.productKey!==product.productKey)]);})
+      .catch(cause=>{if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:'Chưa đọc được bộ listing.');});
+    return ()=>controller.abort();
+  },[initialProductKey]);
   async function run(action: () => Promise<void>) {
     if (locked || working.current) return;
     working.current = true;
@@ -162,7 +186,7 @@ export function HandoffIntake({
       onBusy?.(false);
     }
   }
-  function accept(value: HandoffDocument, name: string) {
+  async function accept(value: HandoffDocument, name: string) {
     // This is only a display hint. The server strictly validates the full document before preview.
     if (
       value?.format !== 'shopee-listing-handoff' ||
@@ -173,7 +197,10 @@ export function HandoffIntake({
       !Array.isArray(value.sources)
     )
       throw new Error(messages.INVALID_INPUT);
-    const match = products.find((product) => product.productKey === value.product.productKey);
+    let match:ListingDraft|null=null;
+    try {match=await api<ListingDraft>('/v1/products/'+encodeURIComponent(value.product.productKey));}
+    catch(error){if(!(error instanceof RequestError) || error.status!==404) throw error;}
+    if(match) setPinnedProducts(previous=>[match!,...previous.filter(product=>product.productKey!==match!.productKey && (product.productKey===targetKey || product.productKey===exportKey))]);
     setDocument(value);
     setFilename(name);
     setPreview(null);
@@ -200,7 +227,7 @@ export function HandoffIntake({
         throw new Error(messages.INVALID_INPUT);
       }
       if (active.current && request === generation.current)
-        accept(value as HandoffDocument, file.name);
+        await accept(value as HandoffDocument, file.name);
     });
   }
   function changeMode(next: HandoffMode) {
@@ -220,7 +247,7 @@ export function HandoffIntake({
       );
       if (!active.current || request !== generation.current) return;
       if (useNow) {
-        accept(value, 'Hồ sơ của bộ đã lưu');
+        await accept(value, 'Hồ sơ của bộ đã lưu');
         return;
       }
       const url = URL.createObjectURL(
@@ -331,13 +358,15 @@ export function HandoffIntake({
           </section>
           <section className="panel handoff-export">
             <h2>Dùng lại bộ đang có trong ứng dụng</h2>
+            <label>Tìm bộ listing<input type="search" value={productQuery} disabled={locked} onChange={event=>{setProductPage(1);setProductQuery(event.target.value);}} /></label>
+            <ProductPager info={productData} loading={productLoading || locked} onPage={setProductPage} />
             <p>Hồ sơ được tạo sẵn từ nguồn đã lưu; bạn không cần tự soạn tệp.</p>
             <label>
               Bộ listing đã lưu
               <select
                 value={exportKey}
                 disabled={locked}
-                onChange={(event) => setExportKey(event.target.value)}
+                onChange={(event) => {const chosen=products.find(product=>product.productKey===event.target.value);if(chosen)setPinnedProducts(previous=>[chosen,...previous.filter(item=>item.productKey!==chosen.productKey && item.productKey===targetKey)]);setExportKey(event.target.value);}}
               >
                 <option value="">Chọn bộ listing</option>
                 {products.map((product) => (
@@ -422,6 +451,8 @@ export function HandoffIntake({
                   value={targetKey}
                   disabled={locked}
                   onChange={(event) => {
+                    const chosen=products.find(product=>product.productKey===event.target.value);
+                    if(chosen)setPinnedProducts(previous=>[chosen,...previous.filter(item=>item.productKey!==chosen.productKey && item.productKey===exportKey)]);
                     setTargetKey(event.target.value);
                     setPreview(null);
                   }}

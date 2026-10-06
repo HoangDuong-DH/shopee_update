@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { openWorkspaceTool, openInputLibrary } from './workspace-navigation.js';
 import { test, expect, type Page } from '@playwright/test';
 import type { CatalogRow, WorkbookImport } from '@shopee/domain';
@@ -48,13 +49,13 @@ async function useIntakeFixture(page: Page) {
     const pathname = new URL(request.url()).pathname;
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
       unexpectedWrites.push(request.method() + ' ' + pathname);
-      await route.fulfill({ status: 503, json: { message: 'Fixture không gửi dữ liệu.' } });
+      await fulfillPagedProducts(route,{ status: 503, json: { message: 'Fixture không gửi dữ liệu.' } });
       return;
     }
-    if (pathname === '/v1/imports') return route.fulfill({ json: [workbookRecord] });
-    if (pathname === '/v1/imports/' + sourceId) return route.fulfill({ json: workbookRecord });
+    if (pathname === '/v1/imports') return fulfillPagedProducts(route,{ json: [workbookRecord] });
+    if (pathname === '/v1/imports/' + sourceId) return fulfillPagedProducts(route,{ json: workbookRecord });
     if (pathname === '/v1/input-library')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           priceBooks: [
             {
@@ -77,10 +78,10 @@ async function useIntakeFixture(page: Page) {
         pathname,
       )
     )
-      return route.fulfill({ json: [] });
+      return fulfillPagedProducts(route,{ json: [] });
     if (pathname === '/v1/status')
-      return route.fulfill({ json: { worker: 'online', productionWrites: false } });
-    return route.fulfill({ status: 404, json: { message: 'Ngoài phạm vi fixture.' } });
+      return fulfillPagedProducts(route,{ json: { worker: 'online', productionWrites: false } });
+    return fulfillPagedProducts(route,{ status: 404, json: { message: 'Ngoài phạm vi fixture.' } });
   });
   return unexpectedWrites;
 }
@@ -221,9 +222,9 @@ test('fixture: the shared price intake accepts only workbooks and retries unchan
     attempts.push({ name, bytes: route.request().postDataBuffer()?.toString('base64') ?? '' });
     if (name === 'fixture-price-b.xlsx' && !rejectedOnce) {
       rejectedOnce = true;
-      return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+      return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
     }
-    return route.fulfill({ status: 201, json: { id: sourceId, status: 'queued' } });
+    return fulfillPagedProducts(route,{ status: 201, json: { id: sourceId, status: 'queued' } });
   });
   await page.goto('/');
   await openWorkspaceTool(page, 'Listing của tôi');

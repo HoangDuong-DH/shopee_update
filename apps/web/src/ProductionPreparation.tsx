@@ -1,3 +1,5 @@
+import type { ProductPageInfo } from '@shopee/domain';
+import { ProductPager } from './ProductPager.js';
 import { useEffect, useRef, useState } from 'react';
 import type { ListingDraft } from '@shopee/domain';
 import { productChannelIssue, type ProductLogisticsChannel } from '../../../packages/domain/src/product-logistics.js';
@@ -120,6 +122,8 @@ type Preview = {
 type Context = {
   scope: { shopId: string; partnerId?: string };
   products: Summary[];
+  productPage: ProductPageInfo;
+  pageProductKeys: string[];
   pricebooks: { id: string; filename: string }[];
   preparations: Preview[];
 };
@@ -743,6 +747,7 @@ export function ProductionPreparation({
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [search, setSearch] = useState(''),
+    [productPage,setProductPage] = useState(1),
     [sourceGroup, setSourceGroup] = useState(''),
     [stock, setStock] = useState(''),
     [publicationMode, setPublicationMode] = useState<PublicationMode>('hidden_for_review'),
@@ -789,12 +794,14 @@ export function ProductionPreparation({
     restoringSession = useRef(false),
     restoringInputs = useRef(new Map<string, WorkingEntry>());
   const initialSelectionApplied = useRef('');
+  const contextReadVersion=useRef(0);
+  const pickerMounted=useRef(false);
   const shopName = targetShopName || Object.values(editing).find(entry => entry.metadata?.shop.id === targetScope.shopId)?.metadata?.shop.name || 'Shop đã chọn';
   const comparisonKey = preview ? preview.id + ':' + preview.entries.map(entry => context?.products.find(product => product.productKey === entry.productKey)?.revision ?? 'missing').join(',') : '';
   const comparison = sourceComparison?.key === comparisonKey ? sourceComparison : null;
   const sourceChanges = comparison?.data ? comparison.data.entries.filter(entry => entry.state !== 'current') : context && preview ? preview.entries.flatMap(entry => {
     const current = context.products.find(product => product.productKey === entry.productKey);
-    if (entry.sourceRevision !== undefined && (!current || current.revision !== entry.sourceRevision))
+    if (entry.sourceRevision !== undefined && current && current.revision !== entry.sourceRevision)
       return [{ ...entry, currentRevision: current?.revision ?? null, state: current ? 'changed' : 'missing', changes: [] as z.infer<typeof sourceComparisonSchema>['entries'][number]['changes'] }];
     return [];
   }) : [];
@@ -1032,13 +1039,20 @@ export function ProductionPreparation({
     await ensure(row);
   }
   async function reload() {
+    const readVersion=++contextReadVersion.current;
     setContextLoading(true);
     setError('');
     try {
-      const response = await api<unknown>(scoped('/v1/production-preparations/context'));
+      const keys=new Set([...selected,...(initialProductKey ? [initialProductKey] : []),...(preview?.entries.map(entry=>entry.productKey) ?? []),...(pending.current?.entries.map(entry=>entry.productKey) ?? [])]);
+      try {const stored=workingCopySchema.parse(JSON.parse(sessionStorage.getItem(workingCopyKey) ?? 'null')); for(const entry of stored.selected) keys.add(entry.productKey);} catch { /* Invalid storage is explained by the existing recovery flow. */ }
+      const params=new URLSearchParams({page:String(productPage),q:search,productKeys:JSON.stringify([...keys])});
+      const response = await api<unknown>(scoped('/v1/production-preparations/context?'+params));
+      if(readVersion!==contextReadVersion.current) return;
       const parsed = z
         .object({
           scope: z.object({ shopId: z.string(), partnerId: z.string().optional() }),
+          productPage:z.object({total:z.number().int().nonnegative(),page:z.number().int().positive(),limit:z.number().int().positive(),hasMore:z.boolean()}),
+          pageProductKeys:z.array(z.string()),
           products: z.array(
             z
               .object({
@@ -1075,9 +1089,9 @@ export function ProductionPreparation({
       }
       return value;
     } catch (error) {
-      if (alive.current) setError(message(error));
+      if (alive.current && readVersion===contextReadVersion.current) setError(message(error));
     } finally {
-      if (alive.current) setContextLoading(false);
+      if (alive.current && readVersion===contextReadVersion.current) setContextLoading(false);
     }
   }
   useEffect(() => {
@@ -1106,6 +1120,11 @@ export function ProductionPreparation({
       lock.current = false;
     };
   }, []);
+  useEffect(()=>{
+    if(!pickerMounted.current){pickerMounted.current=true;return;}
+    const timer=setTimeout(()=>void reload(),200);
+    return ()=>clearTimeout(timer);
+  },[productPage,search]);
   function changed() {
     setAutofillResult(null);
     focusResult.current = false;
@@ -1677,10 +1696,8 @@ export function ProductionPreparation({
   }
   const sourceGroups=[...new Set(context?.products.flatMap(row=>row.sourceSelection?.folderBinding?.groupKey.split('/').slice(0,1) ?? []) ?? [])].sort();
   const visible =
-      context?.products.filter((row) =>
-        (!sourceGroup || (sourceGroup==='__folders' ? !!row.sourceSelection?.folderBinding : row.sourceSelection?.folderBinding?.groupKey.split('/')[0]===sourceGroup)) && [row.title, ...row.skus].some((text) =>
-          text.toLocaleLowerCase('vi-VN').includes(search.toLocaleLowerCase('vi-VN')),
-        ),
+      context?.products.filter((row) => context.pageProductKeys.includes(row.productKey) &&
+        (!sourceGroup || (sourceGroup==='__folders' ? !!row.sourceSelection?.folderBinding : row.sourceSelection?.folderBinding?.groupKey.split('/')[0]===sourceGroup)),
       ) ?? [],
     selectedRows = context?.products.filter((row) => selected.includes(row.productKey)) ?? [];
   return (
@@ -1794,17 +1811,18 @@ export function ProductionPreparation({
           <div className="preparation-picker-summary"><strong>{selected.length}/80 sản phẩm đã chọn</strong><small>{visible.length} trong danh sách</small></div>
           <details className="preparation-selection-help"><summary>Lựa chọn được giữ khi đổi bộ lọc</summary><p>{selected.length}/80 listing đã chọn{selected.some(key => !visible.some(row => row.productKey === key)) ? ` · ${selected.filter(key => !visible.some(row => row.productKey === key)).length} listing đã chọn đang ngoài bộ lọc` : ''}. Thay đổi bộ lọc giữ các lựa chọn trước.</p></details>
           <div className="preparation-picker-tools">
-          {!!sourceGroups.length && <label>Lọc theo đợt nhập<select value={sourceGroup} disabled={busy} onChange={event=>setSourceGroup(event.target.value)}><option value="">Tất cả bộ đã lưu</option><option value="__folders">Các bộ từ thư mục đã nhập</option>{sourceGroups.map(group=><option key={group} value={group}>{group}</option>)}</select></label>}
+          {!!sourceGroups.length && <label>Lọc trang này theo đợt nhập<select value={sourceGroup} disabled={busy} onChange={event=>setSourceGroup(event.target.value)}><option value="">Tất cả bộ đã lưu</option><option value="__folders">Các bộ từ thư mục đã nhập</option>{sourceGroups.map(group=><option key={group} value={group}>{group}</option>)}</select></label>}
           <label>
             Tìm theo tên hoặc SKU
             <input
               type="search"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {setProductPage(1);setSearch(e.target.value);}}
               placeholder="Tìm listing đã lưu"
             />
           </label>
           </div>
+          <ProductPager info={context.productPage} loading={contextLoading || busy} onPage={setProductPage} />
           {!visible.length && (
             <p>Chưa có listing phù hợp. Nhập thư mục hoặc mở bộ đã lưu để hoàn tất nguồn.</p>
           )}

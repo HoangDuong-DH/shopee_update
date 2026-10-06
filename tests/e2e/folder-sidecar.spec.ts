@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -203,11 +204,11 @@ async function fixture(page: Page, info: TestInfo, existing: boolean, portable =
         record = hash === h(word) ? wordRecord : imageUploads.get(hash);
       if (!record) {
         unexpected.push('Unknown upload');
-        return route.fulfill({ status: 400, json: { code: 'INVALID_INPUT' } });
+        return fulfillPagedProducts(route,{ status: 400, json: { code: 'INVALID_INPUT' } });
       }
       uploads.push(record.kind);
       imports.set(record.id, record);
-      return route.fulfill({ json: record });
+      return fulfillPagedProducts(route,{ json: record });
     }
     if (req.method() === 'POST' && path === '/v1/input-batches') {
       const body = req.postDataJSON(),
@@ -220,28 +221,28 @@ async function fixture(page: Page, info: TestInfo, existing: boolean, portable =
         updatedAt: stamp,
       };
       batches.set(body.id, record);
-      return route.fulfill({ json: record });
+      return fulfillPagedProducts(route,{ json: record });
     }
     if (req.method() === 'POST' && path === '/v1/products') {
       productWrites.push(req.postDataJSON());
-      return route.fulfill({ json: saved });
+      return fulfillPagedProducts(route,{ json: saved });
     }
     if (req.method() !== 'GET') {
       unexpected.push(req.method() + ' ' + path);
-      return route.fulfill({ status: 503, json: { code: 'BLOCKED_FIXTURE' } });
+      return fulfillPagedProducts(route,{ status: 503, json: { code: 'BLOCKED_FIXTURE' } });
     }
-    if (path === '/v1/imports') return route.fulfill({ json: [...imports.values()] });
+    if (path === '/v1/imports') return fulfillPagedProducts(route,{ json: [...imports.values()] });
     if (path.startsWith('/v1/imports/'))
-      return route.fulfill({ json: imports.get(path.split('/').at(-1)!) ?? {} });
-    if (path === '/v1/products') return route.fulfill({ json: existing ? [saved] : [] });
-    if (path.startsWith('/v1/products/')) return route.fulfill({ json: saved });
-    if (['/v1/plans', '/v1/jobs', '/v1/shops'].includes(path)) return route.fulfill({ json: [] });
+      return fulfillPagedProducts(route,{ json: imports.get(path.split('/').at(-1)!) ?? {} });
+    if (path === '/v1/products') return fulfillPagedProducts(route,{ json: existing ? [saved] : [] });
+    if (path.startsWith('/v1/products/')) return fulfillPagedProducts(route,{ json: saved });
+    if (['/v1/plans', '/v1/jobs', '/v1/shops'].includes(path)) return fulfillPagedProducts(route,{ json: [] });
     if (path === '/v1/status')
-      return route.fulfill({ json: { worker: 'online', productionWrites: false } });
+      return fulfillPagedProducts(route,{ json: { worker: 'online', productionWrites: false } });
     if (path.startsWith('/v1/media/'))
-      return route.fulfill({ contentType: 'image/png', body: png });
+      return fulfillPagedProducts(route,{ contentType: 'image/png', body: png });
     if (path === '/v1/input-library')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           priceBooks: [{ ...price, rowCount: 3, sheetCount: 1, issueCount: 0 }],
           batches: [...batches.values()].map((b) => ({
@@ -259,9 +260,9 @@ async function fixture(page: Page, info: TestInfo, existing: boolean, portable =
       });
     if (path.startsWith('/v1/input-batches/')) {
       const b = batches.get(path.split('/').at(-1)!);
-      return route.fulfill({ json: { ...b, imports: [...imports.values()] } });
+      return fulfillPagedProducts(route,{ json: { ...b, imports: [...imports.values()] } });
     }
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
   return { directory, batches, unexpected, uploads, manifest, productWrites, price, addImage };
 }

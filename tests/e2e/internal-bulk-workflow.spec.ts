@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { expect, test, type Page } from '@playwright/test';
 import { bulkProductEditInput, previewBulkProductEdit } from '../../packages/domain/src/bulk-product-edit.js';
 import { fact, fixtureDraft } from '../helpers/fixtures.js';
@@ -22,18 +23,18 @@ async function setup(page: Page, conflict = false) {
   await page.route('**/v1/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() !== 'GET') writes.push(path);
-    if (path === '/v1/products/bulk-edit/preview') return route.fulfill({ json: previewResponse(route.request().postDataJSON()) });
+    if (path === '/v1/products/bulk-edit/preview') return fulfillPagedProducts(route,{ json: previewResponse(route.request().postDataJSON()) });
     if (path === '/v1/products/bulk-edit/apply') {
-      if (conflict) return route.fulfill({ status: 409, json: { code: 'PRODUCT_REVISION_CONFLICT' } });
+      if (conflict) return fulfillPagedProducts(route,{ status: 409, json: { code: 'PRODUCT_REVISION_CONFLICT' } });
       const command = route.request().postDataJSON(), preview = previewResponse(command.input);
       expect(command.expectedDigest).toBe(preview.digest);
       product = previewBulkProductEdit(product, command.input.entries[0], command.input).after;
-      return route.fulfill({ json: { ...preview, applied: true, recovered: false } });
+      return fulfillPagedProducts(route,{ json: { ...preview, applied: true, recovered: false } });
     }
     if (route.request().method() !== 'GET') return route.abort();
-    if (path === '/v1/products') return route.fulfill({ json: [product] });
-    if (path === '/v1/status') return route.fulfill({ json: { worker: 'online' } });
-    return route.fulfill({ json: [] });
+    if (path === '/v1/products') return fulfillPagedProducts(route,{ json: [product] });
+    if (path === '/v1/status') return fulfillPagedProducts(route,{ json: { worker: 'online' } });
+    return fulfillPagedProducts(route,{ json: [] });
   });
   await page.goto('/');
   const panel = page.getByRole('region', { name: 'Chỉnh phân loại hàng loạt' });

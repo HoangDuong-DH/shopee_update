@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 import type { ChangePlan, ListingDraft, ShopConnection } from '@shopee/domain';
 import { openWorkspaceTool } from './workspace-navigation.js';
@@ -96,21 +97,21 @@ async function fixture(page: Page, itemId: string | null) {
       writes.push({ pathname, body: request.postDataJSON() });
       if (pathname === '/v1/plans' && request.method() === 'POST') {
         saved = true;
-        return route.fulfill({ status: 201, json: plan });
+        return fulfillPagedProducts(route,{ status: 201, json: plan });
       }
-      return route.fulfill({ status: 503, json: { code: 'UNEXPECTED_FIXTURE_WRITE' } });
+      return fulfillPagedProducts(route,{ status: 503, json: { code: 'UNEXPECTED_FIXTURE_WRITE' } });
     }
-    if (pathname === '/v1/products') return route.fulfill({ json: [value] });
-    if (pathname === '/v1/shops') return route.fulfill({ json: [shop] });
-    if (pathname === '/v1/plans') return route.fulfill({ json: saved ? [plan] : [] });
-    if (pathname === '/v1/status') return route.fulfill({ json: { worker: 'online' } });
+    if (pathname === '/v1/products') return fulfillPagedProducts(route,{ json: [value] });
+    if (pathname === '/v1/shops') return fulfillPagedProducts(route,{ json: [shop] });
+    if (pathname === '/v1/plans') return fulfillPagedProducts(route,{ json: saved ? [plan] : [] });
+    if (pathname === '/v1/status') return fulfillPagedProducts(route,{ json: { worker: 'online' } });
     if (pathname === '/v1/import-patches/context')
-      return route.fulfill({ json: { workOrders: [], imports: [] } });
+      return fulfillPagedProducts(route,{ json: { workOrders: [], imports: [] } });
     if (pathname === '/v1/production-batches')
-      return route.fulfill({ json: { batches: [], enabled: true } });
+      return fulfillPagedProducts(route,{ json: { batches: [], enabled: true } });
     if (pathname === '/v1/input-library')
-      return route.fulfill({ json: { priceBooks: [], batches: [], unassigned: [] } });
-    return route.fulfill({ json: [] });
+      return fulfillPagedProducts(route,{ json: { priceBooks: [], batches: [], unassigned: [] } });
+    return fulfillPagedProducts(route,{ json: [] });
   });
   await page.goto('/');
   await openWorkspaceTool(page, 'Listing của tôi');

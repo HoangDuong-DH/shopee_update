@@ -1,3 +1,5 @@
+import { openWorkspaceTool } from './workspace-navigation.js';
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect, type Page } from '@playwright/test';
 import type {
   HandoffDocument,
@@ -137,10 +139,10 @@ async function fixture(page: Page, initial = [order()]) {
       path = new URL(request.url()).pathname;
     const write = request.method() === 'POST';
     const body = write ? request.postDataJSON() : null;
-    if (path === '/v1/import-patches' && !write) return route.fulfill({ json: [] });
+    if (path === '/v1/import-patches' && !write) return fulfillPagedProducts(route,{ json: [] });
     if (write) writes.push({ path, body });
     if (path === '/v1/workbench' && !write)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           orders: orders.map((row) => ({
             ...row,
@@ -163,7 +165,7 @@ async function fixture(page: Page, initial = [order()]) {
     if (path === '/v1/work-orders' && write) {
       if (failSave) {
         failSave = false;
-        return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
+        return fulfillPagedProducts(route,{ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } });
       }
       const found = orders.find((row) => row.id === body.id);
       const result = {
@@ -171,10 +173,10 @@ async function fixture(page: Page, initial = [order()]) {
         revision: found ? found.revision + 1 : 1,
       };
       orders = [result, ...orders.filter((row) => row.id !== result.id)];
-      return route.fulfill({ json: result });
+      return fulfillPagedProducts(route,{ json: result });
     }
     if (path === '/v1/sandbox-listings/read' && write)
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           scope: shop.scope,
           snapshot: {
@@ -203,7 +205,7 @@ async function fixture(page: Page, initial = [order()]) {
     if (path === '/v1/sandbox-listings/prepare' && write) {
       if (failPrepare) {
         failPrepare = false;
-        return route.fulfill({ status: 409, json: { code: 'SANDBOX_BASELINE_CHANGED' } });
+        return fulfillPagedProducts(route,{ status: 409, json: { code: 'SANDBOX_BASELINE_CHANGED' } });
       }
       run = {
         id: body.id,
@@ -223,10 +225,10 @@ async function fixture(page: Page, initial = [order()]) {
         createdAt: time,
         updatedAt: time,
       };
-      return route.fulfill({ json: run });
+      return fulfillPagedProducts(route,{ json: run });
     }
     if (run && path === '/v1/sandbox-listings/runs/' + run.id && !write)
-      return route.fulfill({ json: run });
+      return fulfillPagedProducts(route,{ json: run });
     if (run && path === `/v1/sandbox-listings/runs/${run.id}/execute` && write) {
       run = {
         ...run,
@@ -254,7 +256,7 @@ async function fixture(page: Page, initial = [order()]) {
               },
       };
       if (dropExecuteReply) return route.abort('connectionfailed');
-      return route.fulfill({ json: run });
+      return fulfillPagedProducts(route,{ json: run });
     }
     if (run && path === `/v1/sandbox-listings/runs/${run.id}/reconcile` && write) {
       run = {
@@ -270,15 +272,19 @@ async function fixture(page: Page, initial = [order()]) {
           after: { ...snapshot, title: sources[0]!.title.value },
         },
       };
-      return route.fulfill({ json: run });
+      return fulfillPagedProducts(route,{ json: run });
     }
-    if (!write && path === '/v1/products') return route.fulfill({ json: sources });
-    if (!write && path === '/v1/shops') return route.fulfill({ json: [shop, production] });
+    if (!write && (path === '/v1/products' || path === '/v1/local-library/products')) return fulfillPagedProducts(route,{ json: sources });
+    if (!write && path.startsWith('/v1/products/')) {
+      const product=sources.find(source=>source.productKey===decodeURIComponent(path.slice('/v1/products/'.length)));
+      return fulfillPagedProducts(route,{status:product?200:404,json:product ?? {code:'NOT_FOUND'}});
+    }
+    if (!write && path === '/v1/shops') return fulfillPagedProducts(route,{ json: [shop, production] });
     if (!write && ['/v1/imports', '/v1/plans', '/v1/jobs'].includes(path))
-      return route.fulfill({ json: [] });
-    if (!write && path === '/v1/status') return route.fulfill({ json: { worker: 'online' } });
+      return fulfillPagedProducts(route,{ json: [] });
+    if (!write && path === '/v1/status') return fulfillPagedProducts(route,{ json: { worker: 'online' } });
     if (write) unexpected.push(path);
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
   return {
     writes,
@@ -322,10 +328,7 @@ test('fixture: workbench starts with concrete exceptions and stays usable on mob
   ];
   const state = await fixture(page, [order(baseConfig, issues)]);
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await expect(
     page.getByRole('heading', { name: 'Công việc đăng hàng', exact: true }),
   ).toBeVisible();
@@ -359,10 +362,7 @@ test('fixture: select prepared sources and explicit shop creates separate work o
 }) => {
   const state = await fixture(page, []);
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: 'Chọn bộ đã có', exact: true }).first().click();
   const form = page.getByRole('region', { name: 'Tạo công việc từ bộ đã có' });
   await expect(form.getByRole('button', { name: /Lưu .*công việc/ })).toBeDisabled();
@@ -389,10 +389,7 @@ test('fixture: blank stock remains undecided and explicit zero survives a failed
 }) => {
   const state = await fixture(page);
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('checkbox', { name: 'Tồn đăng bán', exact: true }).check();
@@ -416,10 +413,7 @@ test('fixture: sandbox flow selects fields, previews exact changes, and reconcil
   const state = await fixture(page);
   state.unknownExecution();
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
@@ -441,10 +435,7 @@ test('fixture: sandbox flow selects fields, previews exact changes, and reconcil
   await expect(page.getByLabel('Mã sản phẩm trên Shopee', { exact: true })).toBeDisabled();
   await page.evaluate(() => localStorage.clear());
   await page.reload();
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(
@@ -482,10 +473,7 @@ test('fixture: sandbox flow selects fields, previews exact changes, and reconcil
 test('fixture: production task cannot enter sandbox execution', async ({ page }) => {
   const state = await fixture(page, [order({ ...baseConfig, connectionId: production.id })]);
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(
@@ -504,10 +492,7 @@ test('fixture: changing shop clears item binding and manually declared stock', a
     order({ ...baseConfig, fieldMask: ['stock'], stocks: { 'TEST-SKU-0': 87 } }),
   ]);
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await expect(page.getByLabel('Tồn đăng bán TEST-SKU-0', { exact: true })).toHaveValue('87');
@@ -523,10 +508,7 @@ test('fixture: lost execution response locks changes until reading the server re
   const state = await fixture(page);
   state.loseExecuteReply();
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
@@ -562,10 +544,7 @@ test('fixture: a terminal drift allows a new read and a new immutable preparatio
   const state = await fixture(page);
   state.driftExecution();
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
@@ -601,10 +580,7 @@ test('fixture: definitive baseline rejection discards stale preparation before a
   const state = await fixture(page);
   state.failPrepareOnce();
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: /^Làm tiếp / }).click();
   await page.getByText('Thiết lập nâng cao / cách nhập thủ công', { exact: true }).click();
   await page.getByRole('button', { name: 'Đọc & đối chiếu sandbox', exact: true }).click();
@@ -670,11 +646,11 @@ test('fixture: opens exported handoff, compares source version, then applies exa
   await page.route('**/v1/handoffs/**', async (route) => {
     const request = route.request(),
       path = new URL(request.url()).pathname;
-    if (request.method() === 'GET') return route.fulfill({ json: handoff });
+    if (request.method() === 'GET') return fulfillPagedProducts(route,{ json: handoff });
     const body = request.postDataJSON();
     requests.push({ path, body });
     if (path === '/v1/handoffs/preview')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           ...body,
           previewFingerprint: 'd'.repeat(64),
@@ -687,19 +663,16 @@ test('fixture: opens exported handoff, compares source version, then applies exa
         },
       });
     if (path === '/v1/handoffs/apply')
-      return route.fulfill({
+      return fulfillPagedProducts(route,{
         json: {
           product: { ...sources[0], title: fact(handoff.content.title), revision: 2 },
           replayed: false,
         },
       });
-    return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+    return fulfillPagedProducts(route,{ status: 404, json: { code: 'NOT_FOUND' } });
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: 'Nhập / xuất hồ sơ', exact: true }).click();
   await page
     .getByRole('combobox', { name: 'Bộ listing đã lưu', exact: true })
@@ -743,13 +716,10 @@ test('fixture: importing a handoff does not apply changes before reviewing and h
     requests: string[] = [];
   await page.route('**/v1/handoffs/preview', async (route) => {
     requests.push(route.request().method());
-    return route.fulfill({ status: 409, json: { code: 'HANDOFF_SOURCE_MISMATCH' } });
+    return fulfillPagedProducts(route,{ status: 409, json: { code: 'HANDOFF_SOURCE_MISMATCH' } });
   });
   await page.goto('/');
-  await page
-    .getByRole('navigation', { name: 'Điều hướng chính' })
-    .getByRole('button', { name: 'Theo dõi công việc', exact: true })
-    .click();
+  await openWorkspaceTool(page,'Theo dõi công việc');
   await page.getByRole('button', { name: 'Nhập / xuất hồ sơ', exact: true }).click();
   await page.locator('.handoff-receive input[type="file"]').setInputFiles({
     name: 'listing-fixture.json',

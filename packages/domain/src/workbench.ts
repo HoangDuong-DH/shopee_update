@@ -1,3 +1,4 @@
+import type { ProductPageInfo } from './product-page.js';
 import type { DraftField, ListingDraft, ShopConnection } from './contracts.js';
 import type { SandboxRun } from './sandbox-listing.js';
 
@@ -41,6 +42,7 @@ export type WorkOrderView = WorkOrder & {
 export type Workbench = {
   orders: WorkOrderView[];
   sources: ListingDraft[];
+  sourcePage: ProductPageInfo;
   shops: ShopConnection[];
   execution: { productionWrites: false; sandboxUpdates: boolean; createEnabled: boolean };
 };

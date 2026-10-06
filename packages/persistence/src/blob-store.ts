@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, link, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { join, resolve } from 'node:path';
 export class BlobStore {
   readonly root: string;
@@ -32,10 +33,45 @@ export class BlobStore {
     }
     return sha;
   }
-  async read(sha: string) {
-    const bytes = await readFile(this.path(sha));
-    if (createHash('sha256').update(bytes).digest('hex') !== sha)
-      throw new Error('BLOB_HASH_MISMATCH');
-    return bytes;
+  async read(sha: string, options: { signal?: AbortSignal; maxBytes?: number } = {}) {
+    options.signal?.throwIfAborted();
+    if (options.maxBytes === undefined) {
+      const bytes = await readFile(this.path(sha), { signal: options.signal });
+      options.signal?.throwIfAborted();
+      if (createHash('sha256').update(bytes).digest('hex') !== sha)
+        throw new Error('BLOB_HASH_MISMATCH');
+      return bytes;
+    }
+    if (
+      !Number.isSafeInteger(options.maxBytes) ||
+      options.maxBytes <= 0 ||
+      options.maxBytes > 64 * 1024 * 1024
+    )
+      throw Error('INVALID_BLOB_READ_LIMIT');
+    const stream = createReadStream(this.path(sha), {
+      highWaterMark: 256 * 1024,
+      signal: options.signal,
+    });
+    const chunks: Buffer[] = [];
+    const hash = createHash('sha256');
+    let total = 0;
+    try {
+      for await (const data of stream) {
+        options.signal?.throwIfAborted();
+        const chunk = data as Buffer;
+        total += chunk.byteLength;
+        if (total > options.maxBytes) throw Error('SOURCE_FILE_TOO_LARGE');
+        hash.update(chunk);
+        chunks.push(chunk);
+      }
+      options.signal?.throwIfAborted();
+      if (hash.digest('hex') !== sha) throw Error('BLOB_HASH_MISMATCH');
+      return Buffer.concat(chunks, total);
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      throw error;
+    } finally {
+      stream.destroy();
+    }
   }
 }

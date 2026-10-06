@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { folderDraftSelection } from '../../domain/src/folder-source-identity.js';
+import { folderDraftSelection } from '@shopee/domain';
 import {
   planFingerprint,
   canonicalJson,
@@ -9,6 +9,7 @@ import {
 } from '@shopee/domain';
 import type { Pool, PoolClient } from 'pg';
 import { transaction, probeMigrations } from './db.js';
+import { readProductPage, readProductsByKeys } from './product-pages.js';
 import { localArchiveList, lockLocalSourceSelection, assertDraftLocalSourcesActive, assertLocalResourcesActive, type LocalLifecycle } from './local-archives.js';
 export type ImportRecord = {
   id: string;
@@ -225,13 +226,13 @@ export class Repository {
     );
     return r.rows[0]?.body ?? null;
   }
+  async listProductsPage(raw: unknown = {}) { return readProductPage(this.pool, raw); }
+  async getProductsByKeys(keys: string[]) { return readProductsByKeys(this.pool, keys); }
+  /** Small legacy/fixture callers only; larger libraries must explicitly consume pages. */
   async listProducts(lifecycle: LocalLifecycle = 'active'): Promise<ListingDraft[]> {
-    const rows = (
-      await this.pool.query(
-        'SELECT r.body FROM products p JOIN product_revisions r ON r.product_key=p.product_key AND r.revision=p.latest_revision ORDER BY p.updated_at DESC',
-      )
-    ).rows.map((r) => r.body);
-    return localArchiveList(this.pool, 'product', rows, r => r.productKey, lifecycle);
+    const result = await this.listProductsPage({ lifecycle, limit: 100 });
+    if (result.hasMore) throw Error('PRODUCT_PAGING_REQUIRED');
+    return result.items;
   }
   async savePlan(plan: ChangePlan) {
     if (planFingerprint(plan) !== plan.fingerprint) throw new Error('PLAN_CONFLICT');

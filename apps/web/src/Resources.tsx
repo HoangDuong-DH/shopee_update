@@ -1,3 +1,5 @@
+import type { ProductPage } from '@shopee/domain';
+import { ProductPager } from './ProductPager.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, FileSpreadsheet, FolderOpen, Search, Upload } from 'lucide-react';
 import type {
@@ -110,6 +112,8 @@ export function Resources({
     [error, setError] = useState(''),
     [reload, setReload] = useState(0);
   const [search, setSearch] = useState('');
+  const [productPage, setProductPage] = useState(1);
+  const [productInfo,setProductInfo] = useState({total:0,page:1,limit:50,hasMore:false});
   const [sourceId, setSourceId] = useState(''),
     [catalog, setCatalog] = useState<WorkbookImport | null>(null);
   const [reading, setReading] = useState(false),
@@ -121,13 +125,15 @@ export function Resources({
   const request = useRef(0);
   useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
     void Promise.all([
       api<InputLibrary>('/v1/input-library?lifecycle=' + lifecycle, { signal: controller.signal }),
-      api<ListingDraft[]>('/v1/products?lifecycle=' + lifecycle, { signal: controller.signal }),
+      api<ProductPage>('/v1/products?' + new URLSearchParams({lifecycle,q:search,page:String(productPage)}), { signal: controller.signal }),
     ]).then(([value, listings]) => {
         if (!controller.signal.aborted) {
           setLibrary(value);
-          setViewProducts(listings);
+          setViewProducts(listings.items);
+          setProductInfo(listings);
           setError('');
         }
       })
@@ -139,14 +145,14 @@ export function Resources({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [imports, reload, lifecycle]);
+  }, [imports, reload, lifecycle, search, productPage]);
   function archiveChanged() {
     request.current++;
     setSourceId(''); setCatalog(null); setReading(false);
     setReload((value) => value + 1);
   }
   function changeLifecycle(value: Lifecycle) {
-    setLifecycle(value); setLibrary(null); setViewProducts([]); setLoading(true);
+    setProductPage(1); setLifecycle(value); setLibrary(null); setViewProducts([]); setLoading(true);
     archiveChanged();
   }
   useEffect(
@@ -189,11 +195,7 @@ export function Resources({
   const batches = (library?.batches ?? []).filter((batch) =>
     batch.name.toLocaleLowerCase('vi').includes(keyword),
   );
-  const completed = viewProducts.filter((product) =>
-    `${product.title.value} ${product.productKey} ${product.variants.map((v) => v.sku.value).join(' ')}`
-      .toLocaleLowerCase('vi')
-      .includes(keyword),
-  );
+  const completed = viewProducts;
   const priceBooks = library?.priceBooks ?? [];
   const profiles = Array.from(
     new Set(
@@ -254,7 +256,7 @@ export function Resources({
                 aria-label="Tìm bộ nguồn"
                 placeholder="Tìm tên bộ hoặc SKU…"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => {setProductPage(1);setSearch(event.target.value);}}
               />
             </label>
           </div>
@@ -314,9 +316,10 @@ export function Resources({
           <section className="library-section" aria-label="Bộ listing đã tiếp nhận">
             <div className="section-heading">
               <h2>
-                Bộ listing đã tiếp nhận <span className="count">{completed.length}</span>
+                Bộ listing đã tiếp nhận <span className="count">{productInfo.total}</span>
               </h2>
             </div>
+            <ProductPager info={productInfo} loading={loading || uploading} onPage={setProductPage} />
             {completed.length ? (
               <div className="input-batch-list">
                 {completed.map((product) => (

@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect } from '@playwright/test';
 
 const partnerId = '2010476';
@@ -13,7 +14,7 @@ test('switching shops keeps the authorization attempt bound to its own shop and 
     const path = url.pathname;
     if (path === '/v1/connections/production' && request.method() === 'GET') {
       const shopId = url.searchParams.get('shopId')!;
-      return route.fulfill({ json: {
+      return fulfillPagedProducts(route,{ json: {
         environment: 'production', partnerId, shopId,
         expectedHandle: shopId === vina ? 'VINA TƯƠI' : 'Shop ' + shopId,
         appName: 'VestaPro', consoleUrl: 'https://open.shopee.com/console/app/218272',
@@ -28,7 +29,7 @@ test('switching shops keeps the authorization attempt bound to its own shop and 
     if (path === '/v1/connections/production/authorize' && request.method() === 'POST') {
       const body = request.postDataJSON();
       prepared.push(body.shopId);
-      return route.fulfill({ json: {
+      return fulfillPagedProducts(route,{ json: {
         attemptId,
         authorizationUrl: 'https://open.shopee.com/auth?partner_id=' + partnerId,
         callbackUrl: 'http://127.0.0.1:4310/v1/connections/production-pilot/callback',
@@ -36,20 +37,20 @@ test('switching shops keeps the authorization attempt bound to its own shop and 
       } });
     }
     if (path === '/v1/connections/production-pilot/authorization/' + attemptId)
-      return route.fulfill({ json: { attemptId, partnerId, shopId: haby, status: 'pending' } });
-    if (path === '/v1/shops') return route.fulfill({ json: [{
+      return fulfillPagedProducts(route,{ json: { attemptId, partnerId, shopId: haby, status: 'pending' } });
+    if (path === '/v1/shops') return fulfillPagedProducts(route,{ json: [{
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       name: 'VINA TƯƠI', officialName: 'VINA TƯƠI', displayName: null, nameRevision: 0,
       region: 'VN', state: 'connected', capabilities: [],
       scope: { environment: 'production', partnerId, shopId: vina, connectionRevision: 1, capabilityRevision: 1 },
     }] });
     if (path === '/v1/status')
-      return route.fulfill({ json: { worker: 'online', productionWrites: false } });
+      return fulfillPagedProducts(route,{ json: { worker: 'online', productionWrites: false } });
     if (path === '/v1/workbench')
-      return route.fulfill({ json: { orders: [], shops: [], sources: [] } });
+      return fulfillPagedProducts(route,{ json: { orders: [], shops: [], sources: [] } });
     if (['/v1/imports','/v1/source-catalogs','/v1/products','/v1/plans','/v1/jobs','/v1/import-patches'].includes(path))
-      return route.fulfill({ json: [] });
-    return route.fulfill({ status: 404, json: {} });
+      return fulfillPagedProducts(route,{ json: [] });
+    return fulfillPagedProducts(route,{ status: 404, json: {} });
   });
 
   await page.addInitScript(() => sessionStorage.setItem('shopee-authorization-attempt', JSON.stringify({

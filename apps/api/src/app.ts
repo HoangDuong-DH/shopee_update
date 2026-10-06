@@ -164,7 +164,7 @@ class ApiErrors implements ExceptionFilter {
     const storageCode = (error as {code?:string})?.code;
     if(['ECONNREFUSED','ECONNRESET','57P01','57P02','57P03','53300'].includes(storageCode ?? ''))
       return reply.status(503).send({code:'DATABASE_UNAVAILABLE',message:'Chưa kết nối được kho dữ liệu. Kiểm tra PostgreSQL rồi đọc lại công việc; không gửi lại thao tác chưa rõ kết quả.'});
-    if(storageCode==='57014') return reply.status(503).send({code:'DATABASE_REQUEST_TIMEOUT',message:'Kho dữ liệu xử lý quá thời gian chờ. Đọc lại trạng thái công việc trước khi gửi lại.'});
+    if(storageCode==='57014' || code==='Query read timeout') return reply.status(503).send({code:'DATABASE_REQUEST_TIMEOUT',message:'Kho dữ liệu xử lý quá thời gian chờ. Đọc lại trạng thái công việc trước khi gửi lại.'});
     if (/^CONTENT_[A-Z0-9_]+$/.test(code)) {
       const messages: Record<string,string> = {
         CONTENT_WORKBOOK_NOT_FOUND: 'Không tìm thấy Excel nội dung. Chọn lại tệp đã nhập.',
@@ -485,7 +485,7 @@ class AppController {
   @Post('production-batches/:id/exclusions') productionBatchExclude(@Param('id') key:string,@Query() query:unknown, @Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).batch.exclude(key, raw); }
   @Get('production-batches/:id/review') productionBatchReviewStatus(@Param('id') key:string,@Query() query:any) { productionRouteScope(query);return this.workflow(query).review.review(key,String(query.sourceKey ?? '')); }
   @Post('production-batches/:id/review/approve') productionBatchReviewApprove(@Param('id') key:string,@Query() query:unknown,@Body() raw:unknown) { productionRouteScope(query);return this.workflow(query).review.approve(key,raw); }
-  @Get('production-preparations/context') productionPreparationContext(@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).preparation.context(); }
+  @Get('production-preparations/context') productionPreparationContext(@Query() query:unknown) { productionRouteScope(query);return this.workflow(query).preparation.context(query); }
   @Post('production-preparations/autofill') async productionPreparationFill(@Query() query:unknown,@Body() raw:unknown, @Req() req:any, @Res({ passthrough: true }) reply:any) {
     productionRouteScope(query);
     // Read-only preparation: stop upstream reads when the operator leaves/cancels.
@@ -740,8 +740,8 @@ class AppController {
     const input = z.object({ expectedRevision: z.number().int().positive() }).strict().parse(raw);
     return this.sandbox.reconcile({ id: id(key), ...input });
   }
-  @Get('workbench') getWorkbench() {
-    return this.workbench.list();
+  @Get('workbench') getWorkbench(@Query() query: unknown) {
+    return this.workbench.list(query);
   }
   @Get('work-orders/:id') workOrder(@Param('id') key: string) {
     return this.workbench.get(id(key));
@@ -877,8 +877,9 @@ class AppController {
       .type(asset.mime)
       .send(await this.blobs.read(record.sha256));
   }
-  @Get('products') async products(@Query('lifecycle') raw?: string) {
-    return projectProductPriceIssues(this.repo, await this.repo.listProducts(lifecycle(raw)));
+  @Get('products') async products(@Query() query: unknown) {
+    const page=await this.repo.listProductsPage(query);
+    return {...page,items:await projectProductPriceIssues(this.repo,page.items)};
   }
   @Get('products/:key') async product(@Param('key') key: string) {
     const record = await this.repo.getProduct(key);

@@ -1,3 +1,4 @@
+import { fulfillPagedProducts } from './fixtures/product-paging.js';
 import { test, expect } from '@playwright/test';
 import { randomUUID, createHash } from 'node:crypto';
 import { openInputLibrary } from './workspace-navigation.js';
@@ -42,7 +43,7 @@ test('save ready folder batch, recover a lost reply after reload, and never dupl
     const request = route.request(), path = new URL(request.url()).pathname;
     if (request.method() === 'POST' && path === '/v1/input-batches') {
       const body = request.postDataJSON(); batch = { ...batch, revision: body.expectedRevision + 1, state: body.state };
-      return route.fulfill({ json: batch });
+      return fulfillPagedProducts(route,{ json: batch });
     }
     if (request.method() === 'POST' && path === '/v1/products') {
       const body = request.postDataJSON(); writes.push(body);
@@ -54,7 +55,7 @@ test('save ready folder batch, recover a lost reply after reload, and never dupl
         tierNames: ['Dung tích'], assets: [image.body], attributes: {}, logistics: {}, issues: [] };
       products.set(productKey, saved);
       if (lostReply) { lostReply = false; return route.abort('connectionreset'); }
-      return route.fulfill({ json: saved });
+      return fulfillPagedProducts(route,{ json: saved });
     }
     if (request.method() !== 'GET') { forbidden.push(request.method() + ' ' + path); return route.abort('blockedbyclient'); }
     reads.push(path);
@@ -66,8 +67,8 @@ test('save ready folder batch, recover a lost reply after reload, and never dupl
     else if (path.startsWith('/v1/products/')) json = products.get(path.split('/').at(-1)!);
     else if (path === '/v1/input-library') json = { batches: [{ id: batchId, name: 'Lô đã chuẩn bị', folderCount: 2, fileCount: files.length, completedCount: 0, updatedAt: stamp }], priceBooks: [], unassigned: [] };
     else if (path === '/v1/input-batches/' + batchId) json = { ...batch, imports };
-    else if (path.startsWith('/v1/media/')) return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg1sAAAAASUVORK5CYII=', 'base64') });
-    return route.fulfill({ json });
+    else if (path.startsWith('/v1/media/')) return fulfillPagedProducts(route,{ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg1sAAAAASUVORK5CYII=', 'base64') });
+    return fulfillPagedProducts(route,{ json });
   });
   async function openBatch() {
     await openInputLibrary(page);

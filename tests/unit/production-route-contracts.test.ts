@@ -95,7 +95,7 @@ it('parses metadata paging and false inventory flags without shadowing the conte
   const first = await call('GET', '/v1/production-preparations/context');
   expect(first.statusCode).toBe(200);
   expect(first.json()).toEqual({ scope: 'context fixture' });
-  expect(context).toHaveBeenCalledExactlyOnceWith();
+  expect(context).toHaveBeenCalledExactlyOnceWith({ partnerId: '2010476', shopId: '1423724897' });
   const second = await call('GET', '/v1/production-preparations/metadata?categoryId=101127&brandOffset=100&inventoryOffset=20&includeInventory=false&inventoryStatus=UNLIST');
   expect(second.statusCode).toBe(200);
   expect(metadata).toHaveBeenCalledExactlyOnceWith({ categoryId: '101127', brandOffset: 100, inventoryOffset: 20, includeInventory: false, inventoryStatus: 'UNLIST' });

@@ -7,6 +7,9 @@
     "jsx": "react-jsx",
     "paths": {
       "@shopee/domain": ["./packages/domain/src/index.ts"],
+      "@shopee/domain/source/kini": ["./packages/domain/src/source/kini.ts"],
+      "@shopee/domain/source/word": ["./packages/domain/src/source/word.ts"],
+      "@shopee/domain/source/assets": ["./packages/domain/src/source/assets.ts"],
       "@shopee/persistence": ["./packages/persistence/src/index.ts"],
       "@shopee/gateway": ["./packages/shopee/src/index.ts"],
       "@shopee/agent-runtime": ["./packages/agent-runtime/src/index.ts"]
