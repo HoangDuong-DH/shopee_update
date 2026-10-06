@@ -470,6 +470,8 @@ export async function databaseState(owned) {
   await validateDependencies(owned.root);
   const require = createRequire(resolve(owned.root, 'package.json'));
   let pool;
+  // Docker health can precede the Windows host port. Retry reads only, never migrations.
+  for (let attempt = 0; attempt < 3; attempt++) {
   try {
     const { Pool } = require('pg');
     pool = new Pool({ connectionString: owned.env.DATABASE_URL, connectionTimeoutMillis: 5000, query_timeout: 5000 });
@@ -480,8 +482,12 @@ export async function databaseState(owned) {
       ? (await pool.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows : [];
     const connectionCount = tables.includes('connections') ? Number((await pool.query('SELECT count(*) FROM connections')).rows[0].count) : 0;
     return { tables, migrations, connectionCount };
-  } catch (error) { throw Error(safeError(error, 'OWNED_DATABASE_UNAVAILABLE')); }
-  finally { if (pool) await pool.end(); }
+  } catch (error) {
+    if (attempt === 2 || !['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT'].includes(error.code))
+      throw Error(safeError(error, 'OWNED_DATABASE_UNAVAILABLE'));
+  } finally { if (pool) await pool.end(); pool = undefined; }
+  await new Promise(done => setTimeout(done, 250 * (attempt + 1)));
+  }
 }
 
 export async function buildIdentity(projectRoot) {
